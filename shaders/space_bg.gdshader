@@ -20,6 +20,10 @@ void fragment() {
 	vec4 neb = texture(nebula, (px + offset * NEBULA_PARALLAX) / NEBULA_SCALE);
 	vec4 far = texture(stars_far, (px + offset * FAR_PARALLAX) / STAR_SCALE);
 	vec4 near = texture(stars_near, (px + offset * NEAR_PARALLAX + vec2(311.0, 97.0)) / STAR_SCALE);
+	// Мерцание ближних звёзд: у каждой клетки текстуры своя фаза.
+	vec2 cell = floor((px + offset * NEAR_PARALLAX) / 6.0);
+	float phase = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
+	near.a *= 0.7 + 0.3 * sin(TIME * 1.7 + phase);
 	vec3 col = base_color + neb.rgb * neb.a + far.rgb * far.a + near.rgb * near.a;
 	COLOR = vec4(col, 1.0);
 }

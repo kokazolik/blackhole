@@ -32,8 +32,6 @@ const CLUSTER_SIZE := Vector2i(15, 30)
 const DRAG := 0.55  # доля скорости, остающаяся через секунду
 const SCAN_INTERVAL := 0.2  # как часто полный обход: удаление дальней пыли и поиск ближней
 const REBASE_DISTANCE := 20000.0
-const POPUP_TIME := 0.9
-const POPUP_LIMIT := 40
 const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
 
 class Dust:
@@ -56,7 +54,6 @@ var _active_count := 0  # пыль в активной области на по�
 var _scan_timer := 0.0
 var _cluster_timer := 0.0
 var _filled := false
-var _popups: Array = []  # всплывающие «+N» цвета материала
 var _clumps := FastNoiseLite.new()
 var _rare := FastNoiseLite.new()  # где встречаются плотные нити: ~2% пространства
 var _mm_node := MultiMeshInstance2D.new()
@@ -99,15 +96,7 @@ func _ready() -> void:
 	_mm_node.material = mat
 	add_child(_mm_node)
 
-	GameState.absorbed.connect(_on_absorbed)
 	GameState.skills_changed.connect(_rewrite_all)
-
-
-func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
-	if _popups.size() >= POPUP_LIMIT:
-		_popups.pop_front()
-	var text := "+%d" % roundi(gained) if is_equal_approx(gained, roundf(gained)) else "+%.1f" % gained
-	_popups.append({"pos": at, "text": text, "color": GameData.MATERIALS[material].color, "t": 0.0})
 
 
 func view_radius() -> float:
@@ -151,8 +140,9 @@ func _physics_process(delta: float) -> void:
 			var dist := sqrt(dist_sq)
 			var dir := to / dist
 			if edible:
+				# Пыль не летит прямо, а закручивается по спирали, как в настоящем захвате.
 				var k := 0.35 + 0.65 * (1.0 - dist / pull_r)
-				d.vel += dir * strength * k * delta
+				d.vel += (dir + dir.orthogonal() * 0.6) * strength * k * delta
 			elif dist < pr + d.r + 0.7:
 				# Пыль выше открытого уровня отталкивается от поверхности.
 				d.pos = pp - dir * (pr + d.r + 0.7)
@@ -170,13 +160,6 @@ func _physics_process(delta: float) -> void:
 		_mm.buffer = _buf
 		_mm.visible_instance_count = dust.size()
 		_dirty = false
-
-	if not _popups.is_empty():
-		for popup in _popups:
-			popup.t += delta
-			popup.pos += player.frame_velocity * delta
-		_popups = _popups.filter(func(p): return p.t < POPUP_TIME)
-		queue_redraw()
 
 
 ## Редкий полный обход: удаляет пыль далеко за экраном и собирает ближнюю,
@@ -370,15 +353,3 @@ func _add_dust(pos: Vector2, level: int, material: String) -> bool:
 	dust.append(d)
 	_write(d)
 	return true
-
-
-## Всплывающие цифры поверх пыли. Размер шрифта переводим в мировые единицы.
-func _draw() -> void:
-	var font := ThemeDB.fallback_font
-	var font_size := maxi(4, roundi(22.0 / camera.zoom.x))
-	for popup in _popups:
-		var k: float = popup.t / POPUP_TIME
-		var pos: Vector2 = popup.pos + Vector2(0, -60.0 * k / camera.zoom.x)
-		var w := font.get_string_size(popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		draw_string_outline(font, pos - Vector2(w * 0.5, 0), popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, maxi(1, font_size / 6), Color(0, 0, 0, 0.7 * (1.0 - k)))
-		draw_string(font, pos - Vector2(w * 0.5, 0), popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(popup.color, 1.0 - k))

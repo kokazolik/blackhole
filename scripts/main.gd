@@ -10,6 +10,7 @@ var camera: Camera2D
 var hud: Hud
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
+var sky_events: Node2D
 
 
 func _ready() -> void:
@@ -23,6 +24,9 @@ func _ready() -> void:
 	var starfield := preload("res://scripts/world/starfield.gd").new()
 	starfield.camera = camera
 	bg_layer.add_child(starfield)
+	sky_events = preload("res://scripts/world/sky_events.gd").new()
+	sky_events.camera = camera
+	bg_layer.add_child(sky_events)
 
 	add_child(preload("res://scripts/world/star.gd").new())
 
@@ -32,6 +36,10 @@ func _ready() -> void:
 	dust_field.camera = camera
 	add_child(dust_field)
 	add_child(player)
+	var fx := AbsorbFx.new()
+	fx.player = player
+	fx.camera = camera
+	add_child(fx)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -73,3 +81,4 @@ func _process(delta: float) -> void:
 	var z := lerpf(camera.zoom.x, _target_zoom(), 1.0 - exp(-2.0 * delta))
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
+	sky_events.star_screen_pos = hud.star_screen_pos

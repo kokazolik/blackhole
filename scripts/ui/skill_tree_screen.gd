@@ -28,12 +28,14 @@ var _dragging := false
 var _pressed := false
 var _touches := {}
 var _pinch_dist := 0.0
+var _time := 0.0
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	theme = UiTheme.get_theme()
 	visible = false
 	_build()
 	GameState.currency_changed.connect(_refresh.unbind(1))
@@ -57,7 +59,7 @@ func close() -> void:
 
 func _build() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.02, 0.02, 0.06, 0.92)
+	bg.color = Color(0.015, 0.02, 0.05, 0.9)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
@@ -68,9 +70,10 @@ func _build() -> void:
 	add_child(_canvas)
 
 	_currency_label = Label.new()
-	_currency_label.position = Vector2(24, 18)
+	_currency_label.position = Vector2(28, 20)
 	_currency_label.add_theme_font_size_override("font_size", 40)
-	_currency_label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.5))
+	_currency_label.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	_currency_label.add_theme_color_override("font_color", UiTheme.GOLD)
 	add_child(_currency_label)
 
 	var close_btn := Button.new()
@@ -96,13 +99,7 @@ func _build() -> void:
 	_info.offset_right = -24
 	_info.offset_top = 116
 	_info.offset_bottom = -24
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.07, 0.13, 0.96)
-	style.border_color = Color(0.4, 0.5, 0.8, 0.6)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(14)
-	style.set_content_margin_all(16)
-	_info.add_theme_stylebox_override("panel", style)
+	_info.add_theme_stylebox_override("panel", UiTheme.glass(22, Color(0.05, 0.07, 0.15, 0.88), Color(0.6, 0.75, 1.0, 0.3), 20.0))
 	add_child(_info)
 
 	var text_box := VBoxContainer.new()
@@ -110,17 +107,18 @@ func _build() -> void:
 	_info.add_child(text_box)
 
 	_info_title = Label.new()
-	_info_title.add_theme_font_size_override("font_size", 28)
+	_info_title.add_theme_font_size_override("font_size", 30)
+	_info_title.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
 	text_box.add_child(_info_title)
 	_info_desc = RichTextLabel.new()
 	_info_desc.bbcode_enabled = true
 	_info_desc.fit_content = true
 	_info_desc.scroll_active = false
-	_info_desc.add_theme_font_size_override("normal_font_size", 22)
+	_info_desc.add_theme_font_size_override("normal_font_size", 20)
 	text_box.add_child(_info_desc)
 	_info_level = Label.new()
 	_info_level.add_theme_font_size_override("font_size", 18)
-	_info_level.add_theme_color_override("font_color", Color(0.7, 0.75, 0.9))
+	_info_level.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 	text_box.add_child(_info_level)
 
 	var spacer := Control.new()
@@ -129,24 +127,24 @@ func _build() -> void:
 
 	_buy_button = Button.new()
 	_buy_button.custom_minimum_size = Vector2(0, 76)
-	_buy_button.add_theme_stylebox_override("normal", _button_style(Color(0.85, 0.62, 0.2)))
-	_buy_button.add_theme_stylebox_override("hover", _button_style(Color(0.95, 0.72, 0.3)))
-	_buy_button.add_theme_stylebox_override("pressed", _button_style(Color(0.75, 0.52, 0.15)))
-	_buy_button.add_theme_stylebox_override("disabled", _button_style(Color(0.2, 0.21, 0.27)))
+	_buy_button.add_theme_stylebox_override("normal", _button_style(UiTheme.GOLD_DEEP, UiTheme.GOLD))
+	_buy_button.add_theme_stylebox_override("hover", _button_style(Color(1.0, 0.7, 0.28), Color(1.0, 0.9, 0.6)))
+	_buy_button.add_theme_stylebox_override("pressed", _button_style(Color(0.78, 0.5, 0.14), UiTheme.GOLD))
+	_buy_button.add_theme_stylebox_override("disabled", _button_style(Color(0.12, 0.14, 0.22, 0.9), Color(1, 1, 1, 0.08)))
 	_buy_button.add_theme_color_override("font_color", Color(0.08, 0.06, 0.02))
 	_buy_button.add_theme_color_override("font_hover_color", Color(0.08, 0.06, 0.02))
 	_buy_button.add_theme_color_override("font_pressed_color", Color(0.08, 0.06, 0.02))
 	_buy_button.add_theme_color_override("font_disabled_color", Color(0.55, 0.57, 0.65))
 	_buy_button.focus_mode = Control.FOCUS_NONE
-	_buy_button.add_theme_font_size_override("font_size", 24)
+	_buy_button.add_theme_font_size_override("font_size", 26)
+	_buy_button.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
 	_buy_button.pressed.connect(_on_buy)
 	text_box.add_child(_buy_button)
 
 
-func _button_style(color: Color) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = color
-	style.set_corner_radius_all(12)
+func _button_style(color: Color, border: Color) -> StyleBoxFlat:
+	var style := UiTheme.glass(18, color, border, 12.0)
+	style.set_border_width_all(2)
 	return style
 
 
@@ -185,8 +183,15 @@ func _refresh() -> void:
 	_canvas.queue_redraw()
 
 
+func _process(delta: float) -> void:
+	# Доступные для покупки узлы мягко пульсируют.
+	if visible:
+		_time += delta
+		_canvas.queue_redraw()
+
+
 func _draw_tree() -> void:
-	var font := get_theme_default_font()
+	var font: Font = UiTheme.FONT_SEMI
 	# Связи.
 	for id in Skills.order:
 		if not Skills.is_discovered(id):
@@ -210,9 +215,14 @@ func _draw_tree() -> void:
 			col = COLOR_AFFORDABLE
 		elif unlocked:
 			col = COLOR_AVAILABLE
+		if Skills.can_buy(id):
+			var k := 0.5 + 0.5 * sin(_time * 3.0)
+			_canvas.draw_circle(p, NODE_RADIUS + 14.0 + 6.0 * k, Color(col, 0.08 + 0.08 * k))
 		if id == _selected:
 			_canvas.draw_circle(p, NODE_RADIUS + 10.0, Color(col, 0.25))
-		_canvas.draw_circle(p, NODE_RADIUS, Color(0.05, 0.06, 0.1))
+			_canvas.draw_arc(p, NODE_RADIUS + 10.0, 0.0, TAU, 48, Color(col, 0.7), 2.0, true)
+		_canvas.draw_circle(p, NODE_RADIUS, Color(0.06, 0.08, 0.16))
+		_canvas.draw_circle(p, NODE_RADIUS * 0.8, Color(col, 0.08))
 		if Skills.is_owned(id):
 			var fill := float(Skills.level(id)) / Skills.max_level(id)
 			_canvas.draw_circle(p, NODE_RADIUS * (0.35 + 0.55 * fill), Color(col, 0.55))
