@@ -13,6 +13,11 @@ uniform vec4 level_colors[3];
 // игрок летит по орбите, и освещённая сторона пыли поворачивается вместе с ним.
 uniform vec2 light_dir = vec2(-1.0, 0.0);
 uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
+uniform float star_radius = 2000.0;
+// Нагрев как в GameData.temperature_at: у границы испарения пыль тлеет.
+uniform float heat_start = 1.75;
+uniform float snow_line = 6800.0;
+uniform float snow_width = 700.0;
 
 const float QUAD = 3.8;    // сторона квадрата в радиусах пылинки
 const float SPRITE = 3.4;  // сторона спрайта в радиусах пылинки
@@ -21,10 +26,25 @@ const float GLOW = 1.9;    // радиус свечения
 
 varying vec4 v_data;
 varying vec4 v_color;
+varying float v_glow;   // свечение от нагрева, 0..1
+varying float v_frost;  // иней у снеговой линии, 0..1
 
 void vertex() {
 	v_data = INSTANCE_CUSTOM;
 	v_color = COLOR;
+	// Расстояние до звезды: вершина уже сдвинута на положение экземпляра,
+	// MODEL_MATRIX добавляет сдвиг узла (орбитальную систему отсчёта).
+	vec2 world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
+	float heat = clamp((heat_start - length(world) / star_radius) / (heat_start - 1.0), 0.0, 1.0);
+	float temp = 300.0 + 2700.0 * pow(heat, 1.3);
+	v_glow = clamp((temp - 800.0) / 600.0, 0.0, 1.0);  // от точки Дрейпера до испарения
+	float ds = (length(world) - snow_line) / snow_width;
+	v_frost = exp(-ds * ds);
+}
+
+// Цвет тления: тёмно-красный → оранжевый.
+vec3 ember(float t) {
+	return mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), t);
 }
 
 void fragment() {
@@ -55,9 +75,39 @@ void fragment() {
 		n = normalize(n + vec3(0.0, 0.0, 0.05));
 		float diff = max(dot(n, normalize(vec3(light_dir, 0.25))), 0.0);
 		tex.rgb *= star_light * (0.18 + 1.4 * diff);
+		// Тление у звезды: зерно светится само, сильнее с горячей стороны.
+		tex.rgb += ember(v_glow) * v_glow * (0.6 + 0.6 * diff) * 0.9;
+
+		// Блик: при вращении грань на миг ловит свет звезды. Лёд блестит чаще и голубее.
+		// У снеговой линии на любой пыли намерзает иней и блестит как лёд.
+		bool ice = v_data.x >= 11.5 || v_frost > 0.45;
+		float facets = ice ? 5.0 : 3.0;
+		float glint = pow(max(sin(a * facets + phase * 7.0), 0.0), ice ? 40.0 : 90.0);
+		vec2 spot = normalize(light_dir) * 0.6;
+		vec2 dp = p - spot;
+		float star4 = max(0.0, 1.0 - abs(dp.x) * 6.0 - abs(dp.y) * 0.9) + max(0.0, 1.0 - abs(dp.y) * 6.0 - abs(dp.x) * 0.9);
+		float core = exp(-dot(dp, dp) * 30.0);
+		float sparkle = glint * (core * 1.5 + star4 * 0.8) * alpha;
+		vec3 glint_col = ice ? vec3(0.75, 0.9, 1.0) : vec3(1.0, 0.95, 0.85);
+		// Иней: голубоватая каёмка на освещённом краю.
+		float rim = pow(1.0 - n.z, 2.0) * diff;
+		float lum = dot(tex.rgb, vec3(0.3, 0.5, 0.2));
+		tex.rgb = mix(tex.rgb, vec3(0.8, 0.9, 1.0) * (lum * 1.3 + 0.05), v_frost * 0.45);
+		tex.rgb += vec3(0.55, 0.75, 1.0) * v_frost * rim * 1.4;
+		if (ice) {
+			// Иней мерцает мелкой рябью.
+			float shimmer = 0.5 + 0.5 * sin(TIME * 3.0 + phase * 20.0 + (sp.x + sp.y) * 18.0);
+			tex.rgb += vec3(0.25, 0.35, 0.45) * shimmer * shimmer * diff * 0.35;
+		}
+
 		col.rgb = mix(col.rgb, tex.rgb, tex.a);
 		col.a = tex.a + col.a * (1.0 - tex.a);
+		col.rgb += glint_col * star_light * sparkle;
+		col.a = max(col.a, clamp(sparkle, 0.0, 1.0));
 	}
+	// Ореол тления вокруг нагретой пылинки.
+	col.rgb = mix(col.rgb, ember(v_glow), g * g * v_glow * 0.6);
+	col.a = max(col.a, g * g * v_glow * 0.5);
 
 	// Кольцо уровня: у пыли выше первого уровня и у недоступной. Толщина ~1.5 px на экране.
 	if (level > 1.5 || alpha < 0.9) {

@@ -6,6 +6,7 @@ shader_type canvas_item;
 uniform float extent = 3.0;
 uniform float star_radius = 2000.0;
 uniform vec3 halo_color : source_color = vec3(1.0, 0.45, 0.12);
+uniform float flare = 0.0;  // вспышка на звезде: свечение ярче и шире
 
 varying highp vec2 star_pos;
 
@@ -15,7 +16,7 @@ void vertex() {
 
 void fragment() {
 	float r = length(star_pos);
-	float a = 0.35 * exp(-2.2 * max(r - 1.0, 0.0)) * smoothstep(extent, extent * 0.5, r);
+	float a = 0.35 * (1.0 + 0.8 * flare) * exp(-2.2 / (1.0 + 0.4 * flare) * max(r - 1.0, 0.0)) * smoothstep(extent, extent * 0.5, r);
 	a += (fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
-	COLOR = vec4(halo_color, clamp(a, 0.0, 1.0));
+	COLOR = vec4(mix(halo_color, vec3(1.0, 0.8, 0.5), flare * 0.5), clamp(a, 0.0, 1.0));
 }

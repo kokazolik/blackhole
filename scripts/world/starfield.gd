@@ -17,10 +17,17 @@ func _ready() -> void:
 	_mat.set_shader_parameter("nebula", preload("res://assets/space/nebula.png"))
 	_mat.set_shader_parameter("stars_far", preload("res://assets/space/stars_far.png"))
 	_mat.set_shader_parameter("stars_near", preload("res://assets/space/stars_near.png"))
+	_mat.set_shader_parameter("disk_streams", preload("res://assets/space/disk_streams.png"))
 	material = _mat
 
 
 func _process(_delta: float) -> void:
 	_mat.set_shader_parameter("view_size", size)
 	if camera:
-		_mat.set_shader_parameter("offset", camera.get_screen_center_position() * camera.zoom.x)
+		var center := camera.get_screen_center_position()
+		_mat.set_shader_parameter("offset", center * camera.zoom.x)
+		_mat.set_shader_parameter("orbit_angle", center.angle())
+		_mat.set_shader_parameter("star_dir", -center.normalized())
+		var d := center.length()
+		_mat.set_shader_parameter("snow", exp(-pow((d - GameData.SNOW_LINE) / GameData.SNOW_LINE_WIDTH, 2.0)))
+	_mat.set_shader_parameter("flare", Star.flare)

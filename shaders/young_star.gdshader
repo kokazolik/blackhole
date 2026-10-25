@@ -9,6 +9,8 @@ shader_type canvas_item;
 
 uniform float extent = 1.8;            // во сколько раз квад больше радиуса звезды
 uniform float star_radius = 2000.0;
+uniform float flare = 0.0;        // сила вспышки 0..1
+uniform float flare_angle = 0.0;  // над каким местом края вспышка (угол в мировых координатах)
 uniform float rotation_speed = 0.02;
 uniform float prominence_amount = 0.8;
 uniform float ray_amount = 0.3;   // вблизи прямые лучи читаются как швы, поэтому слабые и мягкие
@@ -146,8 +148,14 @@ void fragment() {
 	float edge = max(r - 1.0, 0.0);
 	float ang = atan(p.y, p.x) / TAU + 0.5;  // 0..1 по кругу, шум бесшовный
 
+	// Вспышка: яркое пятно над участком края. QuadMesh в 2D перевёрнут по Y,
+	// поэтому мировой угол здесь с обратным знаком.
+	float fa = -flare_angle;
+	float da = atan(sin(atan(p.y, p.x) - fa), cos(atan(p.y, p.x) - fa));
+	float spot = flare * exp(-da * da / 0.08);
+
 	// Корона: ближнее свечение (дальнее — отдельной текстурой).
-	float glow = exp(-edge * 3.0) * 0.85;
+	float glow = exp(-edge * (3.0 - 1.5 * spot)) * 0.85 * (1.0 + 0.4 * flare + 1.2 * spot);
 
 	// Лучи: тонкие радиальные полосы разной длины.
 	float ray_noise = nz(vec2(ang * 12.0, 0.13 + TIME * 0.004));
@@ -157,14 +165,15 @@ void fragment() {
 	// Протуберанцы: закрученные нити через искажение координат.
 	// Считаются только в узком кольце у края, поэтому процедурный шум здесь недорог.
 	float prom = 0.0;
-	if (edge > 0.0 && edge < 0.6) {
+	if (edge > 0.0 && edge < 0.6 + 0.6 * spot) {
 		vec2 dir = normalize(p);
 		vec3 q = vec3(dir * 3.0, edge * 2.5 - TIME * 0.06);
 		vec3 warp = vec3(fbm(q + vec3(0.0, 0.0, TIME * 0.05), 2), fbm(q + vec3(5.2, 1.3, 0.0), 2), 0.0);
 		float strands = fbm(vec3(dir * 5.0, edge * 6.0) + warp * 3.5, 3);
 		float filament = pow(1.0 - abs(sin(strands * 7.0)), 4.0);
-		float region = smoothstep(0.3, 0.6, noise(vec3(dir * 2.5, 9.0 + TIME * 0.02)));
-		prom = filament * region * exp(-edge * 8.0) * smoothstep(0.0, 0.03, edge) * prominence_amount;
+		float region = max(smoothstep(0.3, 0.6, noise(vec3(dir * 2.5, 9.0 + TIME * 0.02))), spot);
+		// Во время вспышки выброс плазмы поднимается выше и светит ярче.
+		prom = filament * region * exp(-edge * (8.0 - 5.0 * spot)) * smoothstep(0.0, 0.03, edge) * prominence_amount * (1.0 + 2.5 * spot);
 	}
 
 	float corona = (glow + ray + prom) * smoothstep(extent, extent * 0.7, r);
@@ -174,7 +183,9 @@ void fragment() {
 	// Лёгкий шум против полос на плавных градиентах (8 бит на канал).
 	float dither = (fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
 	if (r < 1.0) {
-		vec3 inside = surface(p, r);
+		vec3 inside = surface(p, r) * (1.0 + 0.15 * flare);
+		// Яркое пятно на поверхности у основания вспышки.
+		inside += vec3(1.0, 0.85, 0.6) * spot * smoothstep(0.6, 1.0, r) * 0.8;
 		float k = smoothstep(1.0, 0.99, r);
 		COLOR = vec4(mix(outside.rgb, inside, k) + dither, max(k, outside.a));
 	} else {

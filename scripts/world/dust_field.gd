@@ -28,6 +28,7 @@ const QUAD_SCALE := 3.8  # сторона квадрата в радиусах �
 const MAX_SPAWN_PER_FRAME := 24
 const CLUSTER_CHECK := 5.0    # раз в столько секунд бросаем шанс на скопление
 const CLUSTER_CHANCE := 0.03  # скопление — редкая находка
+const STAR_LIGHT := Color(1.0, 0.9, 0.75)  # цвет света звезды, как в шейдере пыли
 
 signal evaporated(world_position: Vector2, grain_radius: float)  # пыль испарилась у звезды
 const CLUSTER_SIZE := Vector2i(15, 30)
@@ -97,6 +98,11 @@ func _ready() -> void:
 	for data in GameData.DUST_LEVELS:
 		level_colors.append(data.color)
 	mat.set_shader_parameter("level_colors", level_colors)
+	# Нагрев и иней в шейдере считаются по тем же границам, что и в игре.
+	mat.set_shader_parameter("star_radius", GameData.STAR_RADIUS)
+	mat.set_shader_parameter("heat_start", GameData.HEAT_START)
+	mat.set_shader_parameter("snow_line", GameData.SNOW_LINE)
+	mat.set_shader_parameter("snow_width", GameData.SNOW_LINE_WIDTH)
 	_mm_node.multimesh = _mm
 	_mm_node.material = mat
 	add_child(_mm_node)
@@ -126,6 +132,8 @@ func _process(delta: float) -> void:
 	# QuadMesh в 2D перевёрнут по Y, отсюда минус.
 	var to_star := -player.position.normalized()
 	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
+	# Вспышка на звезде: пыль освещена ярче.
+	_mm_node.material.set_shader_parameter("star_light", STAR_LIGHT * (1.0 + 0.9 * Star.flare))
 
 	var view_r := view_radius()
 	var active_r := view_r * 1.35

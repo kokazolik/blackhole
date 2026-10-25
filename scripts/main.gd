@@ -65,6 +65,7 @@ func _ready() -> void:
 	ui.add_child(tree_screen)
 
 	hud.tree_requested.connect(_open_tree)
+	tree_screen.closed.connect(hud.play_purchase_spark)
 
 
 func _show_burned_screen() -> void:

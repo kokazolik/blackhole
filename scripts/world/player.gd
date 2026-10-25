@@ -200,5 +200,6 @@ func _update_grain(r: float) -> void:
 	var to_star := (-position).normalized().rotated(-_spin)
 	var mat := _grain.material as ShaderMaterial
 	mat.set_shader_parameter("light_dir", to_star)
+	mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 	var heat_col := GameData.thermal_color(temperature)
 	mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))

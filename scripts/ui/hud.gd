@@ -34,6 +34,11 @@ var _last_currency := 0.0
 var _bump_tween: Tween
 var _time := 0.0
 var _arrow_visible := false
+var _shown_currency := 0.0   # число на экране плавно догоняет настоящее
+var _shown_progress := 0.0   # так же плавно растёт полоса стадии
+var _spark: Control          # золотая искра на книге после покупки навыка
+var _spark_t := -1.0
+var _spark_pending := false
 
 
 func _ready() -> void:
@@ -42,10 +47,13 @@ func _ready() -> void:
 	theme = UiTheme.get_theme()
 	_build()
 	_last_currency = GameState.currency
+	_shown_currency = GameState.currency
+	GameState.skills_changed.connect(func(): _spark_pending = true)
 	GameState.currency_changed.connect(_on_currency_changed)
 	GameState.mass_changed.connect(_refresh.unbind(1))
 	GameState.skills_changed.connect(_refresh)
 	_refresh()
+	_shown_progress = _stage_progress
 
 
 func _build() -> void:
@@ -167,6 +175,11 @@ func _build() -> void:
 	_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_badge.draw.connect(_draw_badge)
 	_tree_button.add_child(_badge)
+	_spark = Control.new()
+	_spark.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_spark.draw.connect(_draw_spark)
+	_tree_button.add_child(_spark)
 
 	# Сброс прогресса: маленькая иконка, первое нажатие просит подтверждения.
 	_reset_button = Button.new()
@@ -284,8 +297,14 @@ func _on_currency_changed(value: float) -> void:
 	_bump_tween.tween_property(_currency_label, "modulate", Color.WHITE, 0.35)
 
 
+## Вызывается при закрытии древа: если что-то купили, книга вспыхивает искрой.
+func play_purchase_spark() -> void:
+	if _spark_pending:
+		_spark_pending = false
+		_spark_t = 0.0
+
+
 func _refresh() -> void:
-	_currency_label.text = GameData.format_number(GameState.currency)
 	_mass_label.text = "масса " + GameData.format_mass(GameState.mass)
 	var idx := GameData.stage_index(GameState.mass)
 	var stage: Dictionary = GameData.STAGES[idx]
@@ -325,9 +344,25 @@ func _draw_currency_icon() -> void:
 func _draw_stage_bar() -> void:
 	var rect := Rect2(Vector2.ZERO, _stage_bar.size)
 	UiTheme.pill(Color(1, 1, 1, 0.08), 3).draw(_stage_bar.get_canvas_item(), rect)
-	if _stage_progress > 0.0:
-		var fill := Rect2(rect.position, Vector2(maxf(rect.size.x * _stage_progress, 6.0), rect.size.y))
+	if _shown_progress > 0.001:
+		var fw := maxf(rect.size.x * _shown_progress, 6.0)
+		var fill := Rect2(rect.position, Vector2(fw, rect.size.y))
 		UiTheme.pill(UiTheme.ICE, 3).draw(_stage_bar.get_canvas_item(), fill)
+		# По заполненной части пробегает отблеск света.
+		var band := 40.0
+		var x := fmod(_time * 90.0, fw + band * 3.0) - band
+		var x0 := clampf(x - band, 0.0, fw)
+		var x1 := clampf(x, 0.0, fw)
+		var x2 := clampf(x + band, 0.0, fw)
+		var h := rect.size.y
+		var clear := Color(1, 1, 1, 0.0)
+		var bright := Color(1, 1, 1, 0.75)
+		if x1 > x0:
+			_stage_bar.draw_polygon(PackedVector2Array([Vector2(x0, 0), Vector2(x1, 0), Vector2(x1, h), Vector2(x0, h)]),
+				PackedColorArray([clear, bright, bright, clear]))
+		if x2 > x1:
+			_stage_bar.draw_polygon(PackedVector2Array([Vector2(x1, 0), Vector2(x2, 0), Vector2(x2, h), Vector2(x1, h)]),
+				PackedColorArray([bright, clear, clear, bright]))
 
 
 ## Полоса состава с отметками порогов смеси (40%) и специализации (50%).
@@ -363,6 +398,26 @@ func _draw_composition() -> void:
 		_comp_bar.draw_line(Vector2(mx, -3), Vector2(mx, h + 3), Color(1, 1, 1, 0.85), 1.5)
 
 
+## Искра покупки: вспыхивает над книгой, разлетается лучами и гаснет.
+func _draw_spark() -> void:
+	if _spark_t < 0.0:
+		return
+	var k := _spark_t
+	var c := _spark.size * 0.5
+	var a := 1.0 - k
+	_spark.draw_circle(c, 10.0 + 50.0 * k, Color(UiTheme.GOLD, 0.25 * a))
+	_spark.draw_arc(c, 8.0 + 46.0 * k, 0.0, TAU, 40, Color(1.0, 0.9, 0.6, 0.8 * a), 2.0, true)
+	var r := 26.0 * sin(minf(k * 2.0, 1.0) * PI * 0.5) * (1.0 - k * 0.5)
+	var w := 4.0 * a + 1.0
+	var pts := PackedVector2Array([c + Vector2(0, -r), c + Vector2(w, -w), c + Vector2(r, 0), c + Vector2(w, w),
+		c + Vector2(0, r), c + Vector2(-w, w), c + Vector2(-r, 0), c + Vector2(-w, -w)])
+	_spark.draw_colored_polygon(pts, Color(1.0, 0.95, 0.75, a))
+	for i in 8:
+		var d := Vector2.from_angle(i * TAU / 8.0 + 0.2)
+		var p := c + d * (14.0 + 40.0 * k)
+		_spark.draw_circle(p, 2.5 * a + 0.5, Color(UiTheme.GOLD, a))
+
+
 func _draw_badge() -> void:
 	var c := _badge.size * 0.5
 	var k := 0.5 + 0.5 * sin(_time * 4.0)
@@ -373,6 +428,20 @@ func _draw_badge() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_currency_icon.queue_redraw()
+	# Валюта «докручивается» до нового значения, полоса стадии плавно растёт.
+	var target := GameState.currency
+	if absf(target - _shown_currency) < 0.05:
+		_shown_currency = target
+	else:
+		_shown_currency = lerpf(_shown_currency, target, 1.0 - exp(-8.0 * delta))
+	_currency_label.text = GameData.format_number(_shown_currency)
+	_shown_progress = lerpf(_shown_progress, _stage_progress, 1.0 - exp(-5.0 * delta))
+	_stage_bar.queue_redraw()
+	if _spark_t >= 0.0:
+		_spark_t += delta
+		_spark.queue_redraw()
+		if _spark_t > 1.0:
+			_spark_t = -1.0
 	if _badge.visible:
 		_badge.queue_redraw()
 	var rect := Rect2(Vector2.ZERO, size).grow(-50.0)
