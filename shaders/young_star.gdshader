@@ -8,9 +8,10 @@ shader_type canvas_item;
 // этот квад небольшой: диск, протуберанцы и начало лучей.
 
 uniform float extent = 1.8;            // во сколько раз квад больше радиуса звезды
+uniform float star_radius = 2000.0;
 uniform float rotation_speed = 0.02;
 uniform float prominence_amount = 0.8;
-uniform float ray_amount = 0.6;
+uniform float ray_amount = 0.3;   // вблизи прямые лучи читаются как швы, поэтому слабые и мягкие
 uniform float boil_amount = 0.08;      // сила «кипения» поверхности
 
 uniform sampler2D surface_tex : filter_linear, repeat_enable;
@@ -58,8 +59,48 @@ float fbm(vec3 p, int octaves) {
 	return v;
 }
 
+// Координата в радиусах звезды с полной точностью. Встроенный UV на огромном кваде
+// на телефонах интерполируется с пониженной точностью, и вблизи звезды картинка
+// рвётся на ступеньки и грани.
+varying highp vec2 star_pos;
+
+void vertex() {
+	star_pos = VERTEX / star_radius;
+}
+
+// Бикубическая выборка (B-сплайн за 4 билинейных чтения): при сильном увеличении
+// обычная билинейная даёт прямые изломы на границах текселей, эта — гладкая.
+vec4 cubic_weights(float v) {
+	vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;
+	vec4 s = n * n * n;
+	float x = s.x;
+	float y = s.y - 4.0 * s.x;
+	float z = s.z - 4.0 * s.y + 6.0 * s.x;
+	return vec4(x, y, z, 6.0 - x - y - z) * (1.0 / 6.0);
+}
+
+vec4 texture_bicubic(sampler2D tex, highp vec2 uv) {
+	vec2 size = vec2(textureSize(tex, 0));
+	vec2 inv = 1.0 / size;
+	uv = uv * size - 0.5;
+	vec2 f = fract(uv);
+	uv -= f;
+	vec4 xc = cubic_weights(f.x);
+	vec4 yc = cubic_weights(f.y);
+	vec4 c = uv.xxyy + vec2(-0.5, 1.5).xyxy;
+	vec4 s = vec4(xc.xz + xc.yw, yc.xz + yc.yw);
+	vec4 o = (c + vec4(xc.yw, yc.yw) / s) * inv.xxyy;
+	vec4 s0 = texture(tex, o.xz);
+	vec4 s1 = texture(tex, o.yz);
+	vec4 s2 = texture(tex, o.xw);
+	vec4 s3 = texture(tex, o.yw);
+	float sx = s.x / (s.x + s.y);
+	float sy = s.z / (s.z + s.w);
+	return mix(mix(s3, s2, sx), mix(s1, s0, sx), sy);
+}
+
 float nz(vec2 uv) {
-	return texture(noise_tex, uv).r;
+	return texture_bicubic(noise_tex, uv).r;
 }
 
 vec3 rotate_y(vec3 p, float a) {
@@ -80,7 +121,7 @@ vec3 surface(vec2 p, float r) {
 	float z = sqrt(max(1.0 - r * r, 0.0));
 	vec3 sp = rotate_y(vec3(p, z), TIME * rotation_speed);
 	vec2 uv = vec2(atan(sp.x, sp.z) / TAU + 0.5, 0.5 - asin(clamp(sp.y, -1.0, 1.0)) / PI);
-	vec4 s = texture(surface_tex, uv);
+	vec4 s = texture_bicubic(surface_tex, uv);
 
 	float heat = s.r * HEAT_RANGE + HEAT_MIN;
 	// Кипение: медленно плывущая рябь яркости поверх запечённых гранул.
@@ -100,7 +141,7 @@ vec3 surface(vec2 p, float r) {
 }
 
 void fragment() {
-	vec2 p = (UV - 0.5) * 2.0 * extent;
+	vec2 p = star_pos;
 	float r = length(p);
 	float edge = max(r - 1.0, 0.0);
 	float ang = atan(p.y, p.x) / TAU + 0.5;  // 0..1 по кругу, шум бесшовный
@@ -111,7 +152,7 @@ void fragment() {
 	// Лучи: тонкие радиальные полосы разной длины.
 	float ray_noise = nz(vec2(ang * 12.0, 0.13 + TIME * 0.004));
 	float ray_len = nz(vec2(ang * 2.0, 0.57 + TIME * 0.003));
-	float ray = pow(ray_noise, 2.5) * exp(-edge * (1.2 + 2.5 * (1.0 - ray_len))) * ray_amount;
+	float ray = pow(ray_noise, 1.5) * exp(-edge * (1.2 + 2.5 * (1.0 - ray_len))) * ray_amount;
 
 	// Протуберанцы: закрученные нити через искажение координат.
 	// Считаются только в узком кольце у края, поэтому процедурный шум здесь недорог.
@@ -130,11 +171,13 @@ void fragment() {
 	vec3 corona_col = mix(color_mid, color_bright, clamp(prom + exp(-edge * 6.0) * 0.6, 0.0, 1.0));
 	vec4 outside = vec4(corona_col * (1.0 + prom * 0.6), clamp(corona, 0.0, 1.0));
 
+	// Лёгкий шум против полос на плавных градиентах (8 бит на канал).
+	float dither = (fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
 	if (r < 1.0) {
 		vec3 inside = surface(p, r);
 		float k = smoothstep(1.0, 0.99, r);
-		COLOR = vec4(mix(outside.rgb, inside, k), max(k, outside.a));
+		COLOR = vec4(mix(outside.rgb, inside, k) + dither, max(k, outside.a));
 	} else {
-		COLOR = outside;
+		COLOR = vec4(outside.rgb + dither, clamp(outside.a + dither, 0.0, 1.0));
 	}
 }

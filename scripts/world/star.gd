@@ -8,14 +8,22 @@ const HALO_COLOR := Color(1.0, 0.45, 0.12)
 # Исходник поверхности: shaders/young_star_procedural.gdshader (тяжёлый, только для запекания
 # через tools/bake_star.tscn). Рельефный вариант: shaders/young_star_relief.gdshader.
 const STAR_SHADER := preload("res://shaders/young_star.gdshader")
+const HALO_SHADER := preload("res://shaders/star_halo.gdshader")
 const SURFACE_TEX := preload("res://assets/star/star_surface.png")
 
 
 func _ready() -> void:
-	# Дальнее свечение: одна текстура вместо шейдера на весь экран.
-	var halo := Sprite2D.new()
-	halo.texture = _make_halo()
-	halo.scale = Vector2.ONE * GameData.STAR_RADIUS * 2.0 * HALO_EXTENT / halo.texture.get_width()
+	# Дальнее свечение: простой квад, яркость считается формулой в шейдере.
+	var halo_quad := QuadMesh.new()
+	halo_quad.size = Vector2.ONE * GameData.STAR_RADIUS * 2.0 * HALO_EXTENT
+	var halo_mat := ShaderMaterial.new()
+	halo_mat.shader = HALO_SHADER
+	halo_mat.set_shader_parameter("extent", HALO_EXTENT)
+	halo_mat.set_shader_parameter("star_radius", GameData.STAR_RADIUS)
+	halo_mat.set_shader_parameter("halo_color", HALO_COLOR)
+	var halo := MeshInstance2D.new()
+	halo.mesh = halo_quad
+	halo.material = halo_mat
 	add_child(halo)
 
 	var quad := QuadMesh.new()
@@ -23,6 +31,7 @@ func _ready() -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = STAR_SHADER
 	mat.set_shader_parameter("extent", QUAD_EXTENT)
+	mat.set_shader_parameter("star_radius", GameData.STAR_RADIUS)
 	mat.set_shader_parameter("surface_tex", SURFACE_TEX)
 	mat.set_shader_parameter("noise_tex", _make_noise())
 	var body := MeshInstance2D.new()
@@ -30,20 +39,6 @@ func _ready() -> void:
 	body.material = mat
 	# QuadMesh в 2D перевёрнут по Y, для звезды это неважно.
 	add_child(body)
-
-
-## Радиальное свечение: яркость спадает как exp(-2.2 · расстояние от края в радиусах),
-## дальше пары радиусов фон остаётся чёрным.
-func _make_halo() -> ImageTexture:
-	var size := 256
-	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	var c := (size - 1) * 0.5
-	for y in size:
-		for x in size:
-			var r := Vector2(x - c, y - c).length() / c * HALO_EXTENT
-			var a := 0.35 * exp(-2.2 * maxf(r - 1.0, 0.0)) * smoothstep(HALO_EXTENT, HALO_EXTENT * 0.5, r)
-			img.set_pixel(x, y, Color(HALO_COLOR, a))
-	return ImageTexture.create_from_image(img)
 
 
 ## Бесшовный шум для кипения и короны, генерируется при старте.
