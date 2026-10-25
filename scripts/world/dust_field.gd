@@ -138,7 +138,8 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 		_spawn_single(_random_point(view_r * 1.05, active_r))
 		spawn_budget -= 1
 
-	_cluster_timer -= delta * Skills.stat("cluster")
+	# Пока пыли мало, скопления тоже реже и меньше.
+	_cluster_timer -= delta * Skills.stat("cluster") * minf(Skills.stat("spawn"), 1.0)
 	if _cluster_timer <= 0.0:
 		_cluster_timer = rng.randf_range(CLUSTER_INTERVAL.x, CLUSTER_INTERVAL.y)
 		_spawn_cluster(_random_point(view_r * 1.1, active_r * 0.95), view_r)
@@ -191,7 +192,8 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 	var level := _pick_level("cluster_weight")
 	var material: String = GameData.pick_weighted(GameData.material_weights(center.length()), rng)
 	var spread := view_r * 0.1
-	for n in rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y):
+	var size_k := clampf(Skills.stat("spawn"), 0.3, 1.0)
+	for n in roundi(rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y) * size_k):
 		var offset := Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread))
 		_add_dust(center + offset, level, material)
 
