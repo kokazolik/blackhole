@@ -462,10 +462,52 @@ func _draw_icon(id: String, col: Color) -> void:
 			_canvas.draw_line(Vector2(9, 6), Vector2(0, -9), Color(col, 0.7), w, true)
 			for v in [Vector2(-9, 6), Vector2(9, 6), Vector2(0, -9)]:
 				_canvas.draw_circle(v, 5.0, col)
+		"pebble_root":
+			# Гладкая галька, газ обтекает её линиями.
+			_ellipse(Vector2(4, 0), Vector2(9.0, 6.5), 0.0, col)
+			for y in [-12.0, 12.0]:
+				var pts := PackedVector2Array()
+				for i in 12:
+					var x := -18.0 + i * 3.4
+					pts.append(Vector2(x, y * (0.55 + 0.45 * absf(x - 4.0) / 22.0)))
+				_canvas.draw_polyline(pts, Color(col, 0.7), 1.6, true)
+			_canvas.draw_line(Vector2(-18, 0), Vector2(-8, 0), Color(col, 0.7), 1.6, true)
+		"toughness":
+			# Плотно спечённый камень: многогранник с внутренними гранями.
+			var pts := PackedVector2Array()
+			for i in 7:
+				pts.append(Vector2.from_angle(i * TAU / 6.0 + 0.3) * 14.0)
+			_canvas.draw_polyline(pts, col, w, true)
+			for i in 3:
+				_canvas.draw_line(Vector2.ZERO, pts[i * 2], Color(col, 0.6), 1.4, true)
+			_canvas.draw_circle(Vector2.ZERO, 3.0, col)
+		"thrust":
+			_canvas.draw_circle(Vector2(6, 0), 6.5, col)
+			_canvas.draw_arc(Vector2(6, 0), 12.0, PI * 0.65, PI * 1.35, 14, Color(col, 0.7), w, true)
+			_canvas.draw_line(Vector2(-6, -12), Vector2(-16, -12), Color(col, 0.6), w, true)
+			_canvas.draw_line(Vector2(-6, 12), Vector2(-16, 12), Color(col, 0.6), w, true)
+		"ice_crust":
+			_canvas.draw_circle(Vector2.ZERO, 7.0, col)
+			for i in 6:
+				var d := Vector2.from_angle(i * TAU / 6.0)
+				_canvas.draw_line(d * 10.0, d * 17.0, col, w, true)
+				_canvas.draw_line(d * 14.0, d * 14.0 + d.rotated(0.9) * 4.0, Color(col, 0.7), 1.4, true)
+				_canvas.draw_line(d * 14.0, d * 14.0 + d.rotated(-0.9) * 4.0, Color(col, 0.7), 1.4, true)
+		"pebble_swarm":
+			for v in [Vector2(-8, -5), Vector2(7, -8), Vector2(9, 7), Vector2(-6, 9), Vector2(0, 0)]:
+				var rr := 4.2 if v == Vector2.ZERO else 3.2
+				_ellipse(v, Vector2(rr, rr * 0.7), v.x * 0.1, col)
 		_:
 			for i in 4:
 				var d := Vector2.from_angle(i * TAU / 4.0)
 				_canvas.draw_colored_polygon(PackedVector2Array([Vector2.ZERO + d.orthogonal() * 3.0, d * 16.0, -d.orthogonal() * 3.0]), col)
+
+
+func _ellipse(c: Vector2, radii: Vector2, rot: float, col: Color) -> void:
+	var pts := PackedVector2Array()
+	for i in 20:
+		pts.append(c + (Vector2.from_angle(i * TAU / 20.0) * radii).rotated(rot))
+	_canvas.draw_colored_polygon(pts, col)
 
 
 func _hit_test(screen_pos: Vector2) -> String:

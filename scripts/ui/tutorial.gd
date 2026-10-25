@@ -57,8 +57,40 @@ const STEPS := [
 	},
 ]
 const NEEDS_START := ["collect", "book", "buy"]
+# Звездочёт рассказывает о жизни гальки, когда пылинка дорастает до неё.
+const PEBBLE_STEPS := [
+	{
+		"id": "p_intro",
+		"text": "Поздравляю, путник: ты теперь галька, камешек размером с горошину. Ты уже так тяжёл, что отстаёшь от газа диска, и он дует тебе навстречу.",
+		"tap": true,
+	},
+	{
+		"id": "p_drift",
+		"text": "Встречный ветер тормозит тебя, и ты по спирали дрейфуешь к звезде. Чем крупнее галька, тем сильнее сносит. Слева сверху видно, куда и как быстро. Держись подальше от жара.",
+		"tap": true,
+	},
+	{
+		"id": "p_collide",
+		"text": "Вокруг другие гальки. Подлетай к ним медленно: зелёная дуга значит, что вы слипнетесь. Красная — удар слишком сильный, от тебя отколются осколки. Пунктир — галька крупнее тебя, её не присоединить.",
+		"tap": true,
+	},
+	{
+		"id": "p_rings",
+		"text": "Видишь светлые кольца в диске? Это ловушки давления. Ветра там почти нет, и гальки копятся. Хорошее место, чтобы расти.",
+		"tap": true,
+	},
+	{
+		"id": "p_book",
+		"text": "В книге знаний проросла новая ветвь, «Галька». Её знания помогут бороться с ветром и мягче сталкиваться. Твой путь к валуну начинается.",
+		"tap": true,
+		"button": "В путь",
+	},
+]
 
 var main: Node  # сцена игры: игрок, интерфейс, древо
+var steps: Array = STEPS
+var pebble := false  # рассказ о гальке, а не первое обучение
+var start_delay := 2.2
 var _step := -1
 var _card: PanelContainer
 var _name: Label
@@ -86,7 +118,7 @@ func _ready() -> void:
 	modulate.a = 0.0
 	# Рассказчик появляется, когда камера уже приблизилась к пылинке.
 	var tw := create_tween()
-	tw.tween_interval(2.2)
+	tw.tween_interval(start_delay)
 	tw.tween_callback(_show_step.bind(0))
 	tw.tween_property(self, "modulate:a", 1.0, 0.8)
 
@@ -170,10 +202,10 @@ func _build() -> void:
 
 
 func _show_step(i: int) -> void:
-	if i >= STEPS.size():
+	if i >= steps.size():
 		_finish()
 		return
-	var step: Dictionary = STEPS[i]
+	var step: Dictionary = steps[i]
 	# Кто уже изучил «Начало» (старое сохранение), тому эти шаги не нужны.
 	if step.id in NEEDS_START and Skills.is_owned("start"):
 		_show_step(i + 1)
@@ -213,7 +245,10 @@ func _finish() -> void:
 	if _done:
 		return
 	_done = true
-	GameState.tutorial_done = true
+	if pebble:
+		GameState.pebble_intro_done = true
+	else:
+		GameState.tutorial_done = true
 	GameState.save_game()
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.6)
@@ -236,7 +271,7 @@ func _process(delta: float) -> void:
 	if _shown < full:
 		_shown = minf(_shown + CHARS_PER_SECOND * delta, full)
 		_text.visible_characters = int(_shown)
-	var step: Dictionary = STEPS[_step]
+	var step: Dictionary = steps[_step]
 	var typed := _shown >= full
 	_next.visible = step.get("tap", false) and typed
 	_target = Vector2.INF
@@ -277,6 +312,10 @@ func _process(delta: float) -> void:
 			_target = _center_of(tree.close_button)
 			if not tree.visible:
 				_advance()
+		"p_drift":
+			_target = _center_of(hud._wind_label)
+		"p_book":
+			_target = _center_of(hud._tree_button)
 
 
 func _center_of(c: Control) -> Vector2:

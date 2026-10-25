@@ -2,11 +2,16 @@ class_name Player
 extends Node2D
 ## Пылинка игрока: движение от стика/клавиатуры, рост от массы, поле притяжения.
 ## У звезды нагревается, светится и испаряется; коснувшись поверхности — гибнет.
+##
+## Став галькой, тело отстаёт от газа: встречный ветер сносит его к звезде
+## (GameData.gas_drift), а скорость набирается и гасится заметно медленнее.
 
 signal burned_up
 
 const ACCEL_FACTOR := 3.0
+const PEBBLE_ACCEL_FACTOR := 1.4  # галька тяжелее: тяга разгоняет её дольше
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
+const PEBBLE_TEX := preload("res://assets/player/player_pebble.png")
 const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~70% её ширины; видимый размер как у пыли (~2.7 радиуса)
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
 const TRAIL_POINTS := 20
@@ -15,6 +20,8 @@ const BURN_RATE := 0.9     # скорость испарения при макс
 
 var velocity := Vector2.ZERO        # собственное движение относительно окружающей пыли
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
+var drift_velocity := Vector2.ZERO  # снос встречным ветром газа (только у гальки)
+var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
 var radius := GameData.BASE_RADIUS
 var body_color := Color.WHITE
@@ -24,6 +31,7 @@ var _trail: Array[Vector2] = []  # след в мировых координат
 var _trail_timer := 0.0
 var _glow_tex := _make_glow()
 var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
+var _pebble := Sprite2D.new()  # облик гальки, проступает при переходе
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
 var dead := false
@@ -41,6 +49,16 @@ func _ready() -> void:
 	mat.shader = preload("res://shaders/lit_grain.gdshader")
 	_grain.material = mat
 	add_child(_grain)
+	_pebble.texture = PEBBLE_TEX
+	_pebble.material = mat.duplicate()
+	add_child(_pebble)
+	pebble_k = 1.0 if GameState.is_pebble() else 0.0
+	GameState.stage_reached.connect(_on_stage_reached)
+
+
+func _on_stage_reached(index: int) -> void:
+	if index == GameData.PEBBLE_STAGE:
+		create_tween().tween_property(self, "pebble_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
 
 
 ## Мягкое свечение одной текстурой вместо стопки полупрозрачных кругов.
@@ -75,6 +93,19 @@ func max_speed() -> float:
 	return 28.0 * pow(radius, 0.75) * Skills.stat("speed") * GameState.body_bonus("speed")
 
 
+## Скорость удара, до которой гальки слипаются. Лёд липкий: чем больше льда в
+## составе, тем мягче можно сталкиваться.
+func stick_speed() -> float:
+	var ice: float = GameData.composition(GameState.materials).get("ice", 0.0)
+	return GameData.STICK_SPEED * pow(radius / GameData.PEBBLE_REF_RADIUS, 0.4) \
+		* Skills.stat("stick") * (1.0 + 0.6 * ice)
+
+
+## Скорость относительно окружающей пыли и газа: своё движение плюс снос ветром.
+func motion() -> Vector2:
+	return velocity + drift_velocity
+
+
 # Движение в _process (каждый кадр отрисовки), а не на шаге физики: иначе на
 # экранах с частотой выше 60 Гц пылинка двигается рывками.
 func _process(delta: float) -> void:
@@ -85,10 +116,12 @@ func _process(delta: float) -> void:
 	var dir := move_input + _keyboard_input()
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
-	velocity = velocity.move_toward(dir * top, top * ACCEL_FACTOR * delta)
+	var accel := lerpf(ACCEL_FACTOR, PEBBLE_ACCEL_FACTOR * Skills.stat("thrust"), pebble_k)
+	velocity = velocity.move_toward(dir * top, top * accel * delta)
 	# Игрок вместе со всей пылью вокруг летит по орбите, стик добавляет своё движение.
 	frame_velocity = GameData.orbit_velocity(position)
-	position += (velocity + frame_velocity) * delta
+	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k
+	position += (velocity + drift_velocity + frame_velocity) * delta
 
 	_update_heat(delta)
 	if dead:
@@ -122,6 +155,7 @@ func die() -> void:
 	velocity = Vector2.ZERO
 	GameState.burned_up = true
 	_grain.visible = false
+	_pebble.visible = false
 	queue_redraw()
 	burned_up.emit()
 
@@ -194,12 +228,17 @@ func _draw() -> void:
 ## Комок поворачивается, а свет всегда идёт от звезды: переводим направление
 ## на звезду в координаты спрайта.
 func _update_grain(r: float) -> void:
-	_grain.rotation = _spin
-	_grain.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
-	_grain.modulate = body_color.lightened(0.5 + 0.3 * _pulse)
 	var to_star := (-position).normalized().rotated(-_spin)
-	var mat := _grain.material as ShaderMaterial
-	mat.set_shader_parameter("light_dir", to_star)
-	mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 	var heat_col := GameData.thermal_color(temperature)
-	mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
+	for sprite in [_grain, _pebble]:
+		sprite.rotation = _spin
+		sprite.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
+		var mat := sprite.material as ShaderMaterial
+		mat.set_shader_parameter("light_dir", to_star)
+		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
+		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
+	# Галька темнее и плотнее рыхлой пылинки: цвет состава почти без осветления.
+	_grain.modulate = Color(body_color.lightened(0.5 + 0.3 * _pulse), 1.0 - pebble_k)
+	_pebble.modulate = Color(body_color.lightened(0.25 + 0.3 * _pulse), pebble_k)
+	_grain.visible = pebble_k < 1.0
+	_pebble.visible = pebble_k > 0.0

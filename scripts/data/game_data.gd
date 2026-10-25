@@ -205,3 +205,67 @@ static func zone_at(distance: float) -> Dictionary:
 	if distance < SNOW_LINE:
 		return {"name": "Каменная зона", "desc": "силикаты и углерод", "color": Color(0.92, 0.82, 0.62)}
 	return {"name": "Ледяная зона", "desc": "лёд и углерод", "color": Color(0.62, 0.85, 1.0)}
+
+
+# --- Этап «Галька» ---
+# Газ диска подпирается давлением и вращается чуть медленнее твёрдых тел. Пыль
+# летит вместе с газом, а галька уже достаточно тяжёлая, чтобы отставать:
+# встречный ветер тормозит её, и она по спирали дрейфует к звезде. Скорость
+# дрейфа растёт с размером (число Стокса растёт к метровым телам).
+const PEBBLE_STAGE := 1               # индекс «Гальки» в STAGES
+const DRIFT_SPEED := 15.0             # дрейф гальки радиусом PEBBLE_REF_RADIUS, ед./с
+const PEBBLE_REF_RADIUS := 6.5        # радиус игрока при массе 30
+const DRIFT_SIZE_EXP := 0.8
+const DRIFT_TANGENTIAL := 0.45        # обгон газа по орбите, в долях радиального дрейфа
+# Ловушки давления: кольца, где давление газа максимально. Внутри кольца газ
+# быстрее, снаружи медленнее, поэтому гальки сносит к середине кольца и там они
+# копятся. Такие кольца видны в диске HL Тельца на снимках ALMA.
+const PRESSURE_RINGS := [5300.0, 6800.0, 8700.0, 11000.0]  # вторая — на снеговой линии
+const RING_WIDTH := 300.0
+# Слипание и раскол: медленно — слипаются, быстро — откалываются осколки.
+const STICK_SPEED := 42.0             # скорость удара, до которой гальки слипаются, ед./с
+const SHATTER_FACTOR := 1.7           # во столько раз быстрее — галька разлетается целиком
+# Откол растёт с энергией удара: масса чужой гальки × (скорость / порог)². Но не
+# больше CHIP_MAX от своей массы за один удар.
+const CHIP_K := 0.35
+const CHIP_MAX := 0.04
+const PEBBLE_DUST_FACTOR := 0.65     # доля массы пылинки, которая прилипает к гальке
+const PEBBLE_DENSITY := 0.0085         # чужие гальки — рыхлые пористые комки: масса = (r / BASE_RADIUS)^3 * плотность
+
+
+static func is_pebble_size(r: float) -> bool:
+	return r >= PEBBLE_REF_RADIUS * 0.6
+
+
+## Насколько тело в ловушке давления: 1 в середине кольца, 0 вдали.
+static func trap_strength(distance: float) -> float:
+	var best := 0.0
+	for rc in PRESSURE_RINGS:
+		var x: float = (distance - rc) / RING_WIDTH
+		best = maxf(best, exp(-x * x / 1.44))
+	return best
+
+
+## Скорость дрейфа тела радиуса r относительно пыли (она летит вместе с газом).
+## Вдали от колец — к звезде и чуть вперёд по орбите; у кольца радиальная
+## составляющая меняет знак, и тело сносит к его середине.
+static func gas_drift(pos: Vector2, r: float) -> Vector2:
+	var dist := pos.length()
+	if dist < 1.0:
+		return Vector2.ZERO
+	var base := DRIFT_SPEED * pow(r / PEBBLE_REF_RADIUS, DRIFT_SIZE_EXP)
+	var radial := -1.0
+	var calm := 0.0
+	for rc in PRESSURE_RINGS:
+		var x: float = (dist - rc) / RING_WIDTH
+		var g := exp(-x * x / 1.44)
+		if g > calm:
+			calm = g
+			radial = -((1.0 - g) + g * tanh(2.0 * x))
+	var out := pos / dist
+	var along := orbit_velocity(pos).normalized()
+	return (out * radial + along * DRIFT_TANGENTIAL * (1.0 - calm)) * base
+
+
+static func pebble_mass(r: float) -> float:
+	return pow(r / BASE_RADIUS, 3.0) * PEBBLE_DENSITY

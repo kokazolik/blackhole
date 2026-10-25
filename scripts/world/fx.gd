@@ -46,6 +46,17 @@ func _ready() -> void:
 	add_child(_light)
 	move_child(_light, 0)
 	GameState.absorbed.connect(_on_absorbed)
+	GameState.chipped.connect(_on_chipped)
+
+
+## Сильный удар: вспышка в точке удара и всплывающая потеря массы.
+func _on_chipped(at: Vector2, lost: float) -> void:
+	var angle := (at - player.position).angle()
+	if _hits.size() < LIMIT:
+		_hits.append({"angle": angle, "color": Color(1.0, 0.55, 0.3), "t": 0.0})
+	if _popups.size() >= LIMIT:
+		_popups.pop_front()
+	_popups.append({"pos": at, "text": "−%.1f массы" % lost, "color": Color(1.0, 0.5, 0.35), "t": 0.0, "drift": randf_range(-0.4, 0.4)})
 
 
 func _on_absorbed(at: Vector2, material: String, gained: float) -> void:

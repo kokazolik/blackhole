@@ -373,6 +373,15 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 			_add_dust(pos, level, material)
 
 
+## Осколки после удара: обычная пыль, которая разлетается и тормозится газом.
+## pos и vel в мировых координатах.
+func add_debris(pos: Vector2, vel: Vector2, level: int, material: String) -> void:
+	if _add_dust(pos, maxi(level, 1), material):
+		var d: Dust = dust.back()
+		d.vel = vel
+		_near.append(d)
+
+
 ## pos в мировых координатах.
 func _add_dust(pos: Vector2, level: int, material: String) -> bool:
 	if dust.size() >= MAX_DUST:

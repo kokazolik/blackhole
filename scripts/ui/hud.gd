@@ -23,6 +23,7 @@ var _heat_label: Label
 var _zone_label: Label
 var _zone_desc: Label
 var _zone_name := ""
+var _wind_label: Label
 var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
@@ -94,6 +95,14 @@ func _build() -> void:
 	zone_box.add_child(_zone_label)
 	_zone_desc = _label(13, UiTheme.TEXT_DIM)
 	zone_box.add_child(_zone_desc)
+	# У гальки: встречный ветер газа и снос к звезде.
+	_wind_label = _label(14, Color(0.75, 0.88, 1.0), UiTheme.FONT_SEMI)
+	_wind_label.visible = false
+	var wind_pad := MarginContainer.new()
+	wind_pad.add_theme_constant_override("margin_top", 6)
+	wind_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wind_pad.add_child(_wind_label)
+	zone_box.add_child(wind_pad)
 
 	# Сверху по центру: стадия, прогресс до следующей, состав тела.
 	var top := VBoxContainer.new()
@@ -227,6 +236,23 @@ func set_zone(zone: Dictionary) -> void:
 		create_tween().tween_property(_zone_label, "modulate", Color.WHITE, 1.2)
 
 
+## Встречный ветер у гальки: сила сноса к звезде или затишье в ловушке давления.
+func set_wind(drift: Vector2, pos: Vector2, pebble_k: float) -> void:
+	_wind_label.visible = pebble_k > 0.5
+	if not _wind_label.visible:
+		return
+	var radial := -drift.dot(pos.normalized())  # > 0 — сносит к звезде
+	if GameData.trap_strength(pos.length()) > 0.6:
+		_wind_label.text = "Ловушка давления: затишье"
+		_wind_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.75))
+	elif radial > 0.0:
+		_wind_label.text = "Встречный ветер: снос к звезде %d м/с" % roundi(radial)
+		_wind_label.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
+	else:
+		_wind_label.text = "Газ выносит к кольцу: %d м/с" % roundi(-radial)
+		_wind_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.75))
+
+
 func set_temperature(temp: float) -> void:
 	_heat_label.visible = temp > GameData.SPACE_TEMP + 100.0
 	if not _heat_label.visible:
@@ -288,7 +314,7 @@ func play_purchase_spark() -> void:
 
 func _refresh() -> void:
 	_mass_label.text = "масса " + GameData.format_mass(GameState.mass)
-	var idx := GameData.stage_index(GameState.mass)
+	var idx := maxi(GameData.stage_index(GameState.mass), GameState.stage)
 	var stage: Dictionary = GameData.STAGES[idx]
 	if idx + 1 < GameData.STAGES.size():
 		var next: Dictionary = GameData.STAGES[idx + 1]

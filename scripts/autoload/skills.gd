@@ -15,6 +15,12 @@ const BASE_STATS := {
 	"cluster": 1.0,   # частота скоплений
 	"value": 1.0,     # валюта с пыли
 	"dust_level": 1,  # максимальный уровень поглощаемой пыли
+	# Этап «Галька»:
+	"drift": 1.0,     # сила встречного ветра (дрейфа к звезде)
+	"stick": 1.0,     # скорость удара, до которой гальки слипаются
+	"thrust": 1.0,    # тяга: как быстро галька набирает и гасит скорость
+	"chip": 1.0,      # сколько массы откалывается при сильном ударе
+	"pebbles": 1.0,   # сколько галек вокруг
 }
 
 var nodes := {}
@@ -62,6 +68,9 @@ func is_maxed(id: String) -> bool:
 ## либо все родители при "requires_all": true. "requires_level" — какого уровня
 ## должны быть родители (по умолчанию хватает первого). Корневые узлы доступны всегда.
 func is_unlocked(id: String) -> bool:
+	# Ветви следующих стадий открываются, когда тело до них доросло.
+	if GameState.stage < int(nodes[id].get("requires_stage", 0)):
+		return false
 	var reqs: Array = nodes[id].get("requires", [])
 	if reqs.is_empty():
 		return true

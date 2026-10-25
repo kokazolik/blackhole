@@ -12,8 +12,10 @@ var hud: Hud
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
 var pause_menu: PauseMenu
+var pebble_field: PebbleField
 var sky_events: Node2D
 var _intro_time := 0.0
+var _caption: Control
 
 
 func _ready() -> void:
@@ -36,10 +38,23 @@ func _ready() -> void:
 	add_child(preload("res://scripts/world/star.gd").new())
 
 	player = Player.new()
+	var rings := PressureRings.new()
+	rings.player = player
+	add_child(rings)
 	dust_field = DustField.new()
 	dust_field.player = player
 	dust_field.camera = camera
 	add_child(dust_field)
+	pebble_field = PebbleField.new()
+	pebble_field.player = player
+	pebble_field.dust_field = dust_field
+	pebble_field.camera = camera
+	add_child(pebble_field)
+	var wind := WindFx.new()
+	wind.player = player
+	wind.dust_field = dust_field
+	wind.camera = camera
+	add_child(wind)
 	add_child(player)
 	var fx := AbsorbFx.new()
 	fx.player = player
@@ -50,6 +65,8 @@ func _ready() -> void:
 	add_child(burn_fx)
 	burn_fx.finished.connect(_show_burned_screen)
 	dust_field.evaporated.connect(burn_fx.puff)
+	pebble_field.evaporated.connect(burn_fx.puff)
+	GameState.stage_reached.connect(_on_stage_reached)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -76,15 +93,49 @@ func _ready() -> void:
 
 	# Вход в игру: камера издалека приближается к пылинке, проступает подпись.
 	camera.zoom *= INTRO_ZOOM
-	_show_caption()
+	_show_caption("Протопланетный диск молодой звезды", "4,6 миллиарда лет назад")
 	if not GameState.tutorial_done:
 		var tutorial := Tutorial.new()
 		tutorial.main = self
 		ui.add_child(tutorial)
 		ui.move_child(pause_menu, -1)
+	elif GameState.is_pebble() and not GameState.pebble_intro_done:
+		_start_pebble_intro(2.5)
 
 
-func _show_caption() -> void:
+## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
+func _on_stage_reached(index: int) -> void:
+	if index != GameData.PEBBLE_STAGE:
+		return
+	var flash := ColorRect.new()
+	flash.color = Color(1.0, 0.92, 0.75, 0.0)
+	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	$UI.add_child(flash)
+	$UI.move_child(flash, hud.get_index() + 1)
+	var tw := flash.create_tween()
+	tw.tween_property(flash, "color:a", 0.55, 0.25)
+	tw.tween_property(flash, "color:a", 0.0, 1.6)
+	tw.tween_callback(flash.queue_free)
+	_show_caption("Галька", "камешек размером с горошину")
+	if not GameState.pebble_intro_done:
+		_start_pebble_intro(4.5)
+
+
+func _start_pebble_intro(delay: float) -> void:
+	for c in $UI.get_children():
+		if c is Tutorial:
+			return
+	var tutorial := Tutorial.new()
+	tutorial.main = self
+	tutorial.steps = Tutorial.PEBBLE_STEPS
+	tutorial.pebble = true
+	tutorial.start_delay = delay
+	$UI.add_child(tutorial)
+	$UI.move_child(pause_menu, -1)
+
+
+func _show_caption(title: String, subtitle: String) -> void:
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	box.offset_left = -400
@@ -93,9 +144,12 @@ func _show_caption() -> void:
 	box.offset_bottom = 230
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.modulate.a = 0.0
+	if is_instance_valid(_caption):
+		_caption.queue_free()
+	_caption = box
 	$UI.add_child(box)
 	$UI.move_child(box, hud.get_index() + 1)  # под книгой и меню, не поверх них
-	for line in [["Протопланетный диск молодой звезды", UiTheme.FONT_SERIF_BOLD, 30], ["4,6 миллиарда лет назад", UiTheme.FONT_SERIF_ITALIC, 22]]:
+	for line in [[title, UiTheme.FONT_SERIF_BOLD, 30], [subtitle, UiTheme.FONT_SERIF_ITALIC, 22]]:
 		var l := Label.new()
 		l.text = line[0]
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -167,3 +221,4 @@ func _process(delta: float) -> void:
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
 	hud.set_temperature(player.temperature)
 	hud.set_zone(GameData.zone_at(player.position.length()))
+	hud.set_wind(player.drift_velocity, player.position, player.pebble_k)

@@ -5,6 +5,8 @@ signal currency_changed(value: float)
 signal mass_changed(value: float)
 signal skills_changed
 signal absorbed(position: Vector2, material: String, gained: float)
+signal stage_reached(index: int)  # впервые достигнута новая стадия (Галька, ...)
+signal chipped(position: Vector2, lost: float)  # удар: от тела откололись осколки
 
 const SAVE_PATH := "user://save.json"
 const SAVE_VERSION := 1
@@ -16,9 +18,11 @@ var materials := {}
 var skill_levels := {}
 var player_position := Vector2(GameData.START_DISTANCE, 0.0)
 var burned_up := false  # пылинка испарилась у звезды: забег окончен, сохранять нечего
+var stage := 0  # высшая достигнутая стадия: потеря массы осколками её не отнимает
 # Не сбрасываются вместе с забегом: пролог и обучение достаточно пройти один раз.
 var prologue_seen := false
 var tutorial_done := false
+var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
 
 
 func _ready() -> void:
@@ -39,13 +43,40 @@ func _notification(what: int) -> void:
 
 func absorb(level: int, material: String, at: Vector2) -> void:
 	var data := GameData.level_data(level)
-	var gained_mass: float = data.mass * body_bonus("mass")
+	# Гальку мелкая пыль чаще огибает вместе с газом, поэтому пылью она растёт медленно.
+	var k := GameData.PEBBLE_DUST_FACTOR if is_pebble() else 1.0
+	absorb_mass(data.mass * k, data.value, material, at)
+
+
+## Присоединить вещество: масса растит тело, ценность даёт звёздную пыль.
+func absorb_mass(base_mass: float, base_value: float, material: String, at: Vector2) -> void:
+	var gained_mass: float = base_mass * body_bonus("mass")
 	mass += gained_mass
 	materials[material] = materials.get(material, 0.0) + gained_mass
-	var gained: float = data.value * Skills.stat("value") * body_bonus("value")
+	var gained: float = base_value * Skills.stat("value") * body_bonus("value")
 	add_currency(gained)
 	mass_changed.emit(mass)
 	absorbed.emit(at, material, gained)
+	_check_stage()
+
+
+func is_pebble() -> bool:
+	return stage >= GameData.PEBBLE_STAGE
+
+
+func _check_stage() -> void:
+	var idx := GameData.stage_index(mass)
+	if idx > stage:
+		stage = idx
+		stage_reached.emit(stage)
+		skills_changed.emit()  # в книге открываются ветви новой стадии
+		save_game()
+
+
+## Сильный удар: от тела откалывается часть вещества, состав сохраняет пропорции.
+func chip(amount: float, at: Vector2) -> void:
+	ablate(amount)
+	chipped.emit(at, amount)
 
 
 ## Испарение у звезды: масса уходит в газ, состав сохраняет пропорции.
@@ -101,6 +132,8 @@ func save_game() -> void:
 		"position": [player_position.x, player_position.y],
 		"prologue_seen": prologue_seen,
 		"tutorial_done": tutorial_done,
+		"stage": stage,
+		"pebble_intro_done": pebble_intro_done,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
@@ -119,7 +152,10 @@ func load_game() -> void:
 	prologue_seen = bool(data.get("prologue_seen", false))
 	tutorial_done = bool(data.get("tutorial_done", false))
 	currency = float(data.get("currency", 0.0))
+	stage = int(data.get("stage", 0))
+	pebble_intro_done = bool(data.get("pebble_intro_done", false))
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
+	stage = maxi(stage, GameData.stage_index(mass))
 	for key in data.get("materials", {}):
 		materials[key] = float(data.materials[key])
 	for key in data.get("skills", {}):
@@ -147,6 +183,7 @@ func reset_run() -> void:
 
 func _reset_values() -> void:
 	burned_up = false
+	stage = 0
 	currency = 0.0
 	mass = 1.0
 	skill_levels = {}
