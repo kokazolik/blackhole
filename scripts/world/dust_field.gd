@@ -68,7 +68,7 @@ func _ready() -> void:
 	_clumps.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_clumps.fractal_type = FastNoiseLite.FRACTAL_RIDGED
 	_clumps.fractal_octaves = 3
-	_clumps.frequency = 0.0022
+	_clumps.frequency = 0.0063
 
 	var quad := QuadMesh.new()
 	quad.size = Vector2.ONE
@@ -144,10 +144,10 @@ func _physics_process(delta: float) -> void:
 			if edible:
 				var k := 0.35 + 0.65 * (1.0 - dist / pull_r)
 				d.vel += dir * strength * k * delta
-			elif dist < pr + d.r + 2.0:
+			elif dist < pr + d.r + 0.7:
 				# Пыль выше открытого уровня отталкивается от поверхности.
-				d.pos = pp - dir * (pr + d.r + 2.0)
-				d.vel = -dir * maxf(player.velocity.length(), 20.0) * 0.8
+				d.pos = pp - dir * (pr + d.r + 0.7)
+				d.vel = -dir * maxf(player.velocity.length(), 8.0) * 0.8
 				_write_origin(d)
 		if d.vel.length_squared() > 0.0001:
 			d.vel *= drag

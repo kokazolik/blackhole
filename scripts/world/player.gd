@@ -4,7 +4,7 @@ extends Node2D
 
 const ACCEL_FACTOR := 3.0
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
-const GRAIN_SCALE := 2.8   # зерно на текстуре занимает ~70% её ширины
+const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~70% её ширины; видимый размер как у пыли (~2.7 радиуса)
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
 const TRAIL_POINTS := 20
 const TRAIL_STEP := 0.035  # секунд между точками следа
@@ -135,9 +135,9 @@ func _draw() -> void:
 	# Поле притяжения: слабое кольцо и бегущая волна внутрь.
 	var pr := pull_radius()
 	var ring := Color(0.55, 0.75, 1.0, 0.10 + 0.05 * (Skills.stat("gravity") - 1.0))
-	draw_arc(Vector2.ZERO, pr, 0.0, TAU, 40, ring, maxf(1.0, radius * 0.08), true)
+	draw_arc(Vector2.ZERO, pr, 0.0, TAU, 40, ring, maxf(0.5, radius * 0.08), true)
 	var wave_r := lerpf(pr, radius, _ring_phase)
-	draw_arc(Vector2.ZERO, wave_r, 0.0, TAU, 32, Color(ring, ring.a * 0.6 * _ring_phase), maxf(1.0, radius * 0.05), true)
+	draw_arc(Vector2.ZERO, wave_r, 0.0, TAU, 32, Color(ring, ring.a * 0.6 * _ring_phase), maxf(0.4, radius * 0.05), true)
 
 	# Шлейф мелкой пыли позади.
 	for i in range(1, _trail.size()):
@@ -152,7 +152,7 @@ func _draw() -> void:
 	var gs := r * 5.2
 	draw_texture_rect(_glow_tex, Rect2(-gs * 0.5, -gs * 0.5, gs, gs), false, Color(body_color, 0.22 + 0.15 * _pulse))
 	var s := r * GRAIN_SCALE
-	var tint := body_color.lightened(0.35 + 0.3 * _pulse)
+	var tint := body_color.lightened(0.5 + 0.3 * _pulse)
 	draw_set_transform(Vector2.ZERO, _spin)
 	draw_texture_rect(GRAIN_TEX, Rect2(-s * 0.5, -s * 0.5, s, s), false, tint)
 	draw_set_transform(Vector2.ZERO)

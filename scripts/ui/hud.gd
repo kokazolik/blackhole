@@ -14,6 +14,8 @@ var _comp_bar: Control
 var _body_label: Label
 var _tree_button: Button
 var _badge: Label
+var _reset_button: Button
+var _reset_armed := false
 var _drawn_star_pos := Vector2(INF, INF)
 
 
@@ -77,10 +79,40 @@ func _build() -> void:
 	_tree_button.pressed.connect(func(): tree_requested.emit())
 	add_child(_tree_button)
 
+	# Сброс прогресса: первое нажатие просит подтверждения, второе сбрасывает.
+	_reset_button = Button.new()
+	_reset_button.text = "Сброс"
+	_reset_button.add_theme_font_size_override("font_size", 18)
+	_reset_button.anchor_left = 1.0
+	_reset_button.anchor_right = 1.0
+	_reset_button.offset_left = -154
+	_reset_button.offset_right = -24
+	_reset_button.offset_top = 108
+	_reset_button.offset_bottom = 152
+	_reset_button.focus_mode = Control.FOCUS_NONE
+	_reset_button.modulate = Color(1, 1, 1, 0.7)
+	_reset_button.pressed.connect(_on_reset_pressed)
+	add_child(_reset_button)
+
 	_badge = _label(26, Color(1.0, 0.7, 0.28))
 	_badge.text = "●"
 	_badge.position = Vector2(150, -12)
 	_tree_button.add_child(_badge)
+
+
+func _on_reset_pressed() -> void:
+	if not _reset_armed:
+		_reset_armed = true
+		_reset_button.text = "Точно?"
+		_reset_button.add_theme_color_override("font_color", Color(1.0, 0.45, 0.35))
+		await get_tree().create_timer(3.0).timeout
+		if is_instance_valid(_reset_button):
+			_reset_armed = false
+			_reset_button.text = "Сброс"
+			_reset_button.remove_theme_color_override("font_color")
+		return
+	GameState.reset_run()
+	get_tree().reload_current_scene()
 
 
 func _label(font_size: int, color: Color) -> Label:

@@ -73,4 +73,4 @@ func _draw_dashed_ring(radius: float, color: Color) -> void:
 	for i in range(0, segments, 2):
 		points.append(Vector2.from_angle(TAU * i / segments) * radius)
 		points.append(Vector2.from_angle(TAU * (i + 1) / segments) * radius)
-	draw_multiline(points, color, 3.0)
+	draw_multiline(points, color, 1.2)

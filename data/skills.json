@@ -8,7 +8,7 @@
 			"max_level": 1,
 			"pos": [0, 0],
 			"requires": [],
-			"effects": {"gravity": 0.5, "dust_level": 2, "spawn": 0.8}
+			"effects": {"gravity": 0.5, "dust_level": 2, "spawn": 0.83}
 		},
 		{
 			"id": "gravity_1",

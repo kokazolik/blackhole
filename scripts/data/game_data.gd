@@ -7,14 +7,16 @@ const INNER_ZONE := 3600.0  # ближе к звезде: металл и сил
 const SNOW_LINE := 6800.0   # дальше: лёд и углерод
 const START_DISTANCE := 4300.0  # с края экрана видно сияние звезды
 
-# Радиус пылинки игрока при массе 1. Радиус растёт как кубический корень массы.
-const BASE_RADIUS := 6.0
+# Радиус пылинки игрока при массе 1: на старте игрок размером с пыль 1-го уровня.
+# Радиус растёт как кубический корень массы, поэтому к первому навыку (~50 пылинок)
+# игрок лишь чуть крупнее пыли 2-го уровня.
+const BASE_RADIUS := 2.1
 
 # Индекс в массиве = уровень пыли - 1.
 const DUST_LEVELS := [
-	{"radius": 2.1, "mass": 0.04, "value": 1.0, "spawn_weight": 1.0, "cluster_weight": 1.0, "color": Color(0.91, 0.93, 1.0)},
-	{"radius": 2.9, "mass": 0.12, "value": 2.0, "spawn_weight": 0.3, "cluster_weight": 0.5, "color": Color(1.0, 0.70, 0.28)},
-	{"radius": 4.0, "mass": 0.40, "value": 5.0, "spawn_weight": 0.1, "cluster_weight": 0.25, "color": Color(0.61, 0.55, 1.0)},
+	{"radius": 1.9, "mass": 0.03, "value": 1.0, "spawn_weight": 1.0, "cluster_weight": 1.0, "color": Color(0.91, 0.93, 1.0)},
+	{"radius": 2.5, "mass": 0.09, "value": 2.0, "spawn_weight": 0.3, "cluster_weight": 0.5, "color": Color(1.0, 0.70, 0.28)},
+	{"radius": 3.3, "mass": 0.30, "value": 5.0, "spawn_weight": 0.1, "cluster_weight": 0.25, "color": Color(0.61, 0.55, 1.0)},
 ]
 
 const MATERIALS := {
@@ -30,7 +32,7 @@ const MATERIAL_ORDER := ["silicate", "metal", "carbon", "ice"]  # совпада
 const SNOW_LINE_BOOST := 2.0
 const SNOW_LINE_WIDTH := 700.0
 # Орбитальная скорость на стартовом расстоянии; вблизи звезды быстрее, как v ~ 1/sqrt(r).
-const ORBIT_SPEED_AT_START := 60.0
+const ORBIT_SPEED_AT_START := 25.0
 
 # Состав тела. Пока собрано мало вещества, тип не определён.
 const COMPOSITION_MIN_MASS := 0.5
