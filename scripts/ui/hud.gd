@@ -20,6 +20,9 @@ var _material_labels := {}
 var _comp_bar: Control
 var _body_label: Label
 var _heat_label: Label
+var _zone_label: Label
+var _zone_desc: Label
+var _zone_name := ""
 var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
@@ -70,6 +73,21 @@ func _build() -> void:
 	mass_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mass_pad.add_child(_mass_label)
 	left.add_child(mass_pad)
+
+	# Зона диска, где сейчас игрок: от неё зависит, какая пыль вокруг.
+	var zone_pad := MarginContainer.new()
+	zone_pad.add_theme_constant_override("margin_left", 6)
+	zone_pad.add_theme_constant_override("margin_top", 14)
+	zone_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	left.add_child(zone_pad)
+	var zone_box := VBoxContainer.new()
+	zone_box.add_theme_constant_override("separation", -2)
+	zone_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	zone_pad.add_child(zone_box)
+	_zone_label = _label(17, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	zone_box.add_child(_zone_label)
+	_zone_desc = _label(13, UiTheme.TEXT_DIM)
+	zone_box.add_child(_zone_desc)
 
 	# Сверху по центру: стадия, прогресс до следующей, состав тела.
 	var top := VBoxContainer.new()
@@ -198,6 +216,20 @@ func _on_reset_pressed() -> void:
 		return
 	GameState.reset_run()
 	get_tree().reload_current_scene()
+
+
+func set_zone(zone: Dictionary) -> void:
+	if zone.name == _zone_name:
+		return
+	var first := _zone_name == ""
+	_zone_name = zone.name
+	_zone_label.text = zone.name
+	_zone_label.add_theme_color_override("font_color", zone.color)
+	_zone_desc.text = zone.desc
+	if not first:
+		# Новая зона: подпись вспыхивает и плавно возвращается.
+		_zone_label.modulate = Color(2.0, 2.0, 2.0)
+		create_tween().tween_property(_zone_label, "modulate", Color.WHITE, 1.2)
 
 
 func set_temperature(temp: float) -> void:

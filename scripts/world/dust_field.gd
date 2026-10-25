@@ -28,6 +28,8 @@ const QUAD_SCALE := 3.8  # сторона квадрата в радиусах �
 const MAX_SPAWN_PER_FRAME := 24
 const CLUSTER_CHECK := 5.0    # раз в столько секунд бросаем шанс на скопление
 const CLUSTER_CHANCE := 0.03  # скопление — редкая находка
+
+signal evaporated(world_position: Vector2, grain_radius: float)  # пыль испарилась у звезды
 const CLUSTER_SIZE := Vector2i(15, 30)
 const SPAWN_MARGIN := 24.0  # насколько за краем экрана появляется пыль, в пикселях
 const DRAG := 0.55  # доля скорости, остающаяся через секунду
@@ -182,11 +184,18 @@ func _scan(pp: Vector2, active_r: float) -> void:
 	var near_sq := near_r * near_r
 	_near.clear()
 	_active_count = 0
+	# Пыль, затянутая в зону испарения, испаряется так же, как сама пылинка игрока.
+	var evap_sq := pow(GameData.sublimation_distance(), 2)
 	var i := dust.size() - 1
 	while i >= 0:
 		var d := dust[i]
 		var dist_sq := d.pos.distance_squared_to(pp)
 		if dist_sq > despawn_sq:
+			_remove(d)
+			i -= 1
+			continue
+		if world_pos(d).length_squared() < evap_sq:
+			evaporated.emit(world_pos(d), d.r)
 			_remove(d)
 			i -= 1
 			continue
@@ -334,8 +343,7 @@ func _spawn_single(pos: Vector2, off_screen := false) -> bool:
 			accepted = true
 			break
 		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
-	# Ближе к звезде пыль не выживает: там она испаряется, как и сама пылинка.
-	if not accepted or GameData.temperature_at(pos.length()) >= GameData.SUBLIMATION_TEMP:
+	if not accepted:
 		return false
 	if off_screen and _hidden_rect.has_point(pos):
 		return false
@@ -360,6 +368,9 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 ## pos в мировых координатах.
 func _add_dust(pos: Vector2, level: int, material: String) -> bool:
 	if dust.size() >= MAX_DUST:
+		return false
+	# Ближе к звезде пыль не выживает: там она испаряется, как и сама пылинка.
+	if pos.length() < GameData.sublimation_distance():
 		return false
 	var d := Dust.new()
 	d.pos = pos - frame_offset

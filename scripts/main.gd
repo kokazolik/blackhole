@@ -46,6 +46,7 @@ func _ready() -> void:
 	burn_fx.player = player
 	add_child(burn_fx)
 	burn_fx.finished.connect(_show_burned_screen)
+	dust_field.evaporated.connect(burn_fx.puff)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -97,3 +98,4 @@ func _process(delta: float) -> void:
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
 	hud.set_temperature(player.temperature)
+	hud.set_zone(GameData.zone_at(player.position.length()))

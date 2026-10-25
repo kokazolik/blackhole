@@ -184,3 +184,23 @@ static func thermal_color(temp: float) -> Color:
 	# Яркость свечения: от еле заметного тления до ослепительного у звезды.
 	c.a = 0.1 + 0.9 * pow(t, 0.8) if temp > GLOW_TEMP else 0.0
 	return c
+
+
+## Расстояние от звезды, ближе которого любая пыль испаряется (температура выше
+## SUBLIMATION_TEMP). Обратная функция к temperature_at.
+static func sublimation_distance() -> float:
+	var heat := pow((SUBLIMATION_TEMP - SPACE_TEMP) / (SURFACE_TEMP - SPACE_TEMP), 1.0 / 1.3)
+	return (HEAT_START - heat * (HEAT_START - 1.0)) * STAR_RADIUS
+
+
+## Зона диска, где сейчас игрок: название, чего там больше и цвет подписи.
+static func zone_at(distance: float) -> Dictionary:
+	if distance < sublimation_distance():
+		return {"name": "Зона испарения", "desc": "пыль не выживает, всё уходит в газ", "color": Color(1.0, 0.5, 0.25)}
+	if distance < INNER_ZONE:
+		return {"name": "Внутренний диск", "desc": "металл и силикаты", "color": Color(1.0, 0.75, 0.45)}
+	if absf(distance - SNOW_LINE) < SNOW_LINE_WIDTH:
+		return {"name": "Снеговая линия", "desc": "замерзает лёд, пыли больше всего", "color": Color(0.7, 0.92, 1.0)}
+	if distance < SNOW_LINE:
+		return {"name": "Каменная зона", "desc": "силикаты и углерод", "color": Color(0.92, 0.82, 0.62)}
+	return {"name": "Ледяная зона", "desc": "лёд и углерод", "color": Color(0.62, 0.85, 1.0)}

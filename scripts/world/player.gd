@@ -19,7 +19,6 @@ var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
 var radius := GameData.BASE_RADIUS
 var body_color := Color.WHITE
 var _pulse := 0.0
-var _ring_phase := 0.0
 var _spin := 0.0
 var _trail: Array[Vector2] = []  # след в мировых координатах, летит по орбите вместе с пылью
 var _trail_timer := 0.0
@@ -99,7 +98,6 @@ func _process(delta: float) -> void:
 	_spin += (SPIN_SPEED + velocity.length() / maxf(radius, 1.0) * 0.05) * delta
 	_update_trail(delta)
 	_pulse = maxf(0.0, _pulse - delta * 4.0)
-	_ring_phase = fmod(_ring_phase + delta * 0.6, 1.0)
 	GameState.player_position = position
 	queue_redraw()
 
@@ -173,13 +171,6 @@ func _update_color() -> void:
 func _draw() -> void:
 	if dead:
 		return
-	# Поле притяжения: слабое кольцо и бегущая волна внутрь.
-	var pr := pull_radius()
-	var ring := Color(0.55, 0.75, 1.0, 0.10 + 0.05 * (Skills.stat("gravity") - 1.0))
-	draw_arc(Vector2.ZERO, pr, 0.0, TAU, 40, ring, maxf(0.5, radius * 0.08), true)
-	var wave_r := lerpf(pr, radius, _ring_phase)
-	draw_arc(Vector2.ZERO, wave_r, 0.0, TAU, 32, Color(ring, ring.a * 0.6 * _ring_phase), maxf(0.4, radius * 0.05), true)
-
 	# Шлейф мелкой пыли позади.
 	for i in range(1, _trail.size()):
 		var t := 1.0 - float(i) / TRAIL_POINTS

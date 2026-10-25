@@ -44,6 +44,13 @@ func _ready() -> void:
 	player.burned_up.connect(_on_burned_up)
 
 
+## Пылинка из поля испарилась у звезды: маленькое облачко пара.
+func puff(at: Vector2, r: float) -> void:
+	for i in 5:
+		if _vapor.size() < LIMIT:
+			_emit_vapor(at, r, GameData.SUBLIMATION_TEMP + 300.0, 0.8)
+
+
 func _process(delta: float) -> void:
 	if not player.dead and player.burn > 0.0:
 		_spawn_acc += delta * (6.0 + 90.0 * player.burn)
