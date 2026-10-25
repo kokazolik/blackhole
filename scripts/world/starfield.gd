@@ -14,8 +14,8 @@ func _ready() -> void:
 	for i in STAR_COUNT:
 		_stars.append({
 			"p": Vector2(rng.randf(), rng.randf()),
-			"r": rng.randf_range(0.6, 1.8),
-			"a": rng.randf_range(0.15, 0.6),
+			"r": rng.randf_range(0.5, 1.3),
+			"a": rng.randf_range(0.06, 0.3),
 		})
 
 

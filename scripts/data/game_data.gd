@@ -12,9 +12,9 @@ const BASE_RADIUS := 6.0
 
 # Индекс в массиве = уровень пыли - 1.
 const DUST_LEVELS := [
-	{"radius": 3.0, "mass": 0.04, "value": 1.0, "spawn_weight": 1.0, "cluster_weight": 1.0, "color": Color(0.91, 0.93, 1.0)},
-	{"radius": 4.0, "mass": 0.12, "value": 2.0, "spawn_weight": 0.3, "cluster_weight": 0.5, "color": Color(1.0, 0.70, 0.28)},
-	{"radius": 6.0, "mass": 0.40, "value": 5.0, "spawn_weight": 0.1, "cluster_weight": 0.25, "color": Color(0.61, 0.55, 1.0)},
+	{"radius": 2.1, "mass": 0.04, "value": 1.0, "spawn_weight": 1.0, "cluster_weight": 1.0, "color": Color(0.91, 0.93, 1.0)},
+	{"radius": 2.9, "mass": 0.12, "value": 2.0, "spawn_weight": 0.3, "cluster_weight": 0.5, "color": Color(1.0, 0.70, 0.28)},
+	{"radius": 4.0, "mass": 0.40, "value": 5.0, "spawn_weight": 0.1, "cluster_weight": 0.25, "color": Color(0.61, 0.55, 1.0)},
 ]
 
 const MATERIALS := {
@@ -23,7 +23,14 @@ const MATERIALS := {
 	"carbon": {"name": "Углерод", "color": Color(0.70, 0.50, 0.44)},
 	"ice": {"name": "Лёд", "color": Color(0.72, 0.94, 1.0)},
 }
-const MATERIAL_ORDER := ["silicate", "metal", "carbon", "ice"]
+const MATERIAL_ORDER := ["silicate", "metal", "carbon", "ice"]  # совпадает со строками атласа пыли
+
+# Плотность пыли в диске. Поверхностная плотность падает как 1/r,
+# а у снеговой линии пыль копится (намерзает лёд), там её в несколько раз больше.
+const SNOW_LINE_BOOST := 2.0
+const SNOW_LINE_WIDTH := 220.0
+# Орбитальная скорость на стартовом расстоянии; вблизи звезды быстрее, как v ~ 1/sqrt(r).
+const ORBIT_SPEED_AT_START := 60.0
 
 # Состав тела. Пока собрано мало вещества, тип не определён.
 const COMPOSITION_MIN_MASS := 0.5
@@ -99,6 +106,18 @@ static func body_type(materials: Dictionary) -> String:
 	if shares[top_key] <= MIX_MAX_SHARE:
 		return "chondrite"
 	return "neutral"
+
+
+## Средняя плотность пыли на расстоянии от звезды (1.0 на старте).
+static func radial_density(distance: float) -> float:
+	var falloff := START_DISTANCE / maxf(distance, STAR_RADIUS)
+	var snow := 1.0 + SNOW_LINE_BOOST * exp(-pow((distance - SNOW_LINE) / SNOW_LINE_WIDTH, 2.0))
+	return falloff * snow
+
+
+## Орбитальная скорость (по Кеплеру) на расстоянии от звезды.
+static func orbit_speed(distance: float) -> float:
+	return ORBIT_SPEED_AT_START * sqrt(START_DISTANCE / maxf(distance, STAR_RADIUS))
 
 
 static func stage_index(mass: float) -> int:

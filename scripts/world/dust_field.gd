@@ -4,8 +4,18 @@ extends Node2D
 ##
 ## Пыль хранится простыми объектами и рисуется в одном _draw, без отдельной ноды на
 ## каждую пылинку: так на телефоне держатся сотни частиц.
+##
+## Распределение неравномерное, как в настоящем диске: сгустки и нити пыли
+## (шум) поверх средней плотности, которая зависит от расстояния до звезды.
+## Вся пыль медленно сносится орбитальным сдвигом относительно игрока.
 
-const BASE_TARGET_COUNT := 500
+const BASE_TARGET_COUNT := 700
+const MAX_DENSITY_SCALE := 1.8  # потолок числа пылинок у снеговой линии, бережём телефон
+const SPAWN_ATTEMPTS := 4
+const ATLAS := preload("res://assets/dust/dust_atlas.png")
+const ATLAS_CELL := 64
+const ATLAS_VARIANTS := 4
+const SPRITE_SCALE := 3.4  # видимое зерно занимает ~80% клетки атласа
 const MAX_SPAWN_PER_FRAME := 24
 const CLUSTER_INTERVAL := Vector2(7.0, 15.0)
 const CLUSTER_SIZE := Vector2i(15, 30)
@@ -20,6 +30,9 @@ class Dust:
 	var material: String
 	var r: float
 	var color: Color
+	var variant: int
+	var rot: float
+	var spin: float
 
 var player: Player
 var camera: Camera2D
@@ -28,11 +41,19 @@ var rng := RandomNumberGenerator.new()
 var _cluster_timer := 0.0
 var _filled := false
 var _popups: Array = []  # всплывающие «+N» цвета материала
+var _clumps := FastNoiseLite.new()
 
 
 func _ready() -> void:
 	rng.randomize()
 	_cluster_timer = rng.randf_range(2.0, 5.0)
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	# Гребневый шум даёт вытянутые нити и сгустки с пустотами между ними.
+	_clumps.seed = 1337
+	_clumps.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_clumps.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	_clumps.fractal_octaves = 3
+	_clumps.frequency = 0.0022
 	GameState.absorbed.connect(_on_absorbed)
 
 
@@ -60,6 +81,7 @@ func _physics_process(delta: float) -> void:
 	var max_lvl := Skills.max_dust_level()
 	var despawn_sq := pow(active_r * 1.3, 2)
 	var drag := pow(DRAG, delta)
+	var player_orbit := GameData.orbit_speed(pp.length())
 
 	var i := dust.size() - 1
 	while i >= 0:
@@ -82,7 +104,11 @@ func _physics_process(delta: float) -> void:
 				d.pos = pp - dir * (pr + d.r + 2.0)
 				d.vel = -dir * maxf(player.velocity.length(), 20.0) * 0.8
 		d.vel *= drag
-		d.pos += d.vel * delta
+		# Орбитальный сдвиг: ближе к звезде пыль обгоняет игрока, дальше — отстаёт.
+		var rd := d.pos.length()
+		var shear := GameData.orbit_speed(rd) - player_orbit
+		d.pos += (d.vel + Vector2(-d.pos.y, d.pos.x) / maxf(rd, 1.0) * shear) * delta
+		d.rot += d.spin * delta
 		if edible and d.pos.distance_squared_to(pp) < pow(pr + d.r * 0.5, 2):
 			GameState.absorb(d.level, d.material, d.pos)
 			_remove_at(i)
@@ -99,7 +125,8 @@ func _remove_at(i: int) -> void:
 
 
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
-	var target := int(BASE_TARGET_COUNT * Skills.stat("spawn"))
+	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
+	var target := int(BASE_TARGET_COUNT * Skills.stat("spawn") * density_scale)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
 	if not _filled:
 		# Первое заполнение: пыль сразу по всему экрану, а не только за краем.
@@ -135,7 +162,23 @@ func _pick_level(weight_key: String) -> int:
 	return GameData.pick_weighted(weights, rng)
 
 
+## Доля «заполненности» места сгустками: 0.15 в пустотах, 1.0 в гуще нитей.
+func clump_density(pos: Vector2) -> float:
+	var n := (_clumps.get_noise_2dv(pos) + 1.0) * 0.5
+	return 0.15 + 0.85 * smoothstep(0.35, 0.8, n)
+
+
 func _spawn_single(pos: Vector2) -> void:
+	# Отбор: в пустотах точка чаще отбрасывается и ищется заново рядом.
+	var accepted := false
+	for attempt in SPAWN_ATTEMPTS:
+		var falloff := GameData.radial_density(pos.length()) / maxf(GameData.radial_density(player.position.length()), 0.01)
+		if rng.randf() < clump_density(pos) * clampf(falloff, 0.2, 2.0) * 0.6:
+			accepted = true
+			break
+		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
+	if not accepted:
+		return
 	if pos.length() < GameData.STAR_RADIUS * 1.5:
 		return
 	var material: String = GameData.pick_weighted(GameData.material_weights(pos.length()), rng)
@@ -162,6 +205,9 @@ func _add_dust(pos: Vector2, level: int, material: String) -> void:
 	var data := GameData.level_data(level)
 	d.r = data.radius * rng.randf_range(0.85, 1.15)
 	d.color = GameData.MATERIALS[material].color
+	d.variant = rng.randi() % ATLAS_VARIANTS
+	d.rot = rng.randf() * TAU
+	d.spin = rng.randf_range(-0.6, 0.6)
 	dust.append(d)
 
 
@@ -169,19 +215,24 @@ func _draw() -> void:
 	var max_lvl := Skills.max_dust_level()
 	var view_sq := pow(view_radius() * 1.1, 2)
 	var pp := player.position
-	var line_w := 1.5 / camera.zoom.x
+	var line_w := 1.2 / camera.zoom.x
 	for d in dust:
 		if d.pos.distance_squared_to(pp) > view_sq:
 			continue
-		if d.level <= max_lvl:
-			draw_circle(d.pos, d.r * 1.8, Color(d.color, 0.12))
-			draw_circle(d.pos, d.r, d.color)
-			if d.level > 1:
-				draw_arc(d.pos, d.r + line_w, 0.0, TAU, 12, Color(GameData.level_data(d.level).color, 0.8), line_w)
-		else:
+		var edible := d.level <= max_lvl
+		draw_set_transform(d.pos, d.rot)
+		# Слабое свечение цвета материала, чтобы мелкие пылинки читались на тёмном фоне.
+		draw_circle(Vector2.ZERO, d.r * 1.9, Color(d.color, 0.09 if edible else 0.04))
+		var s := d.r * SPRITE_SCALE
+		var row := GameData.MATERIAL_ORDER.find(d.material)
+		var region := Rect2(d.variant * ATLAS_CELL, row * ATLAS_CELL, ATLAS_CELL, ATLAS_CELL)
+		draw_texture_rect_region(ATLAS, Rect2(-s * 0.5, -s * 0.5, s, s), region, Color(1, 1, 1, 1.0 if edible else 0.4))
+		if not edible:
 			# Недоступная пыль: тусклая, с обводкой цвета своего уровня.
-			draw_circle(d.pos, d.r, Color(d.color, 0.35))
-			draw_arc(d.pos, d.r + line_w, 0.0, TAU, 16, GameData.level_data(d.level).color, line_w * 1.4)
+			draw_arc(Vector2.ZERO, d.r * 1.7 + line_w, 0.0, TAU, 16, Color(GameData.level_data(d.level).color, 0.5), line_w)
+		elif d.level > 1:
+			draw_arc(Vector2.ZERO, d.r * 1.7 + line_w, 0.0, TAU, 12, Color(GameData.level_data(d.level).color, 0.6), line_w)
+	draw_set_transform(Vector2.ZERO)
 
 	# Всплывающие цифры поверх пыли. Размер шрифта переводим в мировые единицы.
 	var font := ThemeDB.fallback_font

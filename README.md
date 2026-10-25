@@ -26,7 +26,9 @@ Idle-рогалик для телефона (горизонтальный реж
   на сетке, требования (`requires`, `requires_all`) и эффекты.
 - `scripts/data/game_data.gd` — уровни пыли, материалы, зоны, типы тела, стадии.
 - `scripts/world/player.gd` — скорость, радиус и сила притяжения.
-- `scripts/world/dust_field.gd` — плотность пыли, частота и размер скоплений.
+- `scripts/world/dust_field.gd` — плотность пыли, сгустки и нити, скопления, орбитальный дрейф.
+- `tools/gen_dust_atlas.py` — рисует текстуры пылинок в `assets/dust/dust_atlas.png`
+  (строки: силикаты, металл, углерод, лёд; по 4 формы). Запуск: `python3 tools/gen_dust_atlas.py`.
 
 ## Звезда
 - `shaders/young_star.gdshader` — то, что в игре: поверхность берётся из запечённой

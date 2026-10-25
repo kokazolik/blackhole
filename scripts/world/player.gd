@@ -26,7 +26,7 @@ func target_radius() -> float:
 
 
 func pull_radius() -> float:
-	return radius * 5.0 * Skills.stat("reach") * sqrt(Skills.stat("gravity"))
+	return radius * 7.0 * Skills.stat("reach") * sqrt(Skills.stat("gravity"))
 
 
 func pull_strength() -> float:
