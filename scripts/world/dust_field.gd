@@ -150,9 +150,9 @@ func _process(delta: float) -> void:
 			var dist := sqrt(dist_sq)
 			var dir := to / dist
 			if edible:
-				# Пыль не летит прямо, а закручивается по спирали, как в настоящем захвате.
+				# Тянет только наша гравитация, прямо к центру: чем ближе, тем сильнее.
 				var k := 0.35 + 0.65 * (1.0 - dist / pull_r)
-				d.vel += (dir + dir.orthogonal() * 0.6) * strength * k * delta
+				d.vel += dir * strength * k * delta
 			elif dist < pr + d.r + 0.7:
 				# Пыль выше открытого уровня отталкивается от поверхности.
 				d.pos = pp - dir * (pr + d.r + 0.7)

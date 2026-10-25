@@ -1,6 +1,6 @@
 class_name AbsorbFx
 extends Node2D
-## Анимация поглощения пыли: искры по спирали в пылинку, вспышка-кольцо на ней
+## Анимация поглощения пыли: искры падают прямо в пылинку, вспышка-кольцо на ней
 ## и всплывающее «+N» цветом материала. Рисуется только пока эффекты живы.
 
 const SPARK_TIME := 0.3
@@ -27,7 +27,6 @@ func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
 		for i in SPARKS_PER_ABSORB:
 			_sparks.append({
 				"off": offset + Vector2.from_angle(randf() * TAU) * player.radius * randf_range(0.5, 1.5),
-				"spin": randf_range(1.5, 3.0) * (1.0 if randf() < 0.5 else -1.0),
 				"color": color,
 				"t": -i * 0.03,
 			})
@@ -60,13 +59,13 @@ func _draw() -> void:
 	var pr := player.radius
 	var px := 1.0 / camera.zoom.x  # один пиксель экрана в мировых единицах
 
-	# Искры: летят по спирали к центру и гаснут.
+	# Искры: падают к центру и гаснут.
 	for s in _sparks:
 		if s.t < 0.0:
 			continue
 		var k: float = s.t / SPARK_TIME
 		var e := k * k
-		var off: Vector2 = (s.off as Vector2).rotated(s.spin * k) * (1.0 - e)
+		var off: Vector2 = (s.off as Vector2) * (1.0 - e)
 		var p := pp + off
 		var a := 1.0 - e
 		draw_circle(p, (1.2 + 1.5 * (1.0 - k)) * px, Color(s.color, 0.25 * a))
