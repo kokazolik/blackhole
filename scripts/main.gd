@@ -3,6 +3,7 @@ extends Node2D
 
 const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экране в начале, px
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
+const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
 
 var player: Player
 var dust_field: DustField
@@ -10,7 +11,9 @@ var camera: Camera2D
 var hud: Hud
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
+var pause_menu: PauseMenu
 var sky_events: Node2D
+var _intro_time := 0.0
 
 
 func _ready() -> void:
@@ -64,8 +67,66 @@ func _ready() -> void:
 	tree_screen = SkillTreeScreen.new()
 	ui.add_child(tree_screen)
 
+	pause_menu = PauseMenu.new()
+	ui.add_child(pause_menu)
+
 	hud.tree_requested.connect(_open_tree)
+	hud.menu_requested.connect(_open_pause)
 	tree_screen.closed.connect(hud.play_purchase_spark)
+
+	# Вход в игру: камера издалека приближается к пылинке, проступает подпись.
+	camera.zoom *= INTRO_ZOOM
+	_show_caption()
+	if not GameState.tutorial_done:
+		var tutorial := Tutorial.new()
+		tutorial.main = self
+		ui.add_child(tutorial)
+		ui.move_child(pause_menu, -1)
+
+
+func _show_caption() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	box.offset_left = -400
+	box.offset_right = 400
+	box.offset_top = 150
+	box.offset_bottom = 230
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.modulate.a = 0.0
+	$UI.add_child(box)
+	for line in [["Протопланетный диск молодой звезды", UiTheme.FONT_SERIF_BOLD, 30], ["4,6 миллиарда лет назад", UiTheme.FONT_SERIF_ITALIC, 22]]:
+		var l := Label.new()
+		l.text = line[0]
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.add_theme_font_override("font", line[1])
+		l.add_theme_font_size_override("font_size", line[2])
+		l.add_theme_color_override("font_color", Color(1.0, 0.86, 0.6))
+		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+		l.add_theme_constant_override("outline_size", 6)
+		box.add_child(l)
+	var tw := box.create_tween()
+	tw.tween_interval(0.6)
+	tw.tween_property(box, "modulate:a", 1.0, 1.2)
+	tw.tween_interval(2.4)
+	tw.tween_property(box, "modulate:a", 0.0, 1.2)
+	tw.tween_callback(box.queue_free)
+
+
+func _open_pause() -> void:
+	if player.dead or tree_screen.visible:
+		return
+	joystick.reset()
+	player.move_input = Vector2.ZERO
+	pause_menu.open()
+
+
+func _notification(what: int) -> void:
+	# Кнопка «назад» на Android: древо закрывается само, иначе открывается пауза.
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and not tree_screen.visible:
+		if pause_menu.visible:
+			pause_menu.close()
+		else:
+			_open_pause()
 
 
 func _show_burned_screen() -> void:
@@ -77,6 +138,8 @@ func _show_burned_screen() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
 		_open_tree()
+	elif event.pressed and not event.echo and event.physical_keycode == KEY_ESCAPE and not tree_screen.visible:
+		_open_pause()
 
 
 func _open_tree() -> void:
@@ -95,7 +158,10 @@ func _target_zoom() -> float:
 func _process(delta: float) -> void:
 	player.move_input = joystick.output
 	camera.position = player.position
-	var z := lerpf(camera.zoom.x, _target_zoom(), 1.0 - exp(-2.0 * delta))
+	# Приближение идёт в логарифмах: вход издалека выглядит равномерным полётом.
+	_intro_time += delta
+	var rate := lerpf(0.9, 2.0, clampf(_intro_time / 3.0, 0.0, 1.0))
+	var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
 	hud.set_temperature(player.temperature)

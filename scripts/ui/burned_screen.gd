@@ -1,6 +1,6 @@
 class_name BurnedScreen
 extends Control
-## Экран после гибели у звезды: что произошло и кнопка нового забега.
+## Экран после гибели у звезды: что произошло и кнопки нового забега или меню.
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -13,42 +13,61 @@ func _ready() -> void:
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(dim)
 
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiTheme.painted_panel(36))
+	panel.custom_minimum_size = Vector2(620, 0)
+	_center(panel)
+	add_child(panel)
 	var box := VBoxContainer.new()
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	box.custom_minimum_size = Vector2(560, 0)
-	box.position -= Vector2(280, 130)
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 14)
-	add_child(box)
+	panel.add_child(box)
 
 	var title := Label.new()
 	title.text = "Пылинка испарилась"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
 	title.add_theme_font_size_override("font_size", 40)
 	title.add_theme_color_override("font_color", Color(1.0, 0.72, 0.4))
 	box.add_child(title)
 
 	var text := Label.new()
-	text.text = "Огня в космосе нет: излучение звезды раскалило пылинку, вещество перешло в газ, и звёздный ветер унёс его прочь."
+	text.text = "Огня в космосе нет: излучение звезды раскалило пылинку, вещество перешло в газ, и звёздный ветер унёс его прочь. Но в диске ещё много пыли — путь можно начать снова."
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text.add_theme_font_size_override("font_size", 19)
-	text.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	text.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+	text.add_theme_font_size_override("font_size", 21)
+	text.add_theme_color_override("font_color", UiTheme.PARCHMENT)
 	box.add_child(text)
 
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 20)
+	box.add_child(row)
 	var again := Button.new()
 	again.text = "Начать заново"
-	again.custom_minimum_size = Vector2(260, 70)
-	again.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	again.focus_mode = Control.FOCUS_NONE
-	again.add_theme_font_size_override("font_size", 24)
+	again.custom_minimum_size = Vector2(250, 64)
+	UiTheme.paint_button(again, true, 24)
 	again.pressed.connect(_restart)
-	box.add_child(again)
+	row.add_child(again)
+	var menu := Button.new()
+	menu.text = "Главное меню"
+	menu.custom_minimum_size = Vector2(230, 64)
+	UiTheme.paint_button(menu, false, 24)
+	menu.pressed.connect(func():
+		GameState.reset_run()
+		Fader.go(Fader.MENU))
+	row.add_child(menu)
 
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.8)
 
 
 func _restart() -> void:
 	GameState.reset_run()
-	get_tree().reload_current_scene()
+	Fader.go(Fader.GAME)
+
+
+## Панель по центру экрана: растёт во все стороны под своё содержимое.
+func _center(panel: Control) -> void:
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH

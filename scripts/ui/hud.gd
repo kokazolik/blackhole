@@ -1,13 +1,13 @@
 class_name Hud
 extends Control
 ## Интерфейс поверх игры без подложек: валюта и масса слева, стадия и состав
-## сверху по центру, звёздная книга (древо) и сброс справа, указатель на звезду.
+## сверху по центру, звёздная книга (древо) и меню справа, указатель на звезду.
 
 signal tree_requested
+signal menu_requested
 
 const TOP_WIDTH := 380.0
 const BOOK_ICON := preload("res://assets/ui/book.png")
-const RESET_ICON := preload("res://assets/ui/reset.png")
 
 var star_screen_pos := Vector2.ZERO
 var _currency_label: Label
@@ -27,9 +27,7 @@ var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
 var _badge: Control
-var _reset_button: Button
-var _reset_armed := false
-var _reset_hint: Label
+var menu_button: Button
 var _last_currency := 0.0
 var _bump_tween: Tween
 var _time := 0.0
@@ -181,54 +179,38 @@ func _build() -> void:
 	_spark.draw.connect(_draw_spark)
 	_tree_button.add_child(_spark)
 
-	# Сброс прогресса: маленькая иконка, первое нажатие просит подтверждения.
-	_reset_button = Button.new()
-	_reset_button.icon = RESET_ICON
-	_reset_button.expand_icon = true
-	_reset_button.flat = true
-	_reset_button.modulate = Color(1, 1, 1, 0.45)
-	_reset_button.anchor_left = 1.0
-	_reset_button.anchor_right = 1.0
-	_reset_button.offset_left = -78
-	_reset_button.offset_right = -46
-	_reset_button.offset_top = 110
-	_reset_button.offset_bottom = 142
-	_reset_button.focus_mode = Control.FOCUS_NONE
+	# Меню паузы: три золотые черты под книгой.
+	menu_button = Button.new()
+	menu_button.flat = true
+	menu_button.anchor_left = 1.0
+	menu_button.anchor_right = 1.0
+	menu_button.offset_left = -86
+	menu_button.offset_right = -38
+	menu_button.offset_top = 108
+	menu_button.offset_bottom = 152
+	menu_button.focus_mode = Control.FOCUS_NONE
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-		_reset_button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
-	_reset_button.pressed.connect(_on_reset_pressed)
-	add_child(_reset_button)
-	_reset_hint = _label(14, Color(1.0, 0.5, 0.4), UiTheme.FONT_SEMI)
-	_reset_hint.text = "Нажми ещё раз для сброса"
-	_reset_hint.anchor_left = 1.0
-	_reset_hint.anchor_right = 1.0
-	_reset_hint.offset_left = -300
-	_reset_hint.offset_right = -84
-	_reset_hint.offset_top = 116
-	_reset_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_reset_hint.visible = false
-	add_child(_reset_hint)
+		menu_button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	menu_button.draw.connect(_draw_menu_icon)
+	menu_button.button_down.connect(func(): _press_anim(menu_button, 0.9))
+	menu_button.button_up.connect(func(): _press_anim(menu_button, 1.0))
+	menu_button.pressed.connect(func(): menu_requested.emit())
+	add_child(menu_button)
+
+
+func _draw_menu_icon() -> void:
+	var c := menu_button.size * 0.5
+	menu_button.draw_circle(c, 21.0, Color(0.05, 0.03, 0.1, 0.45))
+	menu_button.draw_arc(c, 21.0, 0.0, TAU, 48, Color(UiTheme.GOLD, 0.55), 1.5, true)
+	for i in 3:
+		var y := c.y + (i - 1) * 7.0
+		menu_button.draw_line(Vector2(c.x - 9, y), Vector2(c.x + 9, y), Color(UiTheme.GOLD, 0.9), 2.5, true)
 
 
 func _press_anim(button: Control, target: float) -> void:
 	button.pivot_offset = button.size * 0.5
 	var tw := create_tween()
 	tw.tween_property(button, "scale", Vector2.ONE * target, 0.08)
-
-
-func _on_reset_pressed() -> void:
-	if not _reset_armed:
-		_reset_armed = true
-		_reset_button.modulate = Color(1.0, 0.5, 0.4, 1.0)
-		_reset_hint.visible = true
-		await get_tree().create_timer(3.0).timeout
-		if is_instance_valid(_reset_button):
-			_reset_armed = false
-			_reset_button.modulate = Color(1, 1, 1, 0.45)
-			_reset_hint.visible = false
-		return
-	GameState.reset_run()
-	get_tree().reload_current_scene()
 
 
 func set_zone(zone: Dictionary) -> void:

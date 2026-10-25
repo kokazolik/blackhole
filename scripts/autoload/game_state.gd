@@ -16,6 +16,9 @@ var materials := {}
 var skill_levels := {}
 var player_position := Vector2(GameData.START_DISTANCE, 0.0)
 var burned_up := false  # пылинка испарилась у звезды: забег окончен, сохранять нечего
+# Не сбрасываются вместе с забегом: пролог и обучение достаточно пройти один раз.
+var prologue_seen := false
+var tutorial_done := false
 
 
 func _ready() -> void:
@@ -96,6 +99,8 @@ func save_game() -> void:
 		"materials": materials,
 		"skills": skill_levels,
 		"position": [player_position.x, player_position.y],
+		"prologue_seen": prologue_seen,
+		"tutorial_done": tutorial_done,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
@@ -111,6 +116,8 @@ func load_game() -> void:
 	var data = JSON.parse_string(file.get_as_text())
 	if typeof(data) != TYPE_DICTIONARY:
 		return
+	prologue_seen = bool(data.get("prologue_seen", false))
+	tutorial_done = bool(data.get("tutorial_done", false))
 	currency = float(data.get("currency", 0.0))
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	for key in data.get("materials", {}):
@@ -123,6 +130,11 @@ func load_game() -> void:
 		# Позиция внутри звезды (старые версии) — возвращаем на старт.
 		if player_position.length() < GameData.STAR_RADIUS * 1.05:
 			player_position = Vector2(GameData.START_DISTANCE, 0.0)
+
+
+## Есть ли что продолжать: хоть что-то собрано или куплено.
+func has_progress() -> bool:
+	return currency > 0.0 or mass > 1.0 or not skill_levels.is_empty()
 
 
 func reset_run() -> void:

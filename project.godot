@@ -5,7 +5,8 @@ config_version=5
 [application]
 
 config/name="От пылинки до чёрной дыры"
-run/main_scene="res://scenes/main.tscn"
+config/version="0.18"
+run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -13,6 +14,7 @@ config/icon="res://icon.svg"
 
 GameState="*res://scripts/autoload/game_state.gd"
 Skills="*res://scripts/autoload/skills.gd"
+Fader="*res://scripts/autoload/fader.gd"
 
 [display]
 

@@ -4,6 +4,14 @@ class_name UiTheme
 const FONT_TEXT := preload("res://assets/fonts/Inter-Medium.otf")
 const FONT_SEMI := preload("res://assets/fonts/Inter-SemiBold.otf")
 const FONT_NUMBERS := preload("res://assets/fonts/InterDisplay-Bold.otf")
+# Голос рассказчика и заголовки меню: книжная антиква.
+const FONT_SERIF := preload("res://assets/fonts/LiberationSerif-Regular.ttf")
+const FONT_SERIF_ITALIC := preload("res://assets/fonts/LiberationSerif-Italic.ttf")
+const FONT_SERIF_BOLD := preload("res://assets/fonts/LiberationSerif-Bold.ttf")
+const PANEL_TEX := preload("res://assets/ui/panel_painted.png")
+const BUTTON_DARK_TEX := preload("res://assets/ui/button_dark.png")
+const BUTTON_GOLD_TEX := preload("res://assets/ui/button_gold.png")
+const PARCHMENT := Color(0.96, 0.9, 0.78)  # цвет текста рассказа
 
 const GOLD := Color(1.0, 0.82, 0.42)
 const GOLD_DEEP := Color(0.92, 0.6, 0.18)
@@ -34,6 +42,44 @@ static func glass(radius := 18, bg := GLASS, border := GLASS_BORDER, margin := 1
 	s.shadow_color = Color(0, 0, 0, 0.25)
 	s.shadow_size = 6
 	return s
+
+
+## Расписная карточка с золотой рамкой (меню, рассказчик).
+static func painted_panel(margin := 26.0) -> StyleBoxTexture:
+	var s := StyleBoxTexture.new()
+	s.texture = PANEL_TEX
+	s.set_texture_margin_all(30)
+	s.set_content_margin_all(margin)
+	return s
+
+
+## Расписная кнопка: тёмная с золотым кантом или главная золотая.
+static func paint_button(b: Button, primary := false, font_size := 26) -> void:
+	var tex := BUTTON_GOLD_TEX if primary else BUTTON_DARK_TEX
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var s := StyleBoxTexture.new()
+		s.texture = tex
+		s.set_texture_margin_all(20)
+		s.content_margin_left = 28
+		s.content_margin_right = 28
+		s.content_margin_top = 10
+		s.content_margin_bottom = 10
+		match state:
+			"hover":
+				s.modulate_color = Color(1.15, 1.12, 1.05)
+			"pressed":
+				s.modulate_color = Color(0.85, 0.82, 0.78)
+			"disabled":
+				s.modulate_color = Color(0.6, 0.6, 0.65, 0.7)
+		b.add_theme_stylebox_override(state, s)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_override("font", FONT_SERIF_BOLD)
+	b.add_theme_font_size_override("font_size", font_size)
+	var text_col := Color(0.16, 0.09, 0.02) if primary else PARCHMENT
+	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(key, text_col)
+	b.add_theme_color_override("font_disabled_color", Color(0.6, 0.58, 0.55))
 
 
 static func pill(color: Color, radius := 16) -> StyleBoxFlat:

@@ -31,6 +31,7 @@ var _info_title: Label
 var _info_desc: RichTextLabel
 var _info_level: Label
 var _buy_button: Button
+var close_button: Button
 var _selected := ""
 var _press_pos := Vector2.ZERO
 var _dragging := false
@@ -144,6 +145,7 @@ func _build() -> void:
 	add_child(_currency_label)
 
 	var close_btn := Button.new()
+	close_button = close_btn
 	close_btn.text = "Назад"
 	close_btn.focus_mode = Control.FOCUS_NONE
 	close_btn.add_theme_font_size_override("font_size", 28)
