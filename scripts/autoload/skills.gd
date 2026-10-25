@@ -59,14 +59,16 @@ func is_maxed(id: String) -> bool:
 
 
 ## Узел доступен, когда выполнены требования: любой из родителей куплен,
-## либо все родители при "requires_all": true. Корневые узлы доступны всегда.
+## либо все родители при "requires_all": true. "requires_level" — какого уровня
+## должны быть родители (по умолчанию хватает первого). Корневые узлы доступны всегда.
 func is_unlocked(id: String) -> bool:
 	var reqs: Array = nodes[id].get("requires", [])
 	if reqs.is_empty():
 		return true
 	var need_all: bool = nodes[id].get("requires_all", false)
+	var need_level := int(nodes[id].get("requires_level", 1))
 	for req in reqs:
-		var owned := is_owned(req)
+		var owned := level(req) >= need_level
 		if need_all and not owned:
 			return false
 		if not need_all and owned:
