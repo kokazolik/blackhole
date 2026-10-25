@@ -15,6 +15,7 @@ var mass := 1.0
 var materials := {}
 var skill_levels := {}
 var player_position := Vector2(GameData.START_DISTANCE, 0.0)
+var burned_up := false  # пылинка испарилась у звезды: забег окончен, сохранять нечего
 
 
 func _ready() -> void:
@@ -42,6 +43,17 @@ func absorb(level: int, material: String, at: Vector2) -> void:
 	add_currency(gained)
 	mass_changed.emit(mass)
 	absorbed.emit(at, material, gained)
+
+
+## Испарение у звезды: масса уходит в газ, состав сохраняет пропорции.
+func ablate(amount: float) -> void:
+	if amount <= 0.0 or mass <= 0.0:
+		return
+	var k := maxf(mass - amount, 0.0) / mass
+	mass -= amount
+	for key in materials:
+		materials[key] *= k
+	mass_changed.emit(mass)
 
 
 func body_type() -> String:
@@ -75,6 +87,8 @@ func set_skill_level(id: String, level: int) -> void:
 
 
 func save_game() -> void:
+	if burned_up:
+		_reset_values()  # закрыли игру во время гибели: начнём заново
 	var data := {
 		"version": SAVE_VERSION,
 		"currency": currency,
@@ -98,7 +112,7 @@ func load_game() -> void:
 	if typeof(data) != TYPE_DICTIONARY:
 		return
 	currency = float(data.get("currency", 0.0))
-	mass = maxf(1.0, float(data.get("mass", 1.0)))
+	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	for key in data.get("materials", {}):
 		materials[key] = float(data.materials[key])
 	for key in data.get("skills", {}):
@@ -106,8 +120,8 @@ func load_game() -> void:
 	var pos = data.get("position", [])
 	if pos is Array and pos.size() == 2:
 		player_position = Vector2(pos[0], pos[1])
-		# Сохранение из версии с маленькой звездой: позиция оказалась бы внутри неё.
-		if player_position.length() < GameData.STAR_RADIUS * 1.5:
+		# Позиция внутри звезды (старые версии) — возвращаем на старт.
+		if player_position.length() < GameData.STAR_RADIUS * 1.05:
 			player_position = Vector2(GameData.START_DISTANCE, 0.0)
 
 
@@ -120,6 +134,7 @@ func reset_run() -> void:
 
 
 func _reset_values() -> void:
+	burned_up = false
 	currency = 0.0
 	mass = 1.0
 	skill_levels = {}

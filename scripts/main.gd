@@ -42,6 +42,10 @@ func _ready() -> void:
 	fx.player = player
 	fx.camera = camera
 	add_child(fx)
+	var burn_fx := BurnFx.new()
+	burn_fx.player = player
+	add_child(burn_fx)
+	burn_fx.finished.connect(_show_burned_screen)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -49,6 +53,7 @@ func _ready() -> void:
 	camera.reset_smoothing()
 
 	var ui := CanvasLayer.new()
+	ui.name = "UI"
 	ui.layer = 10
 	add_child(ui)
 	joystick = VirtualJoystick.new()
@@ -61,12 +66,20 @@ func _ready() -> void:
 	hud.tree_requested.connect(_open_tree)
 
 
+func _show_burned_screen() -> void:
+	joystick.visible = false
+	hud.visible = false
+	$UI.add_child(BurnedScreen.new())
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.pressed and not event.echo and event.physical_keycode == KEY_TAB:
 		_open_tree()
 
 
 func _open_tree() -> void:
+	if player.dead:
+		return
 	joystick.reset()
 	player.move_input = Vector2.ZERO
 	tree_screen.open()
@@ -83,3 +96,4 @@ func _process(delta: float) -> void:
 	var z := lerpf(camera.zoom.x, _target_zoom(), 1.0 - exp(-2.0 * delta))
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
+	hud.set_temperature(player.temperature)

@@ -334,7 +334,8 @@ func _spawn_single(pos: Vector2, off_screen := false) -> bool:
 			accepted = true
 			break
 		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
-	if not accepted or pos.length() < GameData.STAR_RADIUS * 1.35:
+	# Ближе к звезде пыль не выживает: там она испаряется, как и сама пылинка.
+	if not accepted or GameData.temperature_at(pos.length()) >= GameData.SUBLIMATION_TEMP:
 		return false
 	if off_screen and _hidden_rect.has_point(pos):
 		return false

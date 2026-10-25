@@ -19,6 +19,8 @@ var _stage_progress := 0.0
 var _material_labels := {}
 var _comp_bar: Control
 var _body_label: Label
+var _heat_label: Label
+var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
 var _badge: Control
@@ -115,6 +117,12 @@ func _build() -> void:
 	_body_desc = _label(12, UiTheme.TEXT_DIM)
 	body_row.add_child(_body_desc)
 
+	# Нагрев у звезды: видно только в горячей зоне.
+	_heat_label = _label(15, Color(1.0, 0.6, 0.3), UiTheme.FONT_SEMI)
+	_heat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_heat_label.visible = false
+	top.add_child(_heat_label)
+
 	# Справа сверху: кнопка древа — звёздная книга, без текста.
 	_tree_button = Button.new()
 	_tree_button.icon = BOOK_ICON
@@ -190,6 +198,25 @@ func _on_reset_pressed() -> void:
 		return
 	GameState.reset_run()
 	get_tree().reload_current_scene()
+
+
+func set_temperature(temp: float) -> void:
+	_heat_label.visible = temp > GameData.SPACE_TEMP + 100.0
+	if not _heat_label.visible:
+		return
+	var state := "нагрев"
+	if temp >= GameData.SUBLIMATION_TEMP:
+		state = "испарение! улетай от звезды"
+	elif temp >= GameData.GLOW_TEMP:
+		state = "раскаляется"
+	_heat_label.text = "%d K · %s" % [roundi(temp / 10.0) * 10, state]
+	var col := GameData.thermal_color(temp)
+	var base := Color(col.r, col.g, col.b) if col.a > 0.0 else Color(1.0, 0.75, 0.5)
+	if temp >= GameData.SUBLIMATION_TEMP:
+		# Мигает, пока пылинка тает.
+		_heat_time += get_process_delta_time()
+		base = base.lerp(Color.WHITE, 0.35 * (0.5 + 0.5 * sin(_heat_time * 8.0)))
+	_heat_label.add_theme_color_override("font_color", base)
 
 
 func _label(font_size: int, color: Color, font: Font = null) -> Label:

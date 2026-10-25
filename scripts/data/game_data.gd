@@ -12,6 +12,16 @@ const START_DISTANCE := 4300.0  # с края экрана видно сияни
 # игрок лишь чуть крупнее пыли 2-го уровня.
 const BASE_RADIUS := 2.1
 
+# Нагрев у звезды. Огня в космосе нет: гореть нечему и нечем (нет кислорода).
+# Пылинка нагревается излучением звезды, светится сама, как раскалённый металл,
+# а потом испаряется (сублимирует) прямо в газ, и звёздный ветер уносит пар.
+const HEAT_START := 1.75          # в радиусах звезды: ближе пылинка заметно греется
+const SPACE_TEMP := 300.0         # K, температура пылинки вдали от этой зоны
+const SURFACE_TEMP := 3000.0      # K, у самой поверхности звезды
+const GLOW_TEMP := 800.0          # K, точка Дрейпера: тело начинает светиться тёмно-красным
+const SUBLIMATION_TEMP := 1400.0  # K, силикатная пыль испаряется (поэтому у звезды пыли нет)
+const DEATH_MASS := 0.12          # меньше этого от пылинки ничего не осталось
+
 # Индекс в массиве = уровень пыли - 1.
 const DUST_LEVELS := [
 	{"radius": 1.9, "mass": 0.03, "value": 1.0, "spawn_weight": 1.0, "cluster_weight": 1.0, "color": Color(0.91, 0.93, 1.0)},
@@ -152,3 +162,25 @@ static func format_mass(v: float) -> String:
 	if v < 100.0:
 		return "%.2f" % v
 	return format_number(v)
+
+
+## Температура пылинки на расстоянии от звезды, K. Растёт к поверхности.
+static func temperature_at(distance: float) -> float:
+	var heat := clampf((HEAT_START - distance / STAR_RADIUS) / (HEAT_START - 1.0), 0.0, 1.0)
+	return SPACE_TEMP + (SURFACE_TEMP - SPACE_TEMP) * pow(heat, 1.3)
+
+
+## Цвет свечения нагретого тела (приближение чёрного тела): тёмно-красный при
+## ~800 K, оранжевый к 1400 K, жёлто-белый к 3000 K. Альфа — яркость свечения.
+static func thermal_color(temp: float) -> Color:
+	var t := clampf((temp - GLOW_TEMP) / (SURFACE_TEMP - GLOW_TEMP), 0.0, 1.0)
+	var c: Color
+	if t < 0.3:
+		c = Color(0.45, 0.04, 0.0).lerp(Color(0.95, 0.25, 0.03), t / 0.3)
+	elif t < 0.65:
+		c = Color(0.95, 0.25, 0.03).lerp(Color(1.0, 0.62, 0.22), (t - 0.3) / 0.35)
+	else:
+		c = Color(1.0, 0.62, 0.22).lerp(Color(1.0, 0.92, 0.75), (t - 0.65) / 0.35)
+	# Яркость свечения: от еле заметного тления до ослепительного у звезды.
+	c.a = 0.1 + 0.9 * pow(t, 0.8) if temp > GLOW_TEMP else 0.0
+	return c

@@ -1,6 +1,9 @@
 class_name Player
 extends Node2D
 ## Пылинка игрока: движение от стика/клавиатуры, рост от массы, поле притяжения.
+## У звезды нагревается, светится и испаряется; коснувшись поверхности — гибнет.
+
+signal burned_up
 
 const ACCEL_FACTOR := 3.0
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
@@ -8,6 +11,7 @@ const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
 const TRAIL_POINTS := 20
 const TRAIL_STEP := 0.035  # секунд между точками следа
+const BURN_RATE := 0.9     # скорость испарения при максимальном нагреве (с площади поверхности)
 
 var velocity := Vector2.ZERO        # собственное движение относительно окружающей пыли
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
@@ -21,6 +25,9 @@ var _trail: Array[Vector2] = []  # след в мировых координат
 var _trail_timer := 0.0
 var _glow_tex := _make_glow()
 var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
+var temperature := GameData.SPACE_TEMP
+var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
+var dead := false
 
 
 func _ready() -> void:
@@ -72,6 +79,10 @@ func max_speed() -> float:
 # Движение в _process (каждый кадр отрисовки), а не на шаге физики: иначе на
 # экранах с частотой выше 60 Гц пылинка двигается рывками.
 func _process(delta: float) -> void:
+	if dead:
+		# Облако пара продолжает лететь по орбите, камера — за ним.
+		position += GameData.orbit_velocity(position) * delta
+		return
 	var dir := move_input + _keyboard_input()
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
@@ -80,13 +91,9 @@ func _process(delta: float) -> void:
 	frame_velocity = GameData.orbit_velocity(position)
 	position += (velocity + frame_velocity) * delta
 
-	# Звезду не пересечь: выталкиваем на безопасное расстояние.
-	var min_dist := GameData.STAR_RADIUS * 1.3 + radius
-	var dist := position.length()
-	if dist < min_dist:
-		var n := position.normalized() if dist > 0.01 else Vector2.RIGHT
-		position = n * min_dist
-		velocity = velocity.slide(n)
+	_update_heat(delta)
+	if dead:
+		return
 
 	radius = lerpf(radius, target_radius(), 1.0 - exp(-4.0 * delta))
 	_spin += (SPIN_SPEED + velocity.length() / maxf(radius, 1.0) * 0.05) * delta
@@ -95,6 +102,30 @@ func _process(delta: float) -> void:
 	_ring_phase = fmod(_ring_phase + delta * 0.6, 1.0)
 	GameState.player_position = position
 	queue_redraw()
+
+
+## Нагрев излучением звезды. Выше температуры испарения вещество уходит в газ
+## с поверхности (поэтому быстрее при большой площади), тело тает и уменьшается.
+## Касание поверхности звезды или полное испарение — гибель.
+func _update_heat(delta: float) -> void:
+	var dist := position.length()
+	temperature = GameData.temperature_at(dist)
+	burn = clampf((temperature - GameData.SUBLIMATION_TEMP) / (GameData.SURFACE_TEMP - GameData.SUBLIMATION_TEMP), 0.0, 1.0)
+	if burn > 0.0:
+		GameState.ablate(BURN_RATE * pow(GameState.mass, 2.0 / 3.0) * burn * burn * delta)
+	if dist < GameData.STAR_RADIUS + radius * 0.5 or GameState.mass < GameData.DEATH_MASS:
+		die()
+
+
+func die() -> void:
+	if dead:
+		return
+	dead = true
+	velocity = Vector2.ZERO
+	GameState.burned_up = true
+	_grain.visible = false
+	queue_redraw()
+	burned_up.emit()
 
 
 ## След из пыльного шлейфа: виден только когда игрок движется относительно пыли.
@@ -140,6 +171,8 @@ func _update_color() -> void:
 
 
 func _draw() -> void:
+	if dead:
+		return
 	# Поле притяжения: слабое кольцо и бегущая волна внутрь.
 	var pr := pull_radius()
 	var ring := Color(0.55, 0.75, 1.0, 0.10 + 0.05 * (Skills.stat("gravity") - 1.0))
@@ -159,6 +192,11 @@ func _draw() -> void:
 	var r := radius * (1.0 + 0.12 * _pulse)
 	var gs := r * 5.2
 	draw_texture_rect(_glow_tex, Rect2(-gs * 0.5, -gs * 0.5, gs, gs), false, Color(body_color, 0.22 + 0.15 * _pulse))
+	var heat_col := GameData.thermal_color(temperature)
+	if heat_col.a > 0.0:
+		# Раскалённое тело светит вокруг себя своим цветом.
+		var hs := r * (4.0 + 5.0 * heat_col.a)
+		draw_texture_rect(_glow_tex, Rect2(-hs * 0.5, -hs * 0.5, hs, hs), false, Color(heat_col, 0.6 * heat_col.a))
 	_update_grain(r)
 
 
@@ -169,4 +207,7 @@ func _update_grain(r: float) -> void:
 	_grain.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
 	_grain.modulate = body_color.lightened(0.5 + 0.3 * _pulse)
 	var to_star := (-position).normalized().rotated(-_spin)
-	(_grain.material as ShaderMaterial).set_shader_parameter("light_dir", to_star)
+	var mat := _grain.material as ShaderMaterial
+	mat.set_shader_parameter("light_dir", to_star)
+	var heat_col := GameData.thermal_color(temperature)
+	mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
