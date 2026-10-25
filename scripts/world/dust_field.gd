@@ -1,60 +1,97 @@
 class_name DustField
 extends Node2D
-## Вся пыль вокруг игрока: появление, притяжение, поглощение и отрисовка одним проходом.
-##
-## Пыль хранится простыми объектами и рисуется в одном _draw, без отдельной ноды на
-## каждую пылинку: так на телефоне держатся сотни частиц.
+## Вся пыль вокруг игрока: появление, притяжение, поглощение и отрисовка.
 ##
 ## Распределение неравномерное, как в настоящем диске: сгустки и нити пыли
 ## (шум) поверх средней плотности, которая зависит от расстояния до звезды.
-## Вся пыль медленно сносится орбитальным сдвигом относительно игрока.
+##
+## Пыль летит по орбите вместе с игроком: в пределах экрана разница орбитальных
+## скоростей ничтожна, поэтому вблизи пыль неподвижна относительно игрока.
+## Движение по орбите видно по звёздам и туманностям фона.
+##
+## Оптимизация для телефона:
+## - вся пыль рисуется одним MultiMesh (один вызов отрисовки), вращение в шейдере;
+## - пыль хранится в координатах орбитальной системы отсчёта: общий полёт по орбите —
+##   это сдвиг одного узла, а не перезапись тысяч позиций;
+## - каждый кадр обрабатывается только пыль рядом с игроком, полный обход редкий.
 
-const BASE_TARGET_COUNT := 700
-const MAX_DENSITY_SCALE := 1.8  # потолок числа пылинок у снеговой линии, бережём телефон
+const BASE_TARGET_COUNT := 1200
+const MAX_DUST := 2600
+const MAX_DENSITY_SCALE := 1.8  # потолок числа пылинок у снеговой линии
 const SPAWN_ATTEMPTS := 4
 const ATLAS := preload("res://assets/dust/dust_atlas.png")
-const ATLAS_CELL := 64
+const DUST_SHADER := preload("res://shaders/dust.gdshader")
 const ATLAS_VARIANTS := 4
-const SPRITE_SCALE := 3.4  # видимое зерно занимает ~80% клетки атласа
+const QUAD_SCALE := 3.8  # сторона квадрата в радиусах пылинки, как QUAD в шейдере
 const MAX_SPAWN_PER_FRAME := 24
 const CLUSTER_INTERVAL := Vector2(7.0, 15.0)
 const CLUSTER_SIZE := Vector2i(15, 30)
 const DRAG := 0.55  # доля скорости, остающаяся через секунду
+const SCAN_INTERVAL := 0.2  # как часто полный обход: удаление дальней пыли и поиск ближней
+const REBASE_DISTANCE := 20000.0
 const POPUP_TIME := 0.9
 const POPUP_LIMIT := 40
+const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
 
 class Dust:
-	var pos: Vector2
+	var pos: Vector2  # в системе отсчёта, летящей по орбите (мир = pos + frame_offset)
 	var vel: Vector2
 	var level: int
 	var material: String
 	var r: float
-	var color: Color
-	var variant: int
-	var rot: float
-	var spin: float
+	var idx: int  # место в массиве и в буфере MultiMesh, -1 у удалённой
+	var cell: int
+	var phase: float
 
 var player: Player
 var camera: Camera2D
 var dust: Array[Dust] = []
+var frame_offset := Vector2.ZERO
 var rng := RandomNumberGenerator.new()
+var _near: Array[Dust] = []
+var _scan_timer := 0.0
 var _cluster_timer := 0.0
 var _filled := false
 var _popups: Array = []  # всплывающие «+N» цвета материала
 var _clumps := FastNoiseLite.new()
+var _mm_node := MultiMeshInstance2D.new()
+var _mm := MultiMesh.new()
+var _buf := PackedFloat32Array()
+var _dirty := false
 
 
 func _ready() -> void:
 	rng.randomize()
 	_cluster_timer = rng.randf_range(2.0, 5.0)
-	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	# Гребневый шум даёт вытянутые нити и сгустки с пустотами между ними.
 	_clumps.seed = 1337
 	_clumps.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_clumps.fractal_type = FastNoiseLite.FRACTAL_RIDGED
 	_clumps.fractal_octaves = 3
 	_clumps.frequency = 0.0022
+
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	_mm.transform_format = MultiMesh.TRANSFORM_2D
+	_mm.use_colors = true
+	_mm.use_custom_data = true
+	_mm.mesh = quad
+	_mm.instance_count = MAX_DUST
+	_mm.visible_instance_count = 0
+	_buf.resize(MAX_DUST * FLOATS)
+	var mat := ShaderMaterial.new()
+	mat.shader = DUST_SHADER
+	mat.set_shader_parameter("atlas", ATLAS)
+	var level_colors := PackedColorArray()
+	for data in GameData.DUST_LEVELS:
+		level_colors.append(data.color)
+	mat.set_shader_parameter("level_colors", level_colors)
+	_mm_node.multimesh = _mm
+	_mm_node.material = mat
+	add_child(_mm_node)
+
 	GameState.absorbed.connect(_on_absorbed)
+	GameState.skills_changed.connect(_rewrite_all)
 
 
 func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
@@ -69,32 +106,40 @@ func view_radius() -> float:
 	return size.length() * 0.5 / camera.zoom.x
 
 
+func world_pos(d: Dust) -> Vector2:
+	return d.pos + frame_offset
+
+
 func _physics_process(delta: float) -> void:
+	# Общий полёт по орбите: сдвигается только узел MultiMesh.
+	frame_offset += player.frame_velocity * delta
+	if frame_offset.length() > REBASE_DISTANCE:
+		_rebase()
+	_mm_node.position = frame_offset
+
 	var view_r := view_radius()
 	var active_r := view_r * 1.35
 	_maintain(view_r, active_r, delta)
 
-	var pp := player.position
+	var pp := player.position - frame_offset
+	_scan_timer -= delta
+	if _scan_timer <= 0.0:
+		_scan_timer = SCAN_INTERVAL
+		_scan(pp, active_r)
+
 	var pr := player.radius
 	var pull_r := player.pull_radius()
 	var strength := player.pull_strength()
 	var max_lvl := Skills.max_dust_level()
-	var despawn_sq := pow(active_r * 1.3, 2)
 	var drag := pow(DRAG, delta)
-	var player_orbit := GameData.orbit_speed(pp.length())
-
-	var i := dust.size() - 1
-	while i >= 0:
-		var d := dust[i]
+	for d in _near:
+		if d.idx < 0:
+			continue
 		var to := pp - d.pos
 		var dist_sq := to.length_squared()
-		if dist_sq > despawn_sq:
-			_remove_at(i)
-			i -= 1
-			continue
-		var dist := sqrt(dist_sq)
 		var edible := d.level <= max_lvl
-		if dist < pull_r and dist > 0.001:
+		if dist_sq < pull_r * pull_r and dist_sq > 0.000001:
+			var dist := sqrt(dist_sq)
 			var dir := to / dist
 			if edible:
 				var k := 0.35 + 0.65 * (1.0 - dist / pull_r)
@@ -103,36 +148,115 @@ func _physics_process(delta: float) -> void:
 				# Пыль выше открытого уровня отталкивается от поверхности.
 				d.pos = pp - dir * (pr + d.r + 2.0)
 				d.vel = -dir * maxf(player.velocity.length(), 20.0) * 0.8
-		d.vel *= drag
-		# Орбитальный сдвиг: ближе к звезде пыль обгоняет игрока, дальше — отстаёт.
-		var rd := d.pos.length()
-		var shear := GameData.orbit_speed(rd) - player_orbit
-		d.pos += (d.vel + Vector2(-d.pos.y, d.pos.x) / maxf(rd, 1.0) * shear) * delta
-		d.rot += d.spin * delta
+				_write_origin(d)
+		if d.vel.length_squared() > 0.0001:
+			d.vel *= drag
+			d.pos += d.vel * delta
+			_write_origin(d)
 		if edible and d.pos.distance_squared_to(pp) < pow(pr + d.r * 0.5, 2):
-			GameState.absorb(d.level, d.material, d.pos)
-			_remove_at(i)
+			GameState.absorb(d.level, d.material, world_pos(d))
+			_remove(d)
+
+	if _dirty:
+		_mm.buffer = _buf
+		_mm.visible_instance_count = dust.size()
+		_dirty = false
+
+	if not _popups.is_empty():
+		for popup in _popups:
+			popup.t += delta
+			popup.pos += player.frame_velocity * delta
+		_popups = _popups.filter(func(p): return p.t < POPUP_TIME)
+		queue_redraw()
+
+
+## Редкий полный обход: удаляет пыль далеко за экраном и собирает ближнюю,
+## которую стоит проверять каждый кадр.
+func _scan(pp: Vector2, active_r: float) -> void:
+	var despawn_sq := pow(active_r * 1.3, 2)
+	# Запас на то, сколько игрок пролетит до следующего обхода.
+	var near_r := player.pull_radius() + player.radius + player.max_speed() * SCAN_INTERVAL * 2.0 + 20.0
+	var near_sq := near_r * near_r
+	_near.clear()
+	var i := dust.size() - 1
+	while i >= 0:
+		var d := dust[i]
+		var dist_sq := d.pos.distance_squared_to(pp)
+		if dist_sq > despawn_sq:
+			_remove(d)
+		elif dist_sq < near_sq or d.vel.length_squared() > 0.0001:
+			_near.append(d)
 		i -= 1
-	for popup in _popups:
-		popup.t += delta
-	_popups = _popups.filter(func(pp_): return pp_.t < POPUP_TIME)
-	queue_redraw()
 
 
-func _remove_at(i: int) -> void:
-	dust[i] = dust.back()
+func _rebase() -> void:
+	for d in dust:
+		d.pos += frame_offset
+		_write_origin(d)
+	frame_offset = Vector2.ZERO
+
+
+func _remove(d: Dust) -> void:
+	var i := d.idx
+	var last := dust.back() as Dust
+	if last != d:
+		dust[i] = last
+		last.idx = i
+		var src := (dust.size() - 1) * FLOATS
+		var dst := i * FLOATS
+		for k in FLOATS:
+			_buf[dst + k] = _buf[src + k]
 	dust.pop_back()
+	d.idx = -1
+	_dirty = true
+
+
+func _write_origin(d: Dust) -> void:
+	var k := d.idx * FLOATS
+	_buf[k + 3] = d.pos.x
+	_buf[k + 7] = d.pos.y
+	_dirty = true
+
+
+func _write(d: Dust) -> void:
+	var k := d.idx * FLOATS
+	var s := d.r * QUAD_SCALE
+	var col: Color = GameData.MATERIALS[d.material].color
+	_buf[k] = s
+	_buf[k + 1] = 0.0
+	_buf[k + 2] = 0.0
+	_buf[k + 3] = d.pos.x
+	_buf[k + 4] = 0.0
+	_buf[k + 5] = s
+	_buf[k + 6] = 0.0
+	_buf[k + 7] = d.pos.y
+	_buf[k + 8] = col.r
+	_buf[k + 9] = col.g
+	_buf[k + 10] = col.b
+	_buf[k + 11] = 1.0
+	_buf[k + 12] = d.cell
+	_buf[k + 13] = 1.0 if d.level <= Skills.max_dust_level() else 0.4
+	_buf[k + 14] = d.level
+	_buf[k + 15] = d.phase
+	_dirty = true
+
+
+## После покупки навыка меняется, какая пыль доступна: обновляем всё.
+func _rewrite_all() -> void:
+	for d in dust:
+		_write(d)
 
 
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
-	var target := int(BASE_TARGET_COUNT * Skills.stat("spawn") * density_scale)
+	var target := mini(int(BASE_TARGET_COUNT * Skills.stat("spawn") * density_scale), MAX_DUST - CLUSTER_SIZE.y)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
 	if not _filled:
 		# Первое заполнение: пыль сразу по всему экрану, а не только за краем.
 		for n in target:
 			_spawn_single(_random_point(0.0, active_r))
 		_filled = true
+		_scan_timer = 0.0
 		return
 	while dust.size() < target and spawn_budget > 0:
 		_spawn_single(_random_point(view_r * 1.05, active_r))
@@ -145,6 +269,7 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 		_spawn_cluster(_random_point(view_r * 1.1, active_r * 0.95), view_r)
 
 
+## Случайная точка в мировых координатах в кольце вокруг игрока.
 func _random_point(min_r: float, max_r: float) -> Vector2:
 	var angle := rng.randf() * TAU
 	var r := sqrt(rng.randf_range(min_r * min_r, max_r * max_r))
@@ -172,22 +297,23 @@ func clump_density(pos: Vector2) -> float:
 func _spawn_single(pos: Vector2) -> void:
 	# Отбор: в пустотах точка чаще отбрасывается и ищется заново рядом.
 	var accepted := false
+	var player_density := maxf(GameData.radial_density(player.position.length()), 0.01)
 	for attempt in SPAWN_ATTEMPTS:
-		var falloff := GameData.radial_density(pos.length()) / maxf(GameData.radial_density(player.position.length()), 0.01)
+		var falloff := GameData.radial_density(pos.length()) / player_density
 		if rng.randf() < clump_density(pos) * clampf(falloff, 0.2, 2.0) * 0.6:
 			accepted = true
 			break
 		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
 	if not accepted:
 		return
-	if pos.length() < GameData.STAR_RADIUS * 1.5:
+	if pos.length() < GameData.STAR_RADIUS * 1.35:
 		return
 	var material: String = GameData.pick_weighted(GameData.material_weights(pos.length()), rng)
 	_add_dust(pos, _pick_level("spawn_weight"), material)
 
 
 func _spawn_cluster(center: Vector2, view_r: float) -> void:
-	if center.length() < GameData.STAR_RADIUS * 2.0:
+	if center.length() < GameData.STAR_RADIUS * 1.4:
 		return
 	var level := _pick_level("cluster_weight")
 	var material: String = GameData.pick_weighted(GameData.material_weights(center.length()), rng)
@@ -198,50 +324,31 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 		_add_dust(center + offset, level, material)
 
 
+## pos в мировых координатах.
 func _add_dust(pos: Vector2, level: int, material: String) -> void:
+	if dust.size() >= MAX_DUST:
+		return
 	var d := Dust.new()
-	d.pos = pos
-	d.vel = Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.0, 4.0)
+	d.pos = pos - frame_offset
+	d.vel = Vector2.ZERO
 	d.level = level
 	d.material = material
 	var data := GameData.level_data(level)
 	d.r = data.radius * rng.randf_range(0.85, 1.15)
-	d.color = GameData.MATERIALS[material].color
-	d.variant = rng.randi() % ATLAS_VARIANTS
-	d.rot = rng.randf() * TAU
-	d.spin = rng.randf_range(-0.6, 0.6)
+	d.cell = GameData.MATERIAL_ORDER.find(material) * ATLAS_VARIANTS + rng.randi() % ATLAS_VARIANTS
+	d.phase = rng.randf() * TAU
+	d.idx = dust.size()
 	dust.append(d)
+	_write(d)
 
 
+## Всплывающие цифры поверх пыли. Размер шрифта переводим в мировые единицы.
 func _draw() -> void:
-	var max_lvl := Skills.max_dust_level()
-	var view_sq := pow(view_radius() * 1.1, 2)
-	var pp := player.position
-	var line_w := 1.2 / camera.zoom.x
-	for d in dust:
-		if d.pos.distance_squared_to(pp) > view_sq:
-			continue
-		var edible := d.level <= max_lvl
-		draw_set_transform(d.pos, d.rot)
-		# Слабое свечение цвета материала, чтобы мелкие пылинки читались на тёмном фоне.
-		draw_circle(Vector2.ZERO, d.r * 1.9, Color(d.color, 0.09 if edible else 0.04))
-		var s := d.r * SPRITE_SCALE
-		var row := GameData.MATERIAL_ORDER.find(d.material)
-		var region := Rect2(d.variant * ATLAS_CELL, row * ATLAS_CELL, ATLAS_CELL, ATLAS_CELL)
-		draw_texture_rect_region(ATLAS, Rect2(-s * 0.5, -s * 0.5, s, s), region, Color(1, 1, 1, 1.0 if edible else 0.4))
-		if not edible:
-			# Недоступная пыль: тусклая, с обводкой цвета своего уровня.
-			draw_arc(Vector2.ZERO, d.r * 1.7 + line_w, 0.0, TAU, 16, Color(GameData.level_data(d.level).color, 0.5), line_w)
-		elif d.level > 1:
-			draw_arc(Vector2.ZERO, d.r * 1.7 + line_w, 0.0, TAU, 12, Color(GameData.level_data(d.level).color, 0.6), line_w)
-	draw_set_transform(Vector2.ZERO)
-
-	# Всплывающие цифры поверх пыли. Размер шрифта переводим в мировые единицы.
 	var font := ThemeDB.fallback_font
 	var font_size := maxi(4, roundi(22.0 / camera.zoom.x))
 	for popup in _popups:
 		var k: float = popup.t / POPUP_TIME
-		var pos: Vector2 = popup.pos + Vector2(0, -30.0 * k / camera.zoom.x * 2.0)
+		var pos: Vector2 = popup.pos + Vector2(0, -60.0 * k / camera.zoom.x)
 		var w := font.get_string_size(popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		draw_string_outline(font, pos - Vector2(w * 0.5, 0), popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, maxi(1, font_size / 6), Color(0, 0, 0, 0.7 * (1.0 - k)))
 		draw_string(font, pos - Vector2(w * 0.5, 0), popup.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(popup.color, 1.0 - k))

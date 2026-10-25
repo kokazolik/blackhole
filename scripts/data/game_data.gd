@@ -2,10 +2,10 @@ class_name GameData
 ## Статичные игровые данные: уровни пыли, материалы, зоны диска, стадии роста.
 
 # Мир: звезда в центре (0, 0), расстояния в пикселях мира.
-const STAR_RADIUS := 180.0
-const INNER_ZONE := 900.0   # ближе к звезде: металл и силикаты
-const SNOW_LINE := 1900.0   # дальше: лёд и углерод
-const START_DISTANCE := 1300.0
+const STAR_RADIUS := 2000.0  # звезда огромная по сравнению с пылинками
+const INNER_ZONE := 3600.0  # ближе к звезде: металл и силикаты
+const SNOW_LINE := 6800.0   # дальше: лёд и углерод
+const START_DISTANCE := 4300.0  # с края экрана видно сияние звезды
 
 # Радиус пылинки игрока при массе 1. Радиус растёт как кубический корень массы.
 const BASE_RADIUS := 6.0
@@ -28,7 +28,7 @@ const MATERIAL_ORDER := ["silicate", "metal", "carbon", "ice"]  # совпада
 # Плотность пыли в диске. Поверхностная плотность падает как 1/r,
 # а у снеговой линии пыль копится (намерзает лёд), там её в несколько раз больше.
 const SNOW_LINE_BOOST := 2.0
-const SNOW_LINE_WIDTH := 220.0
+const SNOW_LINE_WIDTH := 700.0
 # Орбитальная скорость на стартовом расстоянии; вблизи звезды быстрее, как v ~ 1/sqrt(r).
 const ORBIT_SPEED_AT_START := 60.0
 
@@ -118,6 +118,14 @@ static func radial_density(distance: float) -> float:
 ## Орбитальная скорость (по Кеплеру) на расстоянии от звезды.
 static func orbit_speed(distance: float) -> float:
 	return ORBIT_SPEED_AT_START * sqrt(START_DISTANCE / maxf(distance, STAR_RADIUS))
+
+
+## Орбитальная скорость вокруг звезды (на экране — по часовой стрелке).
+static func orbit_velocity(pos: Vector2) -> Vector2:
+	var r := pos.length()
+	if r < 0.001:
+		return Vector2.ZERO
+	return Vector2(-pos.y, pos.x) / r * orbit_speed(r)
 
 
 static func stage_index(mass: float) -> int:

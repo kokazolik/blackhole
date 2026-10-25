@@ -4,8 +4,10 @@ shader_type canvas_item;
 // которую делает tools/bake_star.tscn из young_star_procedural.gdshader.
 // Вращение, кипение, пульсация вспышек и лучи считаются на лету дешёвыми
 // выборками из бесшовной текстуры шума, протуберанцы — шумом в узком кольце у края.
+// Дальнее свечение короны рисуется отдельной дешёвой текстурой (star.gd), поэтому
+// этот квад небольшой: диск, протуберанцы и начало лучей.
 
-uniform float extent = 4.0;            // во сколько раз квад больше радиуса звезды
+uniform float extent = 1.8;            // во сколько раз квад больше радиуса звезды
 uniform float rotation_speed = 0.02;
 uniform float prominence_amount = 0.8;
 uniform float ray_amount = 0.6;
@@ -44,10 +46,11 @@ float noise(vec3 x) {
 				   mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 
-float fbm(vec3 p) {
+// Три октавы вместо пяти: в узком кольце разницы не видно, а телефону легче.
+float fbm(vec3 p, int octaves) {
 	float v = 0.0;
 	float a = 0.5;
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < octaves; i++) {
 		v += a * noise(p);
 		p = p * 2.02 + vec3(1.7, 9.2, 3.1);
 		a *= 0.5;
@@ -102,8 +105,8 @@ void fragment() {
 	float edge = max(r - 1.0, 0.0);
 	float ang = atan(p.y, p.x) / TAU + 0.5;  // 0..1 по кругу, шум бесшовный
 
-	// Корона: мягкое свечение вокруг.
-	float glow = exp(-edge * 3.0) * 0.85 + exp(-edge * 0.9) * 0.25;
+	// Корона: ближнее свечение (дальнее — отдельной текстурой).
+	float glow = exp(-edge * 3.0) * 0.85;
 
 	// Лучи: тонкие радиальные полосы разной длины.
 	float ray_noise = nz(vec2(ang * 12.0, 0.13 + TIME * 0.004));
@@ -116,14 +119,14 @@ void fragment() {
 	if (edge > 0.0 && edge < 0.6) {
 		vec2 dir = normalize(p);
 		vec3 q = vec3(dir * 3.0, edge * 2.5 - TIME * 0.06);
-		vec3 warp = vec3(fbm(q + vec3(0.0, 0.0, TIME * 0.05)), fbm(q + vec3(5.2, 1.3, 0.0)), 0.0);
-		float strands = fbm(vec3(dir * 5.0, edge * 6.0) + warp * 3.5);
+		vec3 warp = vec3(fbm(q + vec3(0.0, 0.0, TIME * 0.05), 2), fbm(q + vec3(5.2, 1.3, 0.0), 2), 0.0);
+		float strands = fbm(vec3(dir * 5.0, edge * 6.0) + warp * 3.5, 3);
 		float filament = pow(1.0 - abs(sin(strands * 7.0)), 4.0);
 		float region = smoothstep(0.3, 0.6, noise(vec3(dir * 2.5, 9.0 + TIME * 0.02)));
 		prom = filament * region * exp(-edge * 8.0) * smoothstep(0.0, 0.03, edge) * prominence_amount;
 	}
 
-	float corona = (glow + ray + prom) * smoothstep(extent, extent * 0.55, r);
+	float corona = (glow + ray + prom) * smoothstep(extent, extent * 0.7, r);
 	vec3 corona_col = mix(color_mid, color_bright, clamp(prom + exp(-edge * 6.0) * 0.6, 0.0, 1.0));
 	vec4 outside = vec4(corona_col * (1.0 + prom * 0.6), clamp(corona, 0.0, 1.0));
 

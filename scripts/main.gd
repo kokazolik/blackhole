@@ -1,7 +1,7 @@
 extends Node2D
 ## Сборка сцены: фон, звезда, пыль, игрок, камера и интерфейс.
 
-const SCREEN_RADIUS_AT_START := 8.0   # радиус пылинки на экране в начале, px
+const SCREEN_RADIUS_AT_START := 5.0   # радиус пылинки на экране в начале, px
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 
 var player: Player

@@ -106,6 +106,9 @@ func load_game() -> void:
 	var pos = data.get("position", [])
 	if pos is Array and pos.size() == 2:
 		player_position = Vector2(pos[0], pos[1])
+		# Сохранение из версии с маленькой звездой: позиция оказалась бы внутри неё.
+		if player_position.length() < GameData.STAR_RADIUS * 1.5:
+			player_position = Vector2(GameData.START_DISTANCE, 0.0)
 
 
 func reset_run() -> void:

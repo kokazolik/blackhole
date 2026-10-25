@@ -1,31 +1,26 @@
-extends Node2D
-## Далёкие звёзды на фоне с лёгким параллаксом.
+extends ColorRect
+## Фон космоса: туманности и звёзды в несколько слоёв параллакса (shaders/space_bg.gdshader).
+##
+## Игрок и пыль вокруг летят по орбите вместе, поэтому полёт читается по фону:
+## ближние звёзды сдвигаются заметнее дальних, туманности почти неподвижны.
 
-const STAR_COUNT := 220
-const PARALLAX := 0.03
+const SHADER := preload("res://shaders/space_bg.gdshader")
 
 var camera: Camera2D
-var _stars: Array = []
+var _mat := ShaderMaterial.new()
 
 
 func _ready() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	for i in STAR_COUNT:
-		_stars.append({
-			"p": Vector2(rng.randf(), rng.randf()),
-			"r": rng.randf_range(0.5, 1.3),
-			"a": rng.randf_range(0.06, 0.3),
-		})
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mat.shader = SHADER
+	_mat.set_shader_parameter("nebula", preload("res://assets/space/nebula.png"))
+	_mat.set_shader_parameter("stars_far", preload("res://assets/space/stars_far.png"))
+	_mat.set_shader_parameter("stars_near", preload("res://assets/space/stars_near.png"))
+	material = _mat
 
 
 func _process(_delta: float) -> void:
-	queue_redraw()
-
-
-func _draw() -> void:
-	var size := get_viewport_rect().size
-	var shift := camera.global_position * PARALLAX if camera else Vector2.ZERO
-	for s in _stars:
-		var p := Vector2(fposmod(s.p.x * size.x - shift.x, size.x), fposmod(s.p.y * size.y - shift.y, size.y))
-		draw_circle(p, s.r, Color(0.85, 0.9, 1.0, s.a))
+	_mat.set_shader_parameter("view_size", size)
+	if camera:
+		_mat.set_shader_parameter("offset", camera.get_screen_center_position() * camera.zoom.x)

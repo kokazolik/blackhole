@@ -14,6 +14,7 @@ var _comp_bar: Control
 var _body_label: Label
 var _tree_button: Button
 var _badge: Label
+var _drawn_star_pos := Vector2(INF, INF)
 
 
 func _ready() -> void:
@@ -134,7 +135,10 @@ func _draw_composition() -> void:
 
 
 func _process(_delta: float) -> void:
-	queue_redraw()
+	# Перерисовываем стрелку только когда она сдвинулась.
+	if star_screen_pos.distance_squared_to(_drawn_star_pos) > 1.0:
+		_drawn_star_pos = star_screen_pos
+		queue_redraw()
 
 
 ## Стрелка у края экрана в сторону звезды, пока её не видно.
