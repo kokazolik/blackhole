@@ -146,15 +146,14 @@ func _build() -> void:
 
 	var close_btn := Button.new()
 	close_button = close_btn
-	close_btn.text = "Назад"
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.add_theme_font_size_override("font_size", 28)
+	close_btn.text = "Закрыть книгу"
+	UiTheme.paint_button(close_btn, false, 22)
 	close_btn.anchor_left = 1.0
 	close_btn.anchor_right = 1.0
-	close_btn.offset_left = -194
+	close_btn.offset_left = -INFO_WIDTH - 24
 	close_btn.offset_right = -24
-	close_btn.offset_top = 20
-	close_btn.offset_bottom = 96
+	close_btn.offset_top = 24
+	close_btn.offset_bottom = 90
 	close_btn.pressed.connect(close)
 	add_child(close_btn)
 
@@ -166,30 +165,46 @@ func _build() -> void:
 	_info.anchor_bottom = 1.0
 	_info.offset_left = -INFO_WIDTH - 24
 	_info.offset_right = -24
-	_info.offset_top = 116
+	_info.offset_top = 104
 	_info.offset_bottom = -24
-	var panel_style := UiTheme.glass(22, Color(0.05, 0.035, 0.1, 0.9), Color(1.0, 0.82, 0.45, 0.45), 20.0)
-	panel_style.set_border_width_all(2)
-	_info.add_theme_stylebox_override("panel", panel_style)
+	_info.add_theme_stylebox_override("panel", UiTheme.painted_panel(28))
 	add_child(_info)
+
+	# Заголовок книги по центру над древом.
+	var heading := Label.new()
+	heading.text = "Книга звёздных знаний"
+	heading.anchor_right = 1.0
+	heading.offset_right = -INFO_WIDTH - 48
+	heading.offset_top = 22
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+	heading.add_theme_font_size_override("font_size", 32)
+	heading.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
+	heading.add_theme_color_override("font_outline_color", Color(0.1, 0.04, 0.0, 0.8))
+	heading.add_theme_constant_override("outline_size", 6)
+	add_child(heading)
 
 	var text_box := VBoxContainer.new()
 	text_box.add_theme_constant_override("separation", 12)
 	_info.add_child(text_box)
 
 	_info_title = Label.new()
-	_info_title.add_theme_font_size_override("font_size", 30)
-	_info_title.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	_info_title.add_theme_font_size_override("font_size", 32)
+	_info_title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
 	text_box.add_child(_info_title)
 	_info_desc = RichTextLabel.new()
 	_info_desc.bbcode_enabled = true
 	_info_desc.fit_content = true
 	_info_desc.scroll_active = false
-	_info_desc.add_theme_font_size_override("normal_font_size", 20)
+	_info_desc.add_theme_font_override("normal_font", UiTheme.FONT_SERIF)
+	_info_desc.add_theme_font_size_override("normal_font_size", 21)
+	_info_desc.add_theme_color_override("default_color", UiTheme.PARCHMENT)
 	text_box.add_child(_info_desc)
 	_info_level = Label.new()
-	_info_level.add_theme_font_size_override("font_size", 18)
-	_info_level.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	_info_level.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+	_info_level.add_theme_font_size_override("font_size", 19)
+	_info_level.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.6))
 	text_box.add_child(_info_level)
 
 	var spacer := Control.new()
@@ -197,26 +212,10 @@ func _build() -> void:
 	text_box.add_child(spacer)
 
 	_buy_button = Button.new()
-	_buy_button.custom_minimum_size = Vector2(0, 76)
-	_buy_button.add_theme_stylebox_override("normal", _button_style(UiTheme.GOLD_DEEP, UiTheme.GOLD))
-	_buy_button.add_theme_stylebox_override("hover", _button_style(Color(1.0, 0.7, 0.28), Color(1.0, 0.9, 0.6)))
-	_buy_button.add_theme_stylebox_override("pressed", _button_style(Color(0.78, 0.5, 0.14), UiTheme.GOLD))
-	_buy_button.add_theme_stylebox_override("disabled", _button_style(Color(0.12, 0.14, 0.22, 0.9), Color(1, 1, 1, 0.08)))
-	_buy_button.add_theme_color_override("font_color", Color(0.08, 0.06, 0.02))
-	_buy_button.add_theme_color_override("font_hover_color", Color(0.08, 0.06, 0.02))
-	_buy_button.add_theme_color_override("font_pressed_color", Color(0.08, 0.06, 0.02))
-	_buy_button.add_theme_color_override("font_disabled_color", Color(0.55, 0.57, 0.65))
-	_buy_button.focus_mode = Control.FOCUS_NONE
-	_buy_button.add_theme_font_size_override("font_size", 26)
-	_buy_button.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	_buy_button.custom_minimum_size = Vector2(0, 70)
+	UiTheme.paint_button(_buy_button, true, 24)
 	_buy_button.pressed.connect(_on_buy)
 	text_box.add_child(_buy_button)
-
-
-func _button_style(color: Color, border: Color) -> StyleBoxFlat:
-	var style := UiTheme.glass(18, color, border, 12.0)
-	style.set_border_width_all(2)
-	return style
 
 
 func _node_pos(id: String) -> Vector2:
@@ -244,13 +243,14 @@ func _refresh() -> void:
 		_info_title.text = node.title
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
-		_info_level.text = "Уровень %d / %d" % [Skills.level(_selected), Skills.max_level(_selected)]
+		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		if Skills.is_maxed(_selected):
 			_buy_button.text = "Изучено"
 			_buy_button.disabled = true
 		else:
-			_buy_button.text = "✦ " + GameData.format_number(Skills.cost(_selected))
+			var price := GameData.format_number(Skills.cost(_selected))
 			_buy_button.disabled = not Skills.can_buy(_selected)
+			_buy_button.text = ("Нужно " if _buy_button.disabled else "Изучить за ") + price
 	_canvas.queue_redraw()
 
 
@@ -398,12 +398,12 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 			else:
 				_canvas.draw_arc(dp, 2.8, 0.0, TAU, 12, Color(col, 0.5), 1.0, true)
 
-	var font: Font = UiTheme.FONT_SEMI
+	var font: Font = UiTheme.FONT_SERIF_BOLD
 	var title: String = Skills.nodes[id].title
-	var w := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
+	var w := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21).x
 	var tp := Vector2(-w * 0.5, r + 30.0)
-	_canvas.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, 5, Color(0.03, 0.02, 0.06, 0.85))
-	_canvas.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(col.lightened(0.2), 0.95))
+	_canvas.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, 5, Color(0.03, 0.02, 0.06, 0.85))
+	_canvas.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(col.lightened(0.2), 0.95))
 	_canvas.draw_set_transform(Vector2.ZERO)
 
 

@@ -94,6 +94,7 @@ func _show_caption() -> void:
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.modulate.a = 0.0
 	$UI.add_child(box)
+	$UI.move_child(box, hud.get_index() + 1)  # под книгой и меню, не поверх них
 	for line in [["Протопланетный диск молодой звезды", UiTheme.FONT_SERIF_BOLD, 30], ["4,6 миллиарда лет назад", UiTheme.FONT_SERIF_ITALIC, 22]]:
 		var l := Label.new()
 		l.text = line[0]
