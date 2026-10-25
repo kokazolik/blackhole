@@ -14,6 +14,8 @@ var sky_events: Node2D
 
 
 func _ready() -> void:
+	# Камера двигается после игрока в том же кадре, иначе отстаёт на кадр и дёргается.
+	process_priority = 100
 	camera = Camera2D.new()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0

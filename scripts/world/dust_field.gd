@@ -29,6 +29,7 @@ const MAX_SPAWN_PER_FRAME := 24
 const CLUSTER_CHECK := 5.0    # раз в столько секунд бросаем шанс на скопление
 const CLUSTER_CHANCE := 0.03  # скопление — редкая находка
 const CLUSTER_SIZE := Vector2i(15, 30)
+const SPAWN_MARGIN := 24.0  # насколько за краем экрана появляется пыль, в пикселях
 const DRAG := 0.55  # доля скорости, остающаяся через секунду
 const SCAN_INTERVAL := 0.2  # как часто полный обход: удаление дальней пыли и поиск ближней
 const REBASE_DISTANCE := 20000.0
@@ -50,6 +51,7 @@ var dust: Array[Dust] = []
 var frame_offset := Vector2.ZERO
 var rng := RandomNumberGenerator.new()
 var _near: Array[Dust] = []
+var _hidden_rect := Rect2()
 var _active_count := 0  # пыль в активной области на последнем обходе плюс появившаяся после
 var _scan_timer := 0.0
 var _cluster_timer := 0.0
@@ -83,6 +85,7 @@ func _ready() -> void:
 	_mm.use_custom_data = true
 	_mm.mesh = quad
 	_mm.instance_count = MAX_DUST
+	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
 	_buf.resize(MAX_DUST * FLOATS)
 	var mat := ShaderMaterial.new()
@@ -108,7 +111,9 @@ func world_pos(d: Dust) -> Vector2:
 	return d.pos + frame_offset
 
 
-func _physics_process(delta: float) -> void:
+# Движение считается каждый кадр отрисовки, а не на шаге физики: на экранах
+# 90–120 Гц и при неровных кадрах так нет подёргиваний.
+func _process(delta: float) -> void:
 	# Общий полёт по орбите: сдвигается только узел MultiMesh.
 	frame_offset += player.frame_velocity * delta
 	if frame_offset.length() > REBASE_DISTANCE:
@@ -258,12 +263,12 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 		_filled = true
 		_scan_timer = 0.0
 		return
-	# Обычно новая пыль появляется за краем экрана. Если её резко стало нужно больше
-	# (после покупки навыка), досыпаем по всей области, иначе за краем экрана
-	# скапливается плотное кольцо, которое выглядит как огромный сгусток.
-	var min_r := 0.0 if _active_count < target * 0.7 else view_r * 1.05
+	# Новая пыль появляется только чуть за краем экрана: на глазах игрока ничего
+	# не возникает из пустоты. Условия отбора (расстояние до звезды, сгустки) те же.
+	_hidden_rect = _screen_rect_world().grow(SPAWN_MARGIN / camera.zoom.x)
+	var min_r := minf(_hidden_rect.size.x, _hidden_rect.size.y) * 0.5
 	while _active_count < target and spawn_budget > 0:
-		if _spawn_single(_random_point(min_r, active_r)):
+		if _spawn_single(_random_point(min_r, active_r), true):
 			_active_count += 1
 		spawn_budget -= 1
 
@@ -273,7 +278,7 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	if _cluster_timer <= 0.0:
 		_cluster_timer = CLUSTER_CHECK
 		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster"):
-			_spawn_cluster(_random_point(view_r * 1.1, active_r * 0.95), view_r)
+			_spawn_cluster(_random_point(view_r * 1.15, active_r * 0.95), view_r)
 
 
 ## Случайная точка в мировых координатах в кольце вокруг игрока.
@@ -308,7 +313,13 @@ func clump_density(pos: Vector2) -> float:
 	return lerpf(calm, filament * 1.6, rare)
 
 
-func _spawn_single(pos: Vector2) -> bool:
+## Видимая часть мира: экран вокруг центра камеры.
+func _screen_rect_world() -> Rect2:
+	var half := get_viewport_rect().size * 0.5 / camera.zoom.x
+	return Rect2(camera.get_screen_center_position() - half, half * 2.0)
+
+
+func _spawn_single(pos: Vector2, off_screen := false) -> bool:
 	# Отбор: в пустотах точка чаще отбрасывается и ищется заново рядом.
 	var accepted := false
 	var player_density := maxf(GameData.radial_density(player.position.length()), 0.01)
@@ -319,6 +330,8 @@ func _spawn_single(pos: Vector2) -> bool:
 			break
 		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
 	if not accepted or pos.length() < GameData.STAR_RADIUS * 1.35:
+		return false
+	if off_screen and _hidden_rect.has_point(pos):
 		return false
 	var material: String = GameData.pick_weighted(GameData.material_weights(pos.length()), rng)
 	return _add_dust(pos, _pick_level("spawn_weight"), material)
@@ -332,8 +345,10 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 	var spread := view_r * 0.1
 	var size_k := clampf(Skills.stat("spawn"), 0.3, 1.0)
 	for n in roundi(rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y) * size_k):
-		var offset := Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread))
-		_add_dust(center + offset, level, material)
+		var pos := center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread))
+		# Части скопления, попавшие на экран, не появляются из воздуха.
+		if not _screen_rect_world().has_point(pos):
+			_add_dust(pos, level, material)
 
 
 ## pos в мировых координатах.

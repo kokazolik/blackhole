@@ -63,7 +63,9 @@ func max_speed() -> float:
 	return 28.0 * pow(radius, 0.75) * Skills.stat("speed") * GameState.body_bonus("speed")
 
 
-func _physics_process(delta: float) -> void:
+# Движение в _process (каждый кадр отрисовки), а не на шаге физики: иначе на
+# экранах с частотой выше 60 Гц пылинка двигается рывками.
+func _process(delta: float) -> void:
 	var dir := move_input + _keyboard_input()
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
