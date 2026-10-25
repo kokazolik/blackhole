@@ -1,0 +1,91 @@
+{
+	"nodes": [
+		{
+			"id": "start",
+			"title": "Начало",
+			"desc": "Увеличивает силу притяжения вещества. Открывает способность поглощать пыль [color=#ffb347]уровня 2[/color].",
+			"cost": 10,
+			"max_level": 1,
+			"pos": [0, 0],
+			"requires": [],
+			"effects": {"gravity": 0.5, "dust_level": 2}
+		},
+		{
+			"id": "gravity_1",
+			"title": "Сгущение",
+			"desc": "Сила притяжения +25% за уровень.",
+			"cost": 20,
+			"cost_growth": 1.6,
+			"max_level": 5,
+			"pos": [-1, -1],
+			"requires": ["start"],
+			"effects": {"gravity": 0.25}
+		},
+		{
+			"id": "reach_1",
+			"title": "Пылевой шлейф",
+			"desc": "Радиус притяжения +15% за уровень.",
+			"cost": 20,
+			"cost_growth": 1.6,
+			"max_level": 5,
+			"pos": [1, -1],
+			"requires": ["start"],
+			"effects": {"reach": 0.15}
+		},
+		{
+			"id": "drift_1",
+			"title": "Дрейф",
+			"desc": "Скорость движения +10% за уровень.",
+			"cost": 15,
+			"cost_growth": 1.5,
+			"max_level": 5,
+			"pos": [-1, 1],
+			"requires": ["start"],
+			"effects": {"speed": 0.1}
+		},
+		{
+			"id": "density_1",
+			"title": "Плотное облако",
+			"desc": "Вокруг появляется на 20% больше пыли за уровень.",
+			"cost": 25,
+			"cost_growth": 1.7,
+			"max_level": 5,
+			"pos": [1, 1],
+			"requires": ["start"],
+			"effects": {"spawn": 0.2}
+		},
+		{
+			"id": "value_1",
+			"title": "Кристаллизация",
+			"desc": "Вся пыль даёт на 10% больше валюты за уровень.",
+			"cost": 40,
+			"cost_growth": 1.8,
+			"max_level": 5,
+			"pos": [2, 0],
+			"requires": ["reach_1", "density_1"],
+			"effects": {"value": 0.1}
+		},
+		{
+			"id": "cluster_1",
+			"title": "Скопления",
+			"desc": "Скопления пыли встречаются на 30% чаще за уровень.",
+			"cost": 40,
+			"cost_growth": 1.8,
+			"max_level": 3,
+			"pos": [-2, 0],
+			"requires": ["gravity_1", "drift_1"],
+			"effects": {"cluster": 0.3}
+		},
+		{
+			"id": "dust_3",
+			"title": "Слипание",
+			"desc": "Пылинки сцепляются прочнее. Открывает способность поглощать пыль [color=#9b8cff]уровня 3[/color].",
+			"cost": 150,
+			"max_level": 1,
+			"pos": [0, -2],
+			"requires": ["gravity_1", "reach_1"],
+			"requires_all": true,
+			"effects": {"dust_level": 3}
+		}
+	]
+}
