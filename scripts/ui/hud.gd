@@ -1,11 +1,13 @@
 class_name Hud
 extends Control
-## Интерфейс поверх игры: карточка с валютой, массой, стадией и составом,
-## кнопки древа и сброса, указатель на звезду.
+## Интерфейс поверх игры без подложек: валюта и масса слева, стадия и состав
+## сверху по центру, звёздная книга (древо) и сброс справа, указатель на звезду.
 
 signal tree_requested
 
-const CARD_WIDTH := 340.0
+const TOP_WIDTH := 380.0
+const BOOK_ICON := preload("res://assets/ui/book.png")
+const RESET_ICON := preload("res://assets/ui/reset.png")
 
 var star_screen_pos := Vector2.ZERO
 var _currency_label: Label
@@ -22,6 +24,7 @@ var _tree_button: Button
 var _badge: Control
 var _reset_button: Button
 var _reset_armed := false
+var _reset_hint: Label
 var _last_currency := 0.0
 var _bump_tween: Tween
 var _time := 0.0
@@ -41,129 +44,149 @@ func _ready() -> void:
 
 
 func _build() -> void:
-	var card := PanelContainer.new()
-	card.position = Vector2(20, 16)
-	card.custom_minimum_size = Vector2(CARD_WIDTH, 0)
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(card)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(box)
-
-	# Валюта: значок-искра и крупное число.
+	# Слева сверху без подложки: валюта и масса.
+	var left := VBoxContainer.new()
+	left.position = Vector2(22, 14)
+	left.add_theme_constant_override("separation", -4)
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(left)
 	var cur_row := HBoxContainer.new()
-	cur_row.add_theme_constant_override("separation", 10)
+	cur_row.add_theme_constant_override("separation", 8)
 	cur_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(cur_row)
+	left.add_child(cur_row)
 	_currency_icon = Control.new()
-	_currency_icon.custom_minimum_size = Vector2(34, 44)
+	_currency_icon.custom_minimum_size = Vector2(34, 46)
 	_currency_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_currency_icon.draw.connect(_draw_currency_icon)
 	cur_row.add_child(_currency_icon)
-	_currency_label = _label(38, UiTheme.GOLD, UiTheme.FONT_NUMBERS)
+	_currency_label = _label(40, UiTheme.GOLD, UiTheme.FONT_NUMBERS)
 	cur_row.add_child(_currency_label)
+	_mass_label = _label(16, UiTheme.TEXT_DIM, UiTheme.FONT_SEMI)
+	_mass_label.custom_minimum_size = Vector2(0, 0)
+	var mass_pad := MarginContainer.new()
+	mass_pad.add_theme_constant_override("margin_left", 44)
+	mass_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mass_pad.add_child(_mass_label)
+	left.add_child(mass_pad)
 
-	# Масса и стадия в одной строке.
-	var mass_row := HBoxContainer.new()
-	mass_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(mass_row)
-	_mass_label = _label(18, UiTheme.TEXT, UiTheme.FONT_SEMI)
-	mass_row.add_child(_mass_label)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mass_row.add_child(spacer)
-	_stage_label = _label(15, UiTheme.TEXT_DIM)
-	mass_row.add_child(_stage_label)
-
+	# Сверху по центру: стадия, прогресс до следующей, состав тела.
+	var top := VBoxContainer.new()
+	top.anchor_left = 0.5
+	top.anchor_right = 0.5
+	top.offset_left = -TOP_WIDTH * 0.5
+	top.offset_right = TOP_WIDTH * 0.5
+	top.offset_top = 12
+	top.add_theme_constant_override("separation", 4)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(top)
+	_stage_label = _label(15, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	_stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(_stage_label)
 	_stage_bar = Control.new()
-	_stage_bar.custom_minimum_size = Vector2(0, 6)
+	_stage_bar.custom_minimum_size = Vector2(0, 5)
 	_stage_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stage_bar.draw.connect(_draw_stage_bar)
-	box.add_child(_stage_bar)
-
+	top.add_child(_stage_bar)
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 4)
+	gap.custom_minimum_size = Vector2(0, 3)
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(gap)
-
+	top.add_child(gap)
 	_comp_bar = Control.new()
-	_comp_bar.custom_minimum_size = Vector2(0, 10)
+	_comp_bar.custom_minimum_size = Vector2(0, 7)
 	_comp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_comp_bar.draw.connect(_draw_composition)
-	box.add_child(_comp_bar)
-
+	top.add_child(_comp_bar)
 	var mats := HBoxContainer.new()
-	mats.add_theme_constant_override("separation", 10)
+	mats.alignment = BoxContainer.ALIGNMENT_CENTER
+	mats.add_theme_constant_override("separation", 12)
 	mats.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(mats)
+	top.add_child(mats)
 	for key in GameData.MATERIAL_ORDER:
-		var l := _label(13, GameData.MATERIALS[key].color)
+		var l := _label(12, GameData.MATERIALS[key].color)
 		mats.add_child(l)
 		_material_labels[key] = l
-
 	var body_row := HBoxContainer.new()
-	body_row.add_theme_constant_override("separation", 8)
+	body_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	body_row.add_theme_constant_override("separation", 6)
 	body_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(body_row)
-	_body_label = _label(16, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	top.add_child(body_row)
+	_body_label = _label(13, UiTheme.TEXT, UiTheme.FONT_SEMI)
 	body_row.add_child(_body_label)
-	_body_desc = _label(13, UiTheme.TEXT_DIM)
-	_body_desc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_body_desc = _label(12, UiTheme.TEXT_DIM)
 	body_row.add_child(_body_desc)
 
+	# Справа сверху: кнопка древа — звёздная книга, без текста.
 	_tree_button = Button.new()
-	_tree_button.text = "Древо"
-	_tree_button.add_theme_font_size_override("font_size", 26)
-	_tree_button.add_theme_stylebox_override("normal", UiTheme.glass(20, Color(0.1, 0.12, 0.24, 0.72), Color(1.0, 0.82, 0.42, 0.45), 12.0))
+	_tree_button.icon = BOOK_ICON
+	_tree_button.expand_icon = true
+	_tree_button.flat = true
 	_tree_button.anchor_left = 1.0
 	_tree_button.anchor_right = 1.0
-	_tree_button.offset_left = -190
-	_tree_button.offset_right = -20
-	_tree_button.offset_top = 16
-	_tree_button.offset_bottom = 84
+	_tree_button.offset_left = -112
+	_tree_button.offset_right = -12
+	_tree_button.offset_top = 4
+	_tree_button.offset_bottom = 104
 	_tree_button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_tree_button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	_tree_button.button_down.connect(func(): _press_anim(_tree_button, 0.9))
+	_tree_button.button_up.connect(func(): _press_anim(_tree_button, 1.0))
 	_tree_button.pressed.connect(func(): tree_requested.emit())
 	add_child(_tree_button)
 
 	# Пульсирующая точка: в древе есть что купить.
 	_badge = Control.new()
-	_badge.position = Vector2(152, 4)
+	_badge.position = Vector2(76, 14)
 	_badge.size = Vector2(14, 14)
 	_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_badge.draw.connect(_draw_badge)
 	_tree_button.add_child(_badge)
 
-	# Сброс прогресса: первое нажатие просит подтверждения, второе сбрасывает.
+	# Сброс прогресса: маленькая иконка, первое нажатие просит подтверждения.
 	_reset_button = Button.new()
-	_reset_button.text = "Сброс"
-	_reset_button.add_theme_font_size_override("font_size", 15)
-	var ghost := UiTheme.glass(14, Color(0.05, 0.06, 0.12, 0.35), Color(1, 1, 1, 0.1), 8.0)
-	ghost.shadow_size = 0
-	_reset_button.add_theme_stylebox_override("normal", ghost)
-	_reset_button.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	_reset_button.icon = RESET_ICON
+	_reset_button.expand_icon = true
+	_reset_button.flat = true
+	_reset_button.modulate = Color(1, 1, 1, 0.45)
 	_reset_button.anchor_left = 1.0
 	_reset_button.anchor_right = 1.0
-	_reset_button.offset_left = -130
-	_reset_button.offset_right = -20
-	_reset_button.offset_top = 94
-	_reset_button.offset_bottom = 132
+	_reset_button.offset_left = -78
+	_reset_button.offset_right = -46
+	_reset_button.offset_top = 110
+	_reset_button.offset_bottom = 142
 	_reset_button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_reset_button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 	_reset_button.pressed.connect(_on_reset_pressed)
 	add_child(_reset_button)
+	_reset_hint = _label(14, Color(1.0, 0.5, 0.4), UiTheme.FONT_SEMI)
+	_reset_hint.text = "Нажми ещё раз для сброса"
+	_reset_hint.anchor_left = 1.0
+	_reset_hint.anchor_right = 1.0
+	_reset_hint.offset_left = -300
+	_reset_hint.offset_right = -84
+	_reset_hint.offset_top = 116
+	_reset_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_reset_hint.visible = false
+	add_child(_reset_hint)
+
+
+func _press_anim(button: Control, target: float) -> void:
+	button.pivot_offset = button.size * 0.5
+	var tw := create_tween()
+	tw.tween_property(button, "scale", Vector2.ONE * target, 0.08)
 
 
 func _on_reset_pressed() -> void:
 	if not _reset_armed:
 		_reset_armed = true
-		_reset_button.text = "Точно?"
-		_reset_button.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
+		_reset_button.modulate = Color(1.0, 0.5, 0.4, 1.0)
+		_reset_hint.visible = true
 		await get_tree().create_timer(3.0).timeout
 		if is_instance_valid(_reset_button):
 			_reset_armed = false
-			_reset_button.text = "Сброс"
-			_reset_button.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+			_reset_button.modulate = Color(1, 1, 1, 0.45)
+			_reset_hint.visible = false
 		return
 	GameState.reset_run()
 	get_tree().reload_current_scene()
@@ -175,6 +198,11 @@ func _label(font_size: int, color: Color, font: Font = null) -> Label:
 	l.add_theme_color_override("font_color", color)
 	if font:
 		l.add_theme_font_override("font", font)
+	# Без подложки текст держится на тени и обводке.
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	l.add_theme_constant_override("outline_size", 4)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
 
@@ -199,7 +227,7 @@ func _on_currency_changed(value: float) -> void:
 
 func _refresh() -> void:
 	_currency_label.text = GameData.format_number(GameState.currency)
-	_mass_label.text = "Масса " + GameData.format_mass(GameState.mass)
+	_mass_label.text = "масса " + GameData.format_mass(GameState.mass)
 	var idx := GameData.stage_index(GameState.mass)
 	var stage: Dictionary = GameData.STAGES[idx]
 	if idx + 1 < GameData.STAGES.size():
@@ -216,7 +244,7 @@ func _refresh() -> void:
 	var body: Dictionary = GameData.BODY_TYPES[type]
 	_body_label.text = body.name
 	_body_label.add_theme_color_override("font_color", GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT)
-	_body_desc.text = body.desc
+	_body_desc.text = "· " + body.desc
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()
 	_badge.visible = Skills.any_affordable()
