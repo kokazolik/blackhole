@@ -4,7 +4,6 @@ assets/space/nebula.png     — туманности отдельными пят
                               большая часть неба остаётся чёрной
 assets/space/stars_far.png  — тысячи слабых звёзд разных цветов и крошечные далёкие галактики
 assets/space/stars_near.png — меньше звёзд, ярче; у самых ярких лучи, как на снимках Hubble
-assets/space/bokeh.png      — размытые пылинки переднего плана (почти прозрачные)
 
 Бесшовность даёт шум, отфильтрованный в частотной области, и рисование «по модулю» размера.
 Запуск: python3 tools/gen_space_bg.py
@@ -156,33 +155,12 @@ def stars_near(rng):
     return to_image(img[..., :3], img[..., 3])
 
 
-def bokeh(rng):
-    """Размытые пылинки у самой камеры: мягкие пятна с чуть более ярким краем."""
-    img = np.zeros((SIZE, SIZE, 4))
-    for _ in range(9):
-        x, y = rng.uniform(0, SIZE, 2)
-        r = rng.uniform(14, 40)
-        half = int(r * 1.3)
-        yy, xx = np.mgrid[-half:half + 1, -half:half + 1]
-        d = np.sqrt((xx - (x - int(x))) ** 2 + (yy - (y - int(y))) ** 2) / r
-        disc = np.clip((1.0 - d) * 3.0, 0, 1) ** 2 * (0.6 + 0.4 * np.clip(d, 0, 1) ** 3)
-        a = disc * rng.uniform(0.03, 0.07)
-        ys = (int(y) + yy) % SIZE
-        xs = (int(x) + xx) % SIZE
-        img[ys, xs, 0] = 1.0
-        img[ys, xs, 1] = 0.9
-        img[ys, xs, 2] = 0.78
-        img[ys, xs, 3] = np.maximum(img[ys, xs, 3], a)
-    return to_image(img[..., :3], img[..., 3])
-
-
 def main():
     rng = np.random.default_rng(11)
     OUT.mkdir(parents=True, exist_ok=True)
     nebula(rng).save(OUT / "nebula.png")
     stars_far(rng).save(OUT / "stars_far.png")
     stars_near(rng).save(OUT / "stars_near.png")
-    bokeh(rng).save(OUT / "bokeh.png")
     print("Фон сохранён в", OUT)
 
 

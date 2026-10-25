@@ -48,14 +48,6 @@ func _ready() -> void:
 	add_child(camera)
 	camera.reset_smoothing()
 
-	# Размытые пылинки у камеры: между миром и интерфейсом.
-	var fg_layer := CanvasLayer.new()
-	fg_layer.layer = 5
-	add_child(fg_layer)
-	var fg := preload("res://scripts/world/foreground_dust.gd").new()
-	fg.camera = camera
-	fg_layer.add_child(fg)
-
 	var ui := CanvasLayer.new()
 	ui.layer = 10
 	add_child(ui)
@@ -91,4 +83,3 @@ func _process(delta: float) -> void:
 	var z := lerpf(camera.zoom.x, _target_zoom(), 1.0 - exp(-2.0 * delta))
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
-	sky_events.star_screen_pos = hud.star_screen_pos

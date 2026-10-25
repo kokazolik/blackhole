@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cvd4p22yf77t"
-path="res://.godot/imported/bokeh.png-10dbb910972ca1f7ddeba3103f8a7f31.ctex"
+uid="uid://c832bcu3m05xi"
+path="res://.godot/imported/tree_bg.png-9b4d7cc6c0302fc8a85343ca43d3e293.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/space/bokeh.png"
-dest_files=["res://.godot/imported/bokeh.png-10dbb910972ca1f7ddeba3103f8a7f31.ctex"]
+source_file="res://assets/ui/tree_bg.png"
+dest_files=["res://.godot/imported/tree_bg.png-9b4d7cc6c0302fc8a85343ca43d3e293.ctex"]
 
 [params]
 
