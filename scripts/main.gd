@@ -48,6 +48,14 @@ func _ready() -> void:
 	add_child(camera)
 	camera.reset_smoothing()
 
+	# Размытые пылинки у камеры: между миром и интерфейсом.
+	var fg_layer := CanvasLayer.new()
+	fg_layer.layer = 5
+	add_child(fg_layer)
+	var fg := preload("res://scripts/world/foreground_dust.gd").new()
+	fg.camera = camera
+	fg_layer.add_child(fg)
+
 	var ui := CanvasLayer.new()
 	ui.layer = 10
 	add_child(ui)

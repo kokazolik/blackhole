@@ -2,7 +2,7 @@ extends Node2D
 ## Молодая звезда в центре диска (шейдер) и границы зон.
 
 const QUAD_EXTENT := 1.8  # квад шейдера в радиусах звезды
-const HALO_EXTENT := 7.0  # дальнее свечение короны, в радиусах звезды
+const HALO_EXTENT := 3.0  # свечение короны только рядом со звездой, в радиусах звезды
 const HALO_COLOR := Color(1.0, 0.45, 0.12)
 # Вид звезды: запечённая поверхность + живая анимация.
 # Исходник поверхности: shaders/young_star_procedural.gdshader (тяжёлый, только для запекания
@@ -32,7 +32,8 @@ func _ready() -> void:
 	add_child(body)
 
 
-## Радиальное свечение: яркость спадает как exp(-0.9 · расстояние от края в радиусах).
+## Радиальное свечение: яркость спадает как exp(-2.2 · расстояние от края в радиусах),
+## дальше пары радиусов фон остаётся чёрным.
 func _make_halo() -> ImageTexture:
 	var size := 256
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
@@ -40,7 +41,7 @@ func _make_halo() -> ImageTexture:
 	for y in size:
 		for x in size:
 			var r := Vector2(x - c, y - c).length() / c * HALO_EXTENT
-			var a := 0.3 * exp(-0.9 * maxf(r - 1.0, 0.0)) * smoothstep(HALO_EXTENT, HALO_EXTENT * 0.6, r)
+			var a := 0.35 * exp(-2.2 * maxf(r - 1.0, 0.0)) * smoothstep(HALO_EXTENT, HALO_EXTENT * 0.5, r)
 			img.set_pixel(x, y, Color(HALO_COLOR, a))
 	return ImageTexture.create_from_image(img)
 

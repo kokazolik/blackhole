@@ -9,6 +9,10 @@ shader_type canvas_item;
 
 uniform sampler2D atlas : filter_linear_mipmap;
 uniform vec4 level_colors[3];
+// Направление на звезду в координатах квадрата. Задаёт dust_field.gd каждый кадр:
+// игрок летит по орбите, и освещённая сторона пыли поворачивается вместе с ним.
+uniform vec2 light_dir = vec2(-1.0, 0.0);
+uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
 
 const float QUAD = 3.8;    // сторона квадрата в радиусах пылинки
 const float SPRITE = 3.4;  // сторона спрайта в радиусах пылинки
@@ -44,6 +48,13 @@ void fragment() {
 		vec2 cell = vec2(mod(v_data.x, 4.0), floor(v_data.x / 4.0));
 		vec4 tex = texture(atlas, (cell + sp) * 0.25);
 		tex.a *= alpha;
+		// Освещение звездой: зерно как шар, светлая сторона смотрит на звезду, обратная в тени.
+		// Звезда лежит в плоскости диска, поэтому свет почти сбоку и граница тени резкая.
+		vec2 q = p / (SPRITE * 0.4);
+		vec3 n = vec3(q, sqrt(max(1.0 - dot(q, q), 0.0)));
+		n = normalize(n + vec3(0.0, 0.0, 0.05));
+		float diff = max(dot(n, normalize(vec3(light_dir, 0.25))), 0.0);
+		tex.rgb *= star_light * (0.18 + 1.4 * diff);
 		col.rgb = mix(col.rgb, tex.rgb, tex.a);
 		col.a = tex.a + col.a * (1.0 - tex.a);
 	}

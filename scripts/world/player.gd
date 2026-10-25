@@ -20,6 +20,7 @@ var _spin := 0.0
 var _trail: Array[Vector2] = []  # след в мировых координатах, летит по орбите вместе с пылью
 var _trail_timer := 0.0
 var _glow_tex := _make_glow()
+var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
 
 
 func _ready() -> void:
@@ -29,6 +30,11 @@ func _ready() -> void:
 	_update_color()
 	GameState.absorbed.connect(_on_absorbed)
 	GameState.skills_changed.connect(queue_redraw)
+	_grain.texture = GRAIN_TEX
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/lit_grain.gdshader")
+	_grain.material = mat
+	add_child(_grain)
 
 
 ## Мягкое свечение одной текстурой вместо стопки полупрозрачных кругов.
@@ -153,8 +159,14 @@ func _draw() -> void:
 	var r := radius * (1.0 + 0.12 * _pulse)
 	var gs := r * 5.2
 	draw_texture_rect(_glow_tex, Rect2(-gs * 0.5, -gs * 0.5, gs, gs), false, Color(body_color, 0.22 + 0.15 * _pulse))
-	var s := r * GRAIN_SCALE
-	var tint := body_color.lightened(0.5 + 0.3 * _pulse)
-	draw_set_transform(Vector2.ZERO, _spin)
-	draw_texture_rect(GRAIN_TEX, Rect2(-s * 0.5, -s * 0.5, s, s), false, tint)
-	draw_set_transform(Vector2.ZERO)
+	_update_grain(r)
+
+
+## Комок поворачивается, а свет всегда идёт от звезды: переводим направление
+## на звезду в координаты спрайта.
+func _update_grain(r: float) -> void:
+	_grain.rotation = _spin
+	_grain.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
+	_grain.modulate = body_color.lightened(0.5 + 0.3 * _pulse)
+	var to_star := (-position).normalized().rotated(-_spin)
+	(_grain.material as ShaderMaterial).set_shader_parameter("light_dir", to_star)

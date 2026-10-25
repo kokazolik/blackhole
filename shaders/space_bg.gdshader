@@ -1,5 +1,5 @@
 shader_type canvas_item;
-// Фон космоса: туманности и два слоя звёзд с разным параллаксом.
+// Фон космоса: редкие туманности, далёкие звёзды с галактиками и ближние яркие звёзды.
 // Три выборки бесшовных текстур на пиксель — дёшево даже на слабом телефоне.
 
 uniform sampler2D nebula : filter_linear, repeat_enable;
@@ -7,7 +7,7 @@ uniform sampler2D stars_far : filter_linear, repeat_enable;
 uniform sampler2D stars_near : filter_linear, repeat_enable;
 uniform vec2 view_size = vec2(1280.0, 720.0);
 uniform vec2 offset;  // положение камеры в пикселях экрана
-uniform vec3 base_color : source_color = vec3(0.010, 0.012, 0.028);
+uniform vec3 base_color : source_color = vec3(0.004, 0.005, 0.009);  // космос почти чёрный
 
 const float NEBULA_PARALLAX = 0.02;
 const float FAR_PARALLAX = 0.06;

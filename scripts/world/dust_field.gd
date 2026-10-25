@@ -119,6 +119,11 @@ func _process(delta: float) -> void:
 	if frame_offset.length() > REBASE_DISTANCE:
 		_rebase()
 	_mm_node.position = frame_offset
+	# Свет идёт от звезды в центре: направление поворачивается по мере полёта по орбите.
+	# В пределах экрана оно почти одинаковое, поэтому одно на всю пыль.
+	# QuadMesh в 2D перевёрнут по Y, отсюда минус.
+	var to_star := -player.position.normalized()
+	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
 
 	var view_r := view_radius()
 	var active_r := view_r * 1.35
