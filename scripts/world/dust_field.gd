@@ -15,7 +15,9 @@ extends Node2D
 ##   это сдвиг одного узла, а не перезапись тысяч позиций;
 ## - каждый кадр обрабатывается только пыль рядом с игроком, полный обход редкий.
 
-const BASE_TARGET_COUNT := 1200
+# Плотность пыли на единицу площади мира при spawn = 1. Число пылинок вокруг считается
+# от площади активной области, поэтому плотность в мире не зависит от приближения камеры.
+const DUST_PER_AREA := 0.0022
 const MAX_DUST := 2600
 const MAX_DENSITY_SCALE := 1.8  # потолок числа пылинок у снеговой линии
 const SPAWN_ATTEMPTS := 4
@@ -24,7 +26,8 @@ const DUST_SHADER := preload("res://shaders/dust.gdshader")
 const ATLAS_VARIANTS := 4
 const QUAD_SCALE := 3.8  # сторона квадрата в радиусах пылинки, как QUAD в шейдере
 const MAX_SPAWN_PER_FRAME := 24
-const CLUSTER_INTERVAL := Vector2(7.0, 15.0)
+const CLUSTER_CHECK := 5.0    # раз в столько секунд бросаем шанс на скопление
+const CLUSTER_CHANCE := 0.03  # скопление — редкая находка
 const CLUSTER_SIZE := Vector2i(15, 30)
 const DRAG := 0.55  # доля скорости, остающаяся через секунду
 const SCAN_INTERVAL := 0.2  # как часто полный обход: удаление дальней пыли и поиск ближней
@@ -49,11 +52,13 @@ var dust: Array[Dust] = []
 var frame_offset := Vector2.ZERO
 var rng := RandomNumberGenerator.new()
 var _near: Array[Dust] = []
+var _active_count := 0  # пыль в активной области на последнем обходе плюс появившаяся после
 var _scan_timer := 0.0
 var _cluster_timer := 0.0
 var _filled := false
 var _popups: Array = []  # всплывающие «+N» цвета материала
 var _clumps := FastNoiseLite.new()
+var _rare := FastNoiseLite.new()  # где встречаются плотные нити: ~2% пространства
 var _mm_node := MultiMeshInstance2D.new()
 var _mm := MultiMesh.new()
 var _buf := PackedFloat32Array()
@@ -62,13 +67,17 @@ var _dirty := false
 
 func _ready() -> void:
 	rng.randomize()
-	_cluster_timer = rng.randf_range(2.0, 5.0)
+	_cluster_timer = CLUSTER_CHECK
 	# Гребневый шум даёт вытянутые нити и сгустки с пустотами между ними.
 	_clumps.seed = 1337
 	_clumps.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_clumps.fractal_type = FastNoiseLite.FRACTAL_RIDGED
 	_clumps.fractal_octaves = 3
 	_clumps.frequency = 0.0063
+	_rare.seed = 4242
+	_rare.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_rare.fractal_octaves = 2
+	_rare.frequency = 0.0009
 
 	var quad := QuadMesh.new()
 	quad.size = Vector2.ONE
@@ -173,18 +182,26 @@ func _physics_process(delta: float) -> void:
 ## Редкий полный обход: удаляет пыль далеко за экраном и собирает ближнюю,
 ## которую стоит проверять каждый кадр.
 func _scan(pp: Vector2, active_r: float) -> void:
-	var despawn_sq := pow(active_r * 1.3, 2)
+	var despawn_sq := pow(active_r * 1.15, 2)
+	var active_sq := active_r * active_r
 	# Запас на то, сколько игрок пролетит до следующего обхода.
 	var near_r := player.pull_radius() + player.radius + player.max_speed() * SCAN_INTERVAL * 2.0 + 20.0
 	var near_sq := near_r * near_r
 	_near.clear()
+	_active_count = 0
 	var i := dust.size() - 1
 	while i >= 0:
 		var d := dust[i]
 		var dist_sq := d.pos.distance_squared_to(pp)
 		if dist_sq > despawn_sq:
 			_remove(d)
-		elif dist_sq < near_sq or d.vel.length_squared() > 0.0001:
+			i -= 1
+			continue
+		# Плотность считаем только по пыли вокруг игрока: отставшая позади пыль
+		# не должна мешать досыпать пыль впереди.
+		if dist_sq < active_sq:
+			_active_count += 1
+		if dist_sq < near_sq or d.vel.length_squared() > 0.0001:
 			_near.append(d)
 		i -= 1
 
@@ -249,7 +266,7 @@ func _rewrite_all() -> void:
 
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
-	var target := mini(int(BASE_TARGET_COUNT * Skills.stat("spawn") * density_scale), MAX_DUST - CLUSTER_SIZE.y)
+	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale), MAX_DUST - CLUSTER_SIZE.y)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
 	if not _filled:
 		# Первое заполнение: пыль сразу по всему экрану, а не только за краем.
@@ -258,15 +275,22 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 		_filled = true
 		_scan_timer = 0.0
 		return
-	while dust.size() < target and spawn_budget > 0:
-		_spawn_single(_random_point(view_r * 1.05, active_r))
+	# Обычно новая пыль появляется за краем экрана. Если её резко стало нужно больше
+	# (после покупки навыка), досыпаем по всей области, иначе за краем экрана
+	# скапливается плотное кольцо, которое выглядит как огромный сгусток.
+	var min_r := 0.0 if _active_count < target * 0.7 else view_r * 1.05
+	while _active_count < target and spawn_budget > 0:
+		if _spawn_single(_random_point(min_r, active_r)):
+			_active_count += 1
 		spawn_budget -= 1
 
-	# Пока пыли мало, скопления тоже реже и меньше.
-	_cluster_timer -= delta * Skills.stat("cluster") * minf(Skills.stat("spawn"), 1.0)
+	# Скопление выпадает с небольшим шансом; навык «скоплений» его повышает,
+	# а пока пыли мало, скопления ещё и мельче.
+	_cluster_timer -= delta
 	if _cluster_timer <= 0.0:
-		_cluster_timer = rng.randf_range(CLUSTER_INTERVAL.x, CLUSTER_INTERVAL.y)
-		_spawn_cluster(_random_point(view_r * 1.1, active_r * 0.95), view_r)
+		_cluster_timer = CLUSTER_CHECK
+		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster"):
+			_spawn_cluster(_random_point(view_r * 1.1, active_r * 0.95), view_r)
 
 
 ## Случайная точка в мировых координатах в кольце вокруг игрока.
@@ -288,13 +312,20 @@ func _pick_level(weight_key: String) -> int:
 	return GameData.pick_weighted(weights, rng)
 
 
-## Доля «заполненности» места сгустками: 0.15 в пустотах, 1.0 в гуще нитей.
+## Доля «заполненности» места: обычно пыль лежит ровно с лёгкими колебаниями,
+## а плотные нити со сгустками и пустотами попадаются редко, примерно на 2% пространства.
+## Порог 0.77–0.80 подобран по распределению шума _rare (97–98-й перцентиль).
 func clump_density(pos: Vector2) -> float:
 	var n := (_clumps.get_noise_2dv(pos) + 1.0) * 0.5
-	return 0.15 + 0.85 * smoothstep(0.35, 0.8, n)
+	var calm := 0.3 + 0.3 * smoothstep(0.35, 0.8, n)
+	var rare := smoothstep(0.77, 0.80, (_rare.get_noise_2dv(pos) + 1.0) * 0.5)
+	if rare <= 0.0:
+		return calm
+	var filament := 0.15 + 0.85 * smoothstep(0.35, 0.8, n)
+	return lerpf(calm, filament * 1.6, rare)
 
 
-func _spawn_single(pos: Vector2) -> void:
+func _spawn_single(pos: Vector2) -> bool:
 	# Отбор: в пустотах точка чаще отбрасывается и ищется заново рядом.
 	var accepted := false
 	var player_density := maxf(GameData.radial_density(player.position.length()), 0.01)
@@ -304,12 +335,10 @@ func _spawn_single(pos: Vector2) -> void:
 			accepted = true
 			break
 		pos = _random_point(pos.distance_to(player.position) * 0.95, pos.distance_to(player.position) * 1.05)
-	if not accepted:
-		return
-	if pos.length() < GameData.STAR_RADIUS * 1.35:
-		return
+	if not accepted or pos.length() < GameData.STAR_RADIUS * 1.35:
+		return false
 	var material: String = GameData.pick_weighted(GameData.material_weights(pos.length()), rng)
-	_add_dust(pos, _pick_level("spawn_weight"), material)
+	return _add_dust(pos, _pick_level("spawn_weight"), material)
 
 
 func _spawn_cluster(center: Vector2, view_r: float) -> void:
@@ -325,9 +354,9 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 
 
 ## pos в мировых координатах.
-func _add_dust(pos: Vector2, level: int, material: String) -> void:
+func _add_dust(pos: Vector2, level: int, material: String) -> bool:
 	if dust.size() >= MAX_DUST:
-		return
+		return false
 	var d := Dust.new()
 	d.pos = pos - frame_offset
 	d.vel = Vector2.ZERO
@@ -340,6 +369,7 @@ func _add_dust(pos: Vector2, level: int, material: String) -> void:
 	d.idx = dust.size()
 	dust.append(d)
 	_write(d)
+	return true
 
 
 ## Всплывающие цифры поверх пыли. Размер шрифта переводим в мировые единицы.
