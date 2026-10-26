@@ -623,7 +623,7 @@ func _collide(p: Pebble, index: int) -> void:
 		if p.food:
 			value *= FOOD_VALUE
 		if GameState.is_boulder():
-			value *= GameData.BOULDER_VALUE
+			value *= GameData.boulder_value(GameState.mass)
 		if p.geode:
 			value *= Skills.stat("geode_value")
 			geode_found.emit(wp, value)

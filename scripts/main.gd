@@ -24,6 +24,7 @@ var _caption: Control
 var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
 var _chip_time := -10.0
 var _chunk_time := -10.0
+var _boulder_time := 0.0  # когда стал валуном (для подсказки о веществе)
 var _chunk_pos := Vector2.ZERO
 var _geode_time := -10.0
 var _geode_pos := Vector2.ZERO
@@ -146,13 +147,15 @@ func _ready() -> void:
 		ui.move_child(pause_menu, -1)
 	elif GameState.is_boulder() and not GameState.boulder_intro_done:
 		_start_pebble_intro(2.5, true)
+	elif GameState.stage >= GameData.PLANETESIMAL_STAGE and not "planetesimal" in GameState.tips_seen:
+		_start_finale(2.5)
 	elif GameState.is_pebble() and not GameState.pebble_intro_done:
 		_start_pebble_intro(2.5)
 
 
 ## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
 func _on_stage_reached(index: int) -> void:
-	if index != GameData.PEBBLE_STAGE and index != GameData.BOULDER_STAGE:
+	if index < GameData.PEBBLE_STAGE or index > GameData.PLANETESIMAL_STAGE:
 		return
 	var flash := ColorRect.new()
 	flash.color = Color(1.0, 0.92, 0.75, 0.0)
@@ -168,7 +171,13 @@ func _on_stage_reached(index: int) -> void:
 	# видно, насколько ты вырос.
 	camera.zoom *= 0.55
 	_zoom_ease = 0.0
+	if index == GameData.PLANETESIMAL_STAGE:
+		_show_caption("Планетезималь", "тело в километр: его держит собственная гравитация")
+		if not "planetesimal" in GameState.tips_seen:
+			_start_finale(4.5)
+		return
 	if index == GameData.BOULDER_STAGE:
+		_boulder_time = _intro_time
 		_show_caption("Валун", "камень ростом с человека")
 		if not GameState.boulder_intro_done:
 			_start_pebble_intro(4.5, true)
@@ -176,6 +185,21 @@ func _on_stage_reached(index: int) -> void:
 	_show_caption("Галька", "камешек размером с горошину")
 	if not GameState.pebble_intro_done:
 		_start_pebble_intro(4.5)
+
+
+## Финал этапа «Валун»: Звездочёт рассказывает о планетезимали.
+func _start_finale(delay: float) -> void:
+	for c in $UI.get_children():
+		if c is Tutorial:
+			return
+	var tutorial := Tutorial.new()
+	tutorial.main = self
+	tutorial.steps = Tutorial.PLANET_STEPS
+	tutorial.tip = "planetesimal"
+	tutorial.start_delay = delay
+	$UI.add_child(tutorial)
+	guide = tutorial
+	$UI.move_child(pause_menu, -1)
 
 
 func _start_pebble_intro(delay: float, boulder := false) -> void:
@@ -327,6 +351,10 @@ func _check_tips() -> void:
 		"ice": player.ice_vapor > 0.0 and hud._ice_label.visible,
 		"shadow": GameState.is_boulder() and pebble_field.shadow_spot() != Vector2.INF,
 		"crash": pebble_field.crash_spot() != Vector2.INF,
+		"gravity": GameState.is_boulder() and GameState.stage < GameData.PLANETESIMAL_STAGE \
+				and GameData.self_gravity(GameState.mass) + Skills.stat("self_grav") > 0.05,
+		"material": GameState.is_boulder() and _intro_time - _boulder_time > 40.0 \
+				and GameData.BOULDER_MATERIAL.has(GameState.body_type()),
 		"clump": pebble_field.clump_left > 3.0 and pebble_field.clump_left < PebbleField.CLUMP_TIME - 1.0,
 	}
 	for kind in found:

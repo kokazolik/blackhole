@@ -314,6 +314,7 @@ static func pebble_mass(r: float, player_mass: float) -> float:
 # падают на звезду. Сразу после превращения снос почти вдвое сильнее, чем у
 # крупной гальки, а с ростом слабеет: километровое тело газ почти не замечает.
 const BOULDER_STAGE := 2
+const PLANETESIMAL_STAGE := 3
 const BOULDER_MASS := 3000.0
 const BARRIER_PEAK := 1.8            # снос в начале этапа, в долях «гальки того же размера»
 const BARRIER_FADE := 0.5            # как быстро снос слабеет с массой
@@ -351,10 +352,17 @@ static func barrier_drift(m: float) -> float:
 
 # На этапе «Валун» тело уже само весит как тысячи галек, и каждое слипание
 # прибавляет ему лишь малую долю: рост к планетезимали растянут на ~25 минут.
-const BOULDER_GAIN := 0.38
-const BOULDER_GAIN_FADE := 0.2
+const BOULDER_GAIN := 0.7
+const BOULDER_GAIN_FADE := 0.15
 # Звёздной пыли за слипание валун получает меньше: тел вокруг много, ветка дорогая.
 const BOULDER_VALUE := 0.03
+# К концу этапа тело в сотни раз тяжелее, и без притормаживания доход взлетал
+# в сотни раз: книга скупалась за минуту. На валуне он растёт с массой слабее.
+const BOULDER_VALUE_FADE := 0.25
+
+
+static func boulder_value(m: float) -> float:
+	return BOULDER_VALUE * pow(maxf(m / BOULDER_MASS, 1.0), -BOULDER_VALUE_FADE)
 
 
 # Что вещество тела даёт валуну. Ключ — тип тела (GameData.body_type), эффекты

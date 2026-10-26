@@ -111,6 +111,30 @@ const PEBBLE_STEPS := [
 	},
 ]
 # Рассказ при превращении в валун.
+const PLANET_STEPS := [
+	{
+		"id": "p_intro",
+		"text": "Километр! Ты стал планетезималью. Теперь тебя держит вместе не липкость и не прочность камня, а собственная гравитация.",
+		"tap": true,
+		"pause": true,
+		"focus": "player",
+	},
+	{
+		"id": "p_pull",
+		"text": "Посмотри: всё мелкое в этом круге само падает на тебя. А газовый ветер такую громаду уже почти не сдвигает.",
+		"tap": true,
+		"pause": true,
+		"focus": "pull",
+	},
+	{
+		"id": "p_next",
+		"text": "Здесь наш путь пока обрывается: следующий этап, где правит гравитация, ещё строится. А ты можешь расти дальше и собирать всё, до чего дотянешься.",
+		"tap": true,
+		"pause": true,
+		"focus": "player",
+	},
+]
+
 const BOULDER_STEPS := [
 	{
 		"id": "b_intro",
@@ -197,6 +221,20 @@ const TIPS := {
 		"tap": true,
 		"pause": true,
 		"focus": "spot",
+	},
+	"gravity": {
+		"id": "t_gravity",
+		"text": "Чувствуешь? Ты стал так тяжёл, что мелочь в этом круге сама плывёт к тебе. Это уже не липкость, а твоя собственная гравитация. Чем ближе к километру, тем сильнее она тянет.",
+		"tap": true,
+		"pause": true,
+		"focus": "pull",
+	},
+	"material": {
+		"id": "t_material",
+		"text": "Вещество, которое ты собрал, теперь тоже работает на тебя. Под полосой состава написано, что оно даёт валуну. Металл тяжёлый и меньше сносится, камень прочный, лёд липкий, а пористый углерод гасит удары.",
+		"tap": true,
+		"pause": true,
+		"focus": "material",
 	},
 	"crash": {
 		"id": "t_crash",
@@ -689,6 +727,15 @@ func _prepare_focus(step: Dictionary) -> bool:
 			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3}.get(tip, 0.1)
 			_focus = {"pos": tip_pos, "r": r}
 			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток"}.get(tip, ""), "color": GOLD}]
+		"pull":
+			var pr: float = pl.pull_radius()
+			_focus = {"pos": pl.position, "r": pr * 1.05}
+			_marks = [{"pos": pl.position, "r": pr, "label": "притяжение", "color": Color(0.75, 0.85, 1.0)}]
+		"material":
+			var type := GameState.body_type()
+			_focus = {"pos": pl.position, "r": pl.radius * 3.0}
+			_marks = [{"pos": pl.position, "r": pl.radius * 1.6, "label": GameData.BODY_TYPES[type].name.to_lower(),
+				"color": GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else GOLD}]
 		"chip":
 			_focus = {"pos": pl.position, "r": pl.radius * 4.0}
 			_marks = [{"pos": pl.position, "r": pl.radius * 3.2, "label": "осколки", "color": Color(1.0, 0.55, 0.4)}]
