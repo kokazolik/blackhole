@@ -49,38 +49,48 @@ void fragment() {
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 	vec4 outc = vec4(col, tex.a);
 	if (v_data.w > 1.5) {
-		// Обломок: угловатый многоугольник с плоскими гранями вместо окатанной гальки.
-		vec2 q = (sp - 0.5) / 0.36;
+		// Осколок шара: долька, у которой с одной стороны дуга прежней поверхности
+		// (с корочкой), а с остальных — плоские свежие изломы, сходящиеся к острию.
+		vec2 q = (sp - 0.5) / 0.36 * 0.85;
 		float seed = fract(v_data.x * 0.618 + v_data.y * 0.137);
-		q *= 0.8;  // чуть крупнее: острые углы выходят за круг, а площадь как у гальки
-		q.y *= 1.0 + 0.6 * fract(seed * 5.3);  // вытянутый: обломки редко бывают ровными
-		float nv = 5.0 + floor(fract(seed * 3.7) * 3.0);
-		float step_a = 6.2832 / nv;
-		float th = atan(q.y, q.x) + 3.1416;
-		float i0 = floor(th / step_a);
-		float i1 = mod(i0 + 1.0, nv);
-		float r0 = 0.5 + 0.5 * fract(sin((i0 + seed * 13.0) * 78.233) * 43758.5453);
-		float r1 = 0.5 + 0.5 * fract(sin((i1 + seed * 13.0) * 78.233) * 43758.5453);
-		vec2 v0 = -vec2(cos(i0 * step_a), sin(i0 * step_a)) * r0;
-		vec2 v1 = -vec2(cos((i0 + 1.0) * step_a), sin((i0 + 1.0) * step_a)) * r1;
-		vec2 e = v1 - v0;
-		float rr = length(q);
-		vec2 u = q / max(rr, 0.0001);
-		// Где луч из центра пересекает ребро: это край обломка в этом направлении.
-		float edge = (v0.x * e.y - v0.y * e.x) / (u.x * e.y - u.y * e.x);
-		float aa = fwidth(rr) * 1.2;
-		float mask = 1.0 - smoothstep(edge - aa, edge + aa, rr);
-		// Грань освещена по своему наклону: у каждой своя яркость.
-		vec2 mid = normalize(v0 + v1);
-		vec3 fn = normalize(vec3(mid * 0.65 * (rr / max(edge, 0.001)), 0.75));
-		float fd = max(dot(fn, normalize(vec3(light_dir, 0.25))), 0.0);
-		float tone = 0.8 + 0.35 * fract(sin((i0 + seed * 31.0) * 12.9898) * 43758.5453);
-		vec3 base = texture(atlas, (cell + vec2(0.5) + q * 0.18) * 0.25).rgb;
-		vec3 scol = base * star_light * (0.25 + 1.3 * fd) * tone;
-		// Светлая кромка на свежем изломе.
-		scol += star_light * 0.25 * smoothstep(edge - 0.12, edge - 0.02, rr) * fd;
+		float h1 = fract(sin(seed * 91.7) * 43758.5453);
+		float h2 = fract(sin(seed * 47.3 + 1.3) * 43758.5453);
+		float h3 = fract(sin(seed * 13.9 + 2.7) * 43758.5453);
+		vec2 dir = vec2(cos(seed * 6.2832), sin(seed * 6.2832));
+		vec2 perp = vec2(-dir.y, dir.x);
+		// Прежняя поверхность: большой круг, его дуга — внешний край осколка.
+		float rc = 1.25 + 0.6 * h1;
+		vec2 c = dir * (0.95 - rc);
+		float d_arc = length(q - c) - rc;
+		// Два излома от острия, раскрываются к дуге; иногда острие сколото третьим.
+		vec2 tip = -dir * (0.8 + 0.15 * h2) + perp * (h3 - 0.5) * 0.4;
+		float w1 = 0.35 + 0.4 * h2;
+		float w2 = 0.35 + 0.4 * h3;
+		vec2 e1 = dir * cos(w1) + perp * sin(w1);
+		vec2 e2 = dir * cos(w2) - perp * sin(w2);
+		vec2 v = q - tip;
+		float d1 = e1.x * v.y - e1.y * v.x;
+		float d2 = -(e2.x * v.y - e2.y * v.x);
+		float d3 = (h1 > 0.6 ? 0.25 * h1 : -1.0) - dot(v, dir);
+		float sd = max(max(d_arc, d3), max(d1, d2));
+		float aa = fwidth(q.x) * 1.5;
+		float mask = 1.0 - smoothstep(-aa, aa, sd);
+		vec3 ld = normalize(vec3(light_dir, 0.25));
+		vec3 tex_c = tex.a > 0.05 ? tex.rgb : texture(atlas, (cell + vec2(0.5)) * 0.25).rgb;
+		// Корочка у дуги — старая окатанная поверхность, освещена как часть шара.
+		float crust = 1.0 - smoothstep(0.06, 0.2, -d_arc);
+		vec3 n_crust = normalize(vec3((q - c) / rc * 0.85, 0.5));
+		vec3 crust_col = tex_c * star_light * (0.2 + 1.4 * max(dot(n_crust, ld), 0.0));
+		// Излом: две плоские грани по сторонам от гребня, светлее и ровнее корочки.
+		float side = sign(perp.x * v.y - perp.y * v.x + 0.0001);
+		vec3 n_face = normalize(vec3(perp * side * 0.55 - dir * 0.15, 0.8));
+		vec3 fresh = mix(tex_c, vec3(dot(tex_c, vec3(0.33))), 0.25) * 1.25;
+		vec3 face_col = fresh * star_light * (0.25 + 1.2 * max(dot(n_face, ld), 0.0));
+		// Тонкая светлая кромка там, где излом встречается с корочкой.
+		float rim = (1.0 - smoothstep(0.0, 0.05, abs(-d_arc - 0.13))) * 0.25;
+		vec3 scol = mix(face_col, crust_col, crust) + star_light * rim * max(dot(n_crust, ld), 0.0);
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
-		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * fd);
+		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * 0.6;
 		outc = vec4(scol, mask);
 	}
 	if (mod(v_data.w, 2.0) > 0.5) {
