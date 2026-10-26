@@ -20,6 +20,8 @@ signal pebble_absorbed(world_position: Vector2)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
+const EDDY_SHADER := preload("res://shaders/eddy.gdshader")
+const EDDY_EXTENT := 1.3  # половина стороны квадрата вихря в его радиусах (как EXTENT в шейдере)
 const MAX_PEBBLES := 140
 const BASE_COUNT := 5               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
@@ -88,7 +90,8 @@ var eddy_center := Vector2.ZERO  # в системе отсчёта пыли
 var eddy_radius := 0.0
 var eddy_left := 0.0
 var _eddy_timer := EDDY_INTERVAL * 0.6
-var _eddy_fx := Node2D.new()  # спирали газа под гальками
+var _eddy_fx := ColorRect.new()  # закрученный газ под гальками (шейдер eddy)
+var _eddy_t := 0.0
 
 
 func _ready() -> void:
@@ -111,7 +114,11 @@ func _ready() -> void:
 	mat.set_shader_parameter("snow_width", GameData.SNOW_LINE_WIDTH)
 	_mm_node.multimesh = _mm
 	_mm_node.material = mat
-	_eddy_fx.draw.connect(_draw_eddy)
+	var eddy_mat := ShaderMaterial.new()
+	eddy_mat.shader = EDDY_SHADER
+	_eddy_fx.material = eddy_mat
+	_eddy_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_eddy_fx.visible = false
 	add_child(_eddy_fx)
 	add_child(_mm_node)
 	_hint.draw.connect(_draw_hints)
@@ -340,8 +347,9 @@ func _update_eddy(delta: float) -> void:
 			for p in pebbles:
 				if p.eddy:
 					p.eddy = false
-		_eddy_fx.queue_redraw()
+		_update_eddy_fx(delta)
 		return
+	_eddy_fx.visible = false
 	_eddy_timer -= delta
 	if _eddy_timer <= 0.0 and not player.dead:
 		_eddy_timer = EDDY_INTERVAL * rng.randf_range(0.8, 1.2)
@@ -368,6 +376,8 @@ func _spawn_eddy() -> void:
 	eddy_radius = view_r * 0.38
 	eddy_center = center - dust_field.frame_offset
 	eddy_left = EDDY_DURATION
+	_eddy_t = 0.0
+	(_eddy_fx.material as ShaderMaterial).set_shader_parameter("seed", rng.randf())
 	var grip := minf(Skills.stat("grip"), 0.95)
 	var count := mini(EDDY_COUNT, MAX_PEBBLES - pebbles.size())
 	for k in count:
@@ -391,24 +401,20 @@ func _spawn_eddy() -> void:
 	eddy_started.emit(center)
 
 
-## Вихрь — несколько закрученных спиралей газа, медленно вращаются и гаснут к концу.
-func _draw_eddy() -> void:
-	if eddy_left <= 0.0:
-		return
+## Вихрь рисует шейдер: квадрат следует за центром, газ появляется и гаснет.
+func _update_eddy_fx(delta: float) -> void:
+	_eddy_t += delta
 	var c := eddy_center + dust_field.frame_offset
+	var half := eddy_radius * EDDY_EXTENT
+	_eddy_fx.visible = eddy_left > 0.0
+	_eddy_fx.position = c - Vector2(half, half)
+	_eddy_fx.size = Vector2(half, half) * 2.0
 	var fade := clampf(eddy_left / 3.0, 0.0, 1.0) * clampf((EDDY_DURATION - eddy_left) / 2.0, 0.0, 1.0)
-	var t := Time.get_ticks_msec() / 1000.0
-	var px := 1.0 / camera.zoom.x
-	for arm in 5:
-		var pts := PackedVector2Array()
-		var base := arm * TAU / 5.0 - t * 0.9  # вращается туда же, куда течёт газ
-		for i in 28:
-			var u := float(i) / 27.0
-			var rr := eddy_radius * (0.12 + 0.95 * u)
-			pts.append(c + Vector2.from_angle(base + u * 3.2) * rr)
-		_eddy_fx.draw_polyline(pts, Color(0.75, 0.85, 1.0, 0.1 * fade), 6.0 * px, true)
-		_eddy_fx.draw_polyline(pts, Color(0.85, 0.92, 1.0, 0.22 * fade), 1.4 * px, true)
-	_eddy_fx.draw_arc(c, eddy_radius, 0.0, TAU, 64, Color(0.8, 0.88, 1.0, 0.12 * fade), 2.0 * px, true)
+	var ice := smoothstep(GameData.SNOW_LINE - GameData.SNOW_LINE_WIDTH, GameData.SNOW_LINE + GameData.SNOW_LINE_WIDTH, c.length())
+	var mat := _eddy_fx.material as ShaderMaterial
+	mat.set_shader_parameter("t", _eddy_t)
+	mat.set_shader_parameter("fade", fade)
+	mat.set_shader_parameter("tint", Color(0.95, 0.8, 0.62).lerp(Color(0.75, 0.88, 1.0), ice))
 
 
 func _collide(p: Pebble, index: int) -> void:

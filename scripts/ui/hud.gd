@@ -24,6 +24,7 @@ var _material_labels := {}
 var _comp_bar: Control
 var _body_label: Label
 var _heat_label: Label
+var _ice_label: Label
 var _zone_label: Label
 var _zone_desc: Label
 var _zone_name := ""
@@ -134,6 +135,9 @@ func _build() -> void:
 	top.offset_left = -TOP_WIDTH * 0.5
 	top.offset_right = TOP_WIDTH * 0.5
 	top.offset_top = 12
+	# Длинная строка расширяет колонку в обе стороны, а полоски стадии и
+	# состава остаются фиксированной ширины.
+	top.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	top.add_theme_constant_override("separation", 4)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
@@ -141,7 +145,8 @@ func _build() -> void:
 	_stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(_stage_label)
 	_stage_bar = Control.new()
-	_stage_bar.custom_minimum_size = Vector2(0, 5)
+	_stage_bar.custom_minimum_size = Vector2(TOP_WIDTH, 5)
+	_stage_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_stage_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stage_bar.draw.connect(_draw_stage_bar)
 	top.add_child(_stage_bar)
@@ -150,7 +155,8 @@ func _build() -> void:
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(gap)
 	_comp_bar = Control.new()
-	_comp_bar.custom_minimum_size = Vector2(0, 7)
+	_comp_bar.custom_minimum_size = Vector2(TOP_WIDTH, 7)
+	_comp_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_comp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_comp_bar.draw.connect(_draw_composition)
 	top.add_child(_comp_bar)
@@ -178,6 +184,11 @@ func _build() -> void:
 	_heat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_heat_label.visible = false
 	top.add_child(_heat_label)
+	# Испарение льда — своя строка: при нагреве обе видны сразу.
+	_ice_label = _label(13, Color(0.6, 0.82, 1.0), UiTheme.FONT_SEMI)
+	_ice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_ice_label.visible = false
+	top.add_child(_ice_label)
 
 	# Справа сверху: кнопка древа — звёздная книга, без текста.
 	_tree_button = Button.new()
@@ -290,7 +301,8 @@ func set_temperature(temp: float) -> void:
 		state = "раскаляется"
 	_heat_label.text = "%d K · %s" % [roundi(temp / 10.0) * 10, state]
 	var col := GameData.thermal_color(temp)
-	var base := Color(col.r, col.g, col.b) if col.a > 0.0 else Color(1.0, 0.75, 0.5)
+	# Тёмно-красный цвет каления на тёмном фоне не читается: подсветляем.
+	var base := Color(col.r, col.g, col.b).lerp(Color(1.0, 0.8, 0.6), 0.45) if col.a > 0.0 else Color(1.0, 0.75, 0.5)
 	if temp >= GameData.SUBLIMATION_TEMP:
 		# Мигает, пока пылинка тает.
 		_heat_time += get_process_delta_time()
@@ -298,13 +310,12 @@ func set_temperature(temp: float) -> void:
 	_heat_label.add_theme_color_override("font_color", base)
 
 
-## Пока не жарко, строка нагрева предупреждает о сублимации льда.
+## Отдельная строка: лёд тает внутри снеговой линии.
 func set_ice_vapor(rate: float) -> void:
-	if rate <= 0.0 or _heat_label.visible:
+	_ice_label.visible = rate > 0.0
+	if rate <= 0.0:
 		return
-	_heat_label.visible = true
-	_heat_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % (rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0)
-	_heat_label.add_theme_color_override("font_color", Color(0.6, 0.82, 1.0))
+	_ice_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % (rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0)
 
 
 func _label(font_size: int, color: Color, font: Font = null) -> Label:
