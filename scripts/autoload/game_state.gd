@@ -24,6 +24,7 @@ var prologue_seen := false
 var tutorial_done := false
 var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
 var boulder_intro_done := false
+var fps_120 := false  # настройка, а не прогресс: «Начать заново» её не сбрасывает
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 
 
@@ -31,6 +32,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_reset_values()
 	load_game()
+	apply_fps()
 	var timer := Timer.new()
 	timer.wait_time = AUTOSAVE_SECONDS
 	timer.autostart = true
@@ -152,6 +154,7 @@ func save_game() -> void:
 		"pebble_intro_done": pebble_intro_done,
 		"boulder_intro_done": boulder_intro_done,
 		"tips_seen": tips_seen,
+		"fps_120": fps_120,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
@@ -174,6 +177,7 @@ func load_game() -> void:
 	pebble_intro_done = bool(data.get("pebble_intro_done", false))
 	boulder_intro_done = bool(data.get("boulder_intro_done", false))
 	tips_seen = Array(data.get("tips_seen", []))
+	fps_120 = bool(data.get("fps_120", false))
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	stage = maxi(stage, GameData.stage_index(mass))
 	for key in data.get("materials", {}):
@@ -191,6 +195,11 @@ func load_game() -> void:
 ## Есть ли что продолжать: хоть что-то собрано или куплено.
 func has_progress() -> bool:
 	return currency > 0.0 or mass > 1.0 or not skill_levels.is_empty()
+
+
+## 60 кадров ровно — по умолчанию; 120 — для мощных телефонов с быстрым экраном.
+func apply_fps() -> void:
+	Engine.max_fps = 120 if fps_120 else 60
 
 
 func reset_run() -> void:

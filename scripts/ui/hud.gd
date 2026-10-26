@@ -32,6 +32,8 @@ var _wind_label: Label
 var _disc_map := Control.new()  # полоска диска от звезды наружу: где какое вещество
 var _map_dist := 0.0
 var _map_rings := 0.0  # видимость колец-ловушек на карте (появляются у гальки)
+var _map_tex: ImageTexture
+var _map_drawn := Vector2(-1.0, -1.0)  # положение метки и видимость колец при последней отрисовке
 const MAP_RANGE := Vector2(2600.0, 12500.0)
 const MAP_SIZE := Vector2(250.0, 36.0)
 var _heat_time := 0.0
@@ -274,20 +276,28 @@ func set_zone(zone: Dictionary) -> void:
 func set_wind(drift: Vector2, pos: Vector2, pebble_k: float) -> void:
 	_map_dist = pos.length()
 	_map_rings = pebble_k
-	_disc_map.queue_redraw()
+	# Перерисовываем карту, только когда метка сдвинулась хотя бы на полпикселя.
+	var state := Vector2(_map_x(_map_dist), _map_rings)
+	if absf(state.x - _map_drawn.x) > 0.5 or absf(state.y - _map_drawn.y) > 0.02:
+		_map_drawn = state
+		_disc_map.queue_redraw()
 	_wind_label.visible = pebble_k > 0.5
 	if not _wind_label.visible:
 		return
 	var radial := -drift.dot(pos.normalized())  # > 0 — сносит к звезде
 	if GameData.trap_strength(pos.length()) > 0.6:
-		_wind_label.text = "Ловушка давления: затишье"
-		_wind_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.75))
+		_set_wind_text("Ловушка давления: затишье", Color(0.7, 1.0, 0.75))
 	elif radial > 0.0:
-		_wind_label.text = "Встречный ветер: снос к звезде %d м/с" % roundi(radial)
-		_wind_label.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
+		_set_wind_text("Встречный ветер: снос к звезде %d м/с" % roundi(radial), Color(0.75, 0.88, 1.0))
 	else:
-		_wind_label.text = "Газ выносит к кольцу: %d м/с" % roundi(-radial)
-		_wind_label.add_theme_color_override("font_color", Color(0.7, 1.0, 0.75))
+		_set_wind_text("Газ выносит к кольцу: %d м/с" % roundi(-radial), Color(0.7, 1.0, 0.75))
+
+
+## Смена цвета пересобирает тему подписи: делаем это, только когда цвет и правда меняется.
+func _set_wind_text(text: String, col: Color) -> void:
+	_wind_label.text = text
+	if _wind_label.get_theme_color("font_color") != col:
+		_wind_label.add_theme_color_override("font_color", col)
 
 
 func set_temperature(temp: float) -> void:
@@ -387,6 +397,33 @@ func _refresh() -> void:
 	_badge.visible = Skills.any_affordable()
 
 
+## Полоска диска не меняется за игру: печём её в текстуру один раз, а не рисуем
+## каждый кадр 240 прямоугольниками.
+func _bake_disc_map() -> ImageTexture:
+	var steps := 120
+	var h := 24
+	var img := Image.create(steps, h, false, Image.FORMAT_RGBA8)
+	for i in steps:
+		var dist := MAP_RANGE.x + (i + 0.5) / steps * (MAP_RANGE.y - MAP_RANGE.x)
+		# Столбик делится по долям материалов: видно, чего здесь больше.
+		var weights := GameData.material_weights(dist)
+		var total := 0.0
+		for key in weights:
+			total += weights[key]
+		var yy := 0.0
+		for key in GameData.MATERIAL_ORDER:
+			if not weights.has(key):
+				continue
+			var hh: float = h * weights[key] / total
+			var col: Color = GameData.MATERIALS[key].color
+			if dist < GameData.sublimation_distance():
+				col = col.lerp(Color(1.0, 0.35, 0.1), 0.75)
+			for py in range(roundi(yy), mini(roundi(yy + hh), h)):
+				img.set_pixel(i, py, Color(col, 0.9))
+			yy += hh
+	return ImageTexture.create_from_image(img)
+
+
 func _map_x(dist: float) -> float:
 	return clampf((dist - MAP_RANGE.x) / (MAP_RANGE.y - MAP_RANGE.x), 0.0, 1.0) * MAP_SIZE.x
 
@@ -396,25 +433,9 @@ func _map_x(dist: float) -> float:
 func _draw_disc_map() -> void:
 	var h := 12.0
 	var y := 12.0
-	var steps := 60
-	var w := MAP_SIZE.x / steps
-	for i in steps:
-		var dist := MAP_RANGE.x + (i + 0.5) / steps * (MAP_RANGE.y - MAP_RANGE.x)
-		# Столбик делится по долям материалов: видно, чего здесь больше.
-		var weights := GameData.material_weights(dist)
-		var total := 0.0
-		for key in weights:
-			total += weights[key]
-		var yy := y
-		for key in GameData.MATERIAL_ORDER:
-			if not weights.has(key):
-				continue
-			var hh: float = h * weights[key] / total
-			var col: Color = GameData.MATERIALS[key].color
-			if dist < GameData.sublimation_distance():
-				col = col.lerp(Color(1.0, 0.35, 0.1), 0.75)
-			_disc_map.draw_rect(Rect2(i * w, yy, w + 0.5, hh), Color(col, 0.9))
-			yy += hh
+	if _map_tex == null:
+		_map_tex = _bake_disc_map()
+	_disc_map.draw_texture_rect(_map_tex, Rect2(0, y, MAP_SIZE.x, h), false)
 	_disc_map.draw_rect(Rect2(0, y, MAP_SIZE.x, h), Color(1, 1, 1, 0.25), false, 1.0)
 	var font: Font = UiTheme.FONT_SEMI
 	# Снеговая линия.
@@ -538,9 +559,10 @@ func _process(delta: float) -> void:
 		if _fps_t > 1.0:
 			var cs := get_tree().current_scene
 			var pf: Variant = cs.get("pebble_field") if cs else null
-			_fps_label.text = "FPS %d · худший кадр %d мс · скрипты %.1f мс · гальки %d" % [
+			_fps_label.text = "FPS %d · худший кадр %d мс · скрипты %.1f мс · вызовов %d · гальки %d" % [
 				Engine.get_frames_per_second(), int(_fps_worst * 1000.0),
 				Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 				pf.pebbles.size() if pf else 0]
 			_fps_t = 0.0
 			_fps_worst = 0.0

@@ -25,14 +25,15 @@ const float NEBULA_SCALE = 2048.0;  // туманность растянута �
 const float STAR_SCALE = 1024.0;
 
 void fragment() {
+	// TIME растёт без конца, а на телефоне точность float невысокая: зацикливаем.
+	float T = mod(TIME, 1000.0 * 6.2832);
 	vec2 px = UV * view_size;
 	vec4 neb = texture(nebula, (px + offset * NEBULA_PARALLAX) / NEBULA_SCALE);
 	vec4 far = texture(stars_far, (px + offset * FAR_PARALLAX) / STAR_SCALE);
 	vec4 near = texture(stars_near, (px + offset * NEAR_PARALLAX + vec2(311.0, 97.0)) / STAR_SCALE);
-	// Мерцание ближних звёзд: у каждой клетки текстуры своя фаза.
-	vec2 cell = floor((px + offset * NEAR_PARALLAX) / 6.0);
-	float phase = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
-	near.a *= 0.7 + 0.3 * sin(TIME * 1.7 + phase);
+	// Мерцание ближних звёзд: фаза берётся из цвета самой звезды (у соседних
+	// звёзд оттенок разный), без хеша на каждый пиксель экрана.
+	near.a *= 0.7 + 0.3 * sin(T * 1.7 + (near.r - near.b) * 40.0 + near.g * 17.0);
 	// Потоки диска: текстура повёрнута так, чтобы волокна шли по касательной к орбите.
 	vec2 rel = px - view_size * 0.5 + offset * STREAM_PARALLAX;
 	float ca = cos(orbit_angle);
@@ -49,15 +50,15 @@ void fragment() {
 	col += near.rgb * near.a;
 
 	// Иней у снеговой линии: голубая дымка и редкие вспыхивающие кристаллики.
+	// Раньше здесь на каждый пиксель считались хеш, степень и экспонента: на
+	// снеговой линии весь экран дорожал вдвое. Теперь искры — те же звёзды из
+	// текстуры, только в другом масштабе и голубые.
 	if (snow > 0.01) {
 		vec2 hp = px + offset * HAZE_PARALLAX;
-		vec2 hcell = floor(hp / 9.0);
-		float h = fract(sin(dot(hcell, vec2(41.31, 289.17))) * 43758.5453);
-		float tw = pow(max(sin(TIME * (1.0 + h * 2.0) + h * 40.0), 0.0), 24.0);
-		vec2 f = fract(hp / 9.0) - 0.5;
-		float dotc = exp(-dot(f, f) * 60.0) * step(0.8, h) * tw;
-		float haze = 0.5 + 0.5 * sin(hp.x * 0.004 + hp.y * 0.003 + TIME * 0.2);
-		col += vec3(0.35, 0.55, 0.8) * snow * (0.045 * haze + dotc * 1.2);
+		vec4 sp = texture(stars_far, hp / 700.0 + vec2(0.53, 0.29));
+		float tw = max(sin(T * 2.3 + sp.r * 50.0), 0.0);
+		float haze = 0.5 + 0.5 * sin(hp.x * 0.004 + hp.y * 0.003 + T * 0.2);
+		col += vec3(0.35, 0.55, 0.8) * snow * (0.045 * haze + sp.a * tw * tw * 1.4);
 	}
 	COLOR = vec4(col, 1.0);
 }
