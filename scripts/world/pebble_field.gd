@@ -155,6 +155,7 @@ func _process(delta: float) -> void:
 	var to_star := -player.position.normalized()
 	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
 	_mm_node.material.set_shader_parameter("star_light", DustField.STAR_LIGHT * (1.0 + 0.9 * Star.flare))
+	_follow_world_scale()
 	_maintain()
 	_update_combo(delta)
 	_update_swarm(delta)
@@ -190,6 +191,29 @@ func _process(delta: float) -> void:
 		i -= 1
 	_write()
 	_hint.queue_redraw()
+
+
+## При превращении в валун мир вокруг мельчает (GameData.world_k): гальки
+## уменьшаются и стягиваются к игроку вместе с камерой, сцена не дёргается.
+var _world_k := -1.0
+
+
+func _follow_world_scale() -> void:
+	var k := GameData.world_k
+	if _world_k < 0.0:
+		_world_k = k
+	if is_equal_approx(k, _world_k):
+		return
+	var ratio := k / _world_k
+	_world_k = k
+	var c := player.position - dust_field.frame_offset
+	for p in pebbles:
+		p.r *= ratio
+		p.pos = c + (p.pos - c) * ratio
+		p.vel *= ratio
+	if eddy_left > 0.0:
+		eddy_radius *= ratio
+		eddy_center = c + (eddy_center - c) * ratio
 
 
 ## Гальки появляются за краем экрана, в кольцах-ловушках чаще.
@@ -753,7 +777,7 @@ func _main_material() -> String:
 func _debris(at: Vector2, dir: Vector2, impact: float, material: String, count: int) -> void:
 	for k in count:
 		var d := dir.rotated(rng.randf_range(-1.3, 1.3))
-		var speed := impact * rng.randf_range(0.5, 1.3) + 20.0
+		var speed := impact * rng.randf_range(0.5, 1.3) + 20.0 * GameData.world_k
 		var level := 1 + int(rng.randf() < 0.45) + int(rng.randf() < 0.15)
 		dust_field.add_debris(at + d * rng.randf_range(0.5, 2.5), d * speed, mini(level, Skills.max_dust_level()), material)
 

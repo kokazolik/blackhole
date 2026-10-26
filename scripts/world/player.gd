@@ -50,6 +50,7 @@ var dead := false
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	position = GameState.player_position
+	GameData.world_k = GameData.BOULDER_WORLD if GameState.is_boulder() else 1.0
 	radius = target_radius()
 	_update_color()
 	GameState.absorbed.connect(_on_absorbed)
@@ -71,6 +72,7 @@ func _ready() -> void:
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	boulder_k = 1.0 if GameState.is_boulder() else 0.0
+	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
 	GameState.stage_reached.connect(_on_stage_reached)
 
 
@@ -119,7 +121,10 @@ func max_speed() -> float:
 	# Галька медленнее пылинки и с ростом разгоняется слабо: к гальке подкатываешь
 	# аккуратно, а диск из конца в конец за секунды не пролетишь.
 	var dust := 28.0 * pow(radius, 0.75)
-	var pebble := PEBBLE_SPEED * pow(radius / GameData.PEBBLE_REF_RADIUS, PEBBLE_SPEED_EXP)
+	# На валуне мир вокруг в world_k раз мельче (см. GameData.BOULDER_WORLD):
+	# скорость считаем по настоящему размеру, а в мир переводим через speed_k.
+	var wk := GameData.world_k
+	var pebble := PEBBLE_SPEED * pow(radius / wk / GameData.PEBBLE_REF_RADIUS, PEBBLE_SPEED_EXP) * GameData.speed_k()
 	return lerpf(dust, pebble, pebble_k) * Skills.stat("speed") * GameState.body_bonus("speed")
 
 
@@ -127,7 +132,8 @@ func max_speed() -> float:
 ## составе, тем мягче можно сталкиваться.
 func stick_speed() -> float:
 	var ice: float = GameData.composition(GameState.materials).get("ice", 0.0)
-	return GameData.STICK_SPEED * pow(radius / GameData.PEBBLE_REF_RADIUS, 0.4) \
+	var wk := GameData.world_k
+	return GameData.STICK_SPEED * pow(radius / wk / GameData.PEBBLE_REF_RADIUS, 0.4) * GameData.speed_k() \
 		* Skills.stat("stick") * (1.0 + 0.6 * ice)
 
 
@@ -154,6 +160,7 @@ func _process(delta: float) -> void:
 	var barrier := lerpf(1.0, GameData.barrier_drift(GameState.mass), boulder_k)
 	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k * barrier
 	position += (velocity + drift_velocity + frame_velocity) * delta
+	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
 
 	_update_heat(delta)
 	if dead:

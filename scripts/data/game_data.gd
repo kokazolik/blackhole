@@ -288,7 +288,8 @@ static func gas_drift(pos: Vector2, r: float) -> Vector2:
 	var dist := pos.length()
 	if dist < 1.0:
 		return Vector2.ZERO
-	var base := DRIFT_SPEED * pow(r / PEBBLE_REF_RADIUS, DRIFT_SIZE_EXP)
+	# r — радиус в мире; снос считаем по настоящему размеру и переводим в мир.
+	var base := DRIFT_SPEED * pow(r / world_k / PEBBLE_REF_RADIUS, DRIFT_SIZE_EXP) * speed_k()
 	var radial := -1.0
 	var calm := 0.0
 	for rc in PRESSURE_RINGS:
@@ -321,10 +322,25 @@ const BARRIER_FADE := 0.5            # как быстро снос слабее
 const BOULDER_RADIUS_EXP := 1.0 / 9.0
 
 
+# Смена масштаба на валуне. Настоящая звезда больше метрового валуна в
+# миллиарды раз; показать так нельзя, но и прежние ~70 раз — слишком мало. При
+# превращении в валун всё вокруг тебя (тело, гальки, скорости, снос) становится
+# в BOULDER_WORLD раз меньше, а звезда и диск остаются прежними. Камера
+# приближается, и на экране ты прежнего размера, а звезда — огромная.
+const BOULDER_WORLD := 0.25
+static var world_k := 1.0  # 1 до валуна, BOULDER_WORLD на валуне; плавно в переходе (ставит Player)
+
+
+## Скорости на валуне уменьшаются слабее, чем размеры: иначе диск для валуна
+## становится в 4 раза больше, и до колец и снеговой линии не долететь.
+static func speed_k() -> float:
+	return sqrt(world_k)
+
+
 static func body_radius(m: float) -> float:
 	if m <= BOULDER_MASS:
-		return BASE_RADIUS * pow(maxf(m, 0.0), 1.0 / 3.0)
-	return BASE_RADIUS * pow(BOULDER_MASS, 1.0 / 3.0) * pow(m / BOULDER_MASS, BOULDER_RADIUS_EXP)
+		return BASE_RADIUS * pow(maxf(m, 0.0), 1.0 / 3.0) * world_k
+	return BASE_RADIUS * pow(BOULDER_MASS, 1.0 / 3.0) * pow(m / BOULDER_MASS, BOULDER_RADIUS_EXP) * world_k
 
 
 ## Во сколько раз снос сильнее, чем у гальки того же радиуса (1 до валуна).
