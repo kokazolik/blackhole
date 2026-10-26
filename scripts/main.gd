@@ -103,6 +103,13 @@ func _ready() -> void:
 	pebble_field.chunks_broken.connect(func(at: Vector2) -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
+	pebble_field.crash_burst.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26)
+		if "crash" in GameState.tips_seen:
+			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
+	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
+		if "clump" in GameState.tips_seen:
+			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -319,6 +326,8 @@ func _check_tips() -> void:
 				and pebble_field.chunk_center() != Vector2.INF,  # дать кускам разлететься
 		"ice": player.ice_vapor > 0.0 and hud._ice_label.visible,
 		"shadow": GameState.is_boulder() and pebble_field.shadow_spot() != Vector2.INF,
+		"crash": pebble_field.crash_spot() != Vector2.INF,
+		"clump": pebble_field.clump_left > 3.0 and pebble_field.clump_left < PebbleField.CLUMP_TIME - 1.0,
 	}
 	for kind in found:
 		if found[kind] and not kind in GameState.tips_seen:
@@ -327,7 +336,8 @@ func _check_tips() -> void:
 			tip.steps = [Tutorial.TIPS[kind]]
 			tip.tip = kind
 			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
-					"shadow": pebble_field.shadow_spot()}.get(kind, Vector2.INF)
+					"shadow": pebble_field.shadow_spot(), "crash": pebble_field.crash_spot(),
+					"clump": pebble_field.clump_center + dust_field.frame_offset}.get(kind, Vector2.INF)
 			tip.start_delay = 0.1
 			$UI.add_child(tip)
 			$UI.move_child(pause_menu, -1)

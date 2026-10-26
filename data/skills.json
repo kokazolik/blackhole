@@ -1274,6 +1274,50 @@
 			},
 			"icon": "gravity_1",
 			"legendary": true
+		},
+		{
+			"id": "b_hunter",
+			"title": "Охотник за обломками",
+			"desc": "Ты знаешь, где искать после столкновений: обломки валунов и мелочь из сгустка приносят на 25% больше звёздной пыли за уровень.",
+			"cost": 9000,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				2,
+				12
+			],
+			"requires": [
+				"b_transfer"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"debris_value": 0.25
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "b_collapse",
+			"title": "Гравитационный коллапс",
+			"desc": "Легендарный навык. Сгусток сжимается под собственным весом, а ты его центр тяжести: стоит влететь в сгусток, и вся его мелочь схлопывается прямо в тебя.",
+			"cost": 70000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				1,
+				13.3
+			],
+			"requires": [
+				"b_grip",
+				"b_hunter"
+			],
+			"requires_level": 1,
+			"requires_all": true,
+			"requires_stage": 2,
+			"effects": {
+				"collapse": 1.0
+			},
+			"icon": "swarm",
+			"legendary": true
 		}
 	]
 }

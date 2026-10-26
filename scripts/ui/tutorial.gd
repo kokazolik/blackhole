@@ -198,6 +198,20 @@ const TIPS := {
 		"pause": true,
 		"focus": "spot",
 	},
+	"crash": {
+		"id": "t_crash",
+		"text": "Видел? Два валуна врезались друг в друга и разлетелись облаком обломков. Обломки прилипают на любой скорости и стоят вдвое дороже, но они быстрые, а через полминуты рассыплются в пыль. Лови!",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
+	"clump": {
+		"id": "t_clump",
+		"text": "Смотри, в кольце мелочь сбилась в сгусток, и он сжимается. Через 25 секунд всё, что не собрали, слипнется в новый валун. Кто успеет в центр, заберёт больше всех.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
 	"geode": {
 		"id": "t_geode",
 		"text": "Жеода! Внутри этой гальки были кристаллы, поэтому она принесла намного больше звёздной пыли. Такие попадаются редко, а знание «Жеоды» в книге поможет находить их чаще.",
@@ -672,9 +686,9 @@ func _prepare_focus(step: Dictionary) -> bool:
 		"spot":
 			if tip_pos == Vector2.INF:
 				return false
-			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18}.get(tip, 0.1)
+			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3}.get(tip, 0.1)
 			_focus = {"pos": tip_pos, "r": r}
-			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень"}.get(tip, ""), "color": GOLD}]
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток"}.get(tip, ""), "color": GOLD}]
 		"chip":
 			_focus = {"pos": pl.position, "r": pl.radius * 4.0}
 			_marks = [{"pos": pl.position, "r": pl.radius * 3.2, "label": "осколки", "color": Color(1.0, 0.55, 0.4)}]

@@ -20,6 +20,9 @@ signal pebble_split(world_position: Vector2)
 signal self_split(world_position: Vector2)
 signal eddy_started(world_position: Vector2)
 signal pebble_absorbed(world_position: Vector2)
+signal crash_started(world_position: Vector2)  # два валуна летят друг в друга
+signal crash_burst(world_position: Vector2)    # столкнулись: облако обломков
+signal clump_started(world_position: Vector2)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
@@ -79,6 +82,17 @@ const EDDY_DURATION := 30.0
 const EDDY_COUNT := 10
 const EDDY_VALUE := 1.5               # множитель звёздной пыли за гальку из вихря
 const EDDY_SPIN := 1.7                # скорость круговорота в долях скорости слипания
+# События этапа «Валун».
+const CRASH_INTERVAL := 150.0         # столкновение валунов вдали: раз в пару минут
+const CRASH_FLIGHT := 2.6             # секунд до удара после появления
+const CRASH_PIECES := 11              # обломков с каждого валуна
+const CRASH_MASS := 0.1               # масса облака в долях твоей
+const CRASH_LIFE := 30.0              # облако живёт полминуты, потом рассыпается в пыль
+const CRASH_VALUE := 2.0              # обломки ценнее обычной мелочи
+const CLUMP_INTERVAL := 170.0         # сгусток: только в кольце-ловушке
+const CLUMP_TIME := 25.0              # за столько он сжимается в валун
+const CLUMP_COUNT := 30
+const CLUMP_VALUE := 1.5
 
 class Pebble:
 	var pos: Vector2  # в системе отсчёта пыли (мир = pos + dust_field.frame_offset)
@@ -97,6 +111,9 @@ class Pebble:
 	var shard := false     # угловатый обломок (шейдер рисует гранёный камень вместо окатанной гальки)
 	var shard_seed := 0.0  # форма обломка
 	var own := false       # кусок, отколотый от тебя самого («Куча щебня» тянет его обратно)
+	var life := 0.0        # >0 — обломок облака столкновения: рассыпется через столько секунд
+	var crash := false     # валун, летящий на столкновение (газ его не тормозит)
+	var clump := false     # из сгустка: стягивается к его центру
 
 var player: Player
 var dust_field: DustField
@@ -117,6 +134,15 @@ var eddy_left := 0.0
 var _eddy_timer := EDDY_INTERVAL * 0.6
 var _eddy_fx := ColorRect.new()  # закрученный газ под гальками (шейдер eddy)
 var _eddy_t := 0.0
+var _crash_timer := 75.0
+var _crash_pair: Array[Pebble] = []
+var crash_left := 0.0   # сколько ещё живёт облако обломков
+var crash_center := Vector2.ZERO  # в системе отсчёта пыли
+var _clump_timer := 60.0
+var clump_left := 0.0
+var clump_center := Vector2.ZERO  # в системе отсчёта пыли
+var clump_radius := 0.0
+var _clump_r0 := 0.0
 
 
 func _ready() -> void:
@@ -165,6 +191,8 @@ func _process(delta: float) -> void:
 	_update_combo(delta)
 	_update_swarm(delta)
 	_update_eddy(delta)
+	_update_crash(delta)
+	_update_clump(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
 	var pull_cap := 0.5
@@ -181,7 +209,18 @@ func _process(delta: float) -> void:
 	while i >= 0:
 		var p := pebbles[i]
 		var wp := world_pos(p)
-		p.vel *= drag
+		if not p.crash:
+			p.vel *= drag
+		if p.life > 0.0:
+			p.life -= delta
+			if p.life <= 0.0:
+				# Облако рассеялось: несобранный обломок крошится в пыль.
+				_debris(wp, Vector2.from_angle(rng.randf() * TAU), 10.0, p.material, 3)
+				pebbles.remove_at(i)
+				i -= 1
+				continue
+		if p.clump and clump_left > 0.0:
+			_clump_pull(p, wp, delta)
 		if p.eddy and eddy_left > 0.0:
 			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
 		if rubble and p.own and p.hit_cd < 0.6:
@@ -577,6 +616,10 @@ func _collide(p: Pebble, index: int) -> void:
 		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
 		if p.eddy:
 			value *= EDDY_VALUE
+		if p.life > 0.0:
+			value *= CRASH_VALUE * Skills.stat("debris_value")
+		if p.clump:
+			value *= CLUMP_VALUE * Skills.stat("debris_value")
 		if p.food:
 			value *= FOOD_VALUE
 		if GameState.is_boulder():
@@ -924,6 +967,7 @@ func _draw_hints() -> void:
 		return
 	var px := 1.0 / camera.zoom.x
 	_draw_shadows()
+	_draw_clump()
 	var stick := player.stick_speed()
 	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон
 	# не тянул, когда вокруг рой крупных галек.
@@ -966,3 +1010,214 @@ func _draw_hints() -> void:
 		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
 	if not dash_pts.is_empty():
 		_hint.draw_multiline_colors(dash_pts, dash_cols, -1.0)
+
+
+## Столкновение валунов: вдали два крупных тела летят друг в друга и
+## разбиваются в облако быстрых обломков. Собирать их выгодно, но они быстрые.
+func _update_crash(delta: float) -> void:
+	if crash_left > 0.0:
+		crash_left -= delta
+	if not GameState.is_boulder() or player.boulder_k < 1.0 or player.dead:
+		return
+	if not _crash_pair.is_empty():
+		var a: Pebble = _crash_pair[0]
+		var b: Pebble = _crash_pair[1]
+		if not (a in pebbles and b in pebbles):
+			for q in _crash_pair:
+				q.crash = false
+			_crash_pair.clear()
+			return
+		if a.pos.distance_to(b.pos) < (a.r + b.r) * 0.9:
+			_crash_burst(a, b)
+		return
+	_crash_timer -= delta
+	if _crash_timer <= 0.0:
+		_crash_timer = CRASH_INTERVAL * rng.randf_range(0.8, 1.2)
+		_start_crash()
+
+
+func _start_crash() -> void:
+	var view_r := dust_field.view_radius()
+	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
+	var center := player.position + dir.rotated(rng.randf_range(-0.8, 0.8)) * view_r * 0.45
+	if center.length() < GameData.sublimation_distance() * 1.4 or pebbles.size() > MAX_PEBBLES - 2 * CRASH_PIECES - 2:
+		_crash_timer = 20.0
+		return
+	var axis := Vector2.from_angle(rng.randf() * TAU)
+	var gap := view_r * 0.32
+	for side in [-1.0, 1.0]:
+		var p := Pebble.new()
+		p.r = player.radius * rng.randf_range(1.0, 1.35)
+		p.pos = center + axis * side * gap - dust_field.frame_offset
+		p.vel = -axis * side * (gap - p.r) / CRASH_FLIGHT
+		p.material = _pick_material(center.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.3, 0.3)
+		p.crash = true
+		pebbles.append(p)
+		_crash_pair.append(p)
+	crash_started.emit(center)
+
+
+func _crash_burst(a: Pebble, b: Pebble) -> void:
+	var at := (world_pos(a) + world_pos(b)) * 0.5
+	var mid_vel := (a.vel + b.vel) * 0.5
+	var speed := a.vel.length() + b.vel.length()
+	var total := GameState.mass * CRASH_MASS
+	var count := CRASH_PIECES * 2
+	var room := MAX_PEBBLES - pebbles.size() + 2
+	for body: Pebble in [a, b]:
+		pebbles.erase(body)
+		var wp := body.pos + dust_field.frame_offset
+		var seeds: Array[Vector2] = []
+		for k in CRASH_PIECES:
+			seeds.append(Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.9)
+		var cells := _voronoi(_silhouette(), seeds)
+		var area := 0.0
+		for cell in cells:
+			area += absf(_area(cell))
+		var mat_cell := GameData.MATERIAL_ORDER.find(body.material) * 4 + rng.randi() % 4
+		for cell in cells:
+			if room <= 0:
+				break
+			room -= 1
+			var share := absf(_area(cell)) / area
+			var c := Pebble.new()
+			c.r = body.r * pow(share, 1.0 / 3.0) * 0.9
+			var centre := _set_shape(c, cell).rotated(body.angle)
+			c.pos = body.pos + centre * body.r
+			var out := (wp + centre * body.r - at).normalized()
+			c.vel = mid_vel + out * speed * rng.randf_range(0.5, 1.1)
+			c.chunk_mass = total / count
+			c.material = body.material
+			c.cell = mat_cell
+			c.angle = body.angle
+			c.spin = rng.randf_range(-2.0, 2.0)
+			c.life = CRASH_LIFE * rng.randf_range(0.85, 1.0)
+			c.hit_cd = 0.8
+			pebbles.append(c)
+		_debris(wp, (wp - at).normalized(), speed, body.material, 16)
+	_crash_pair.clear()
+	crash_center = at - dust_field.frame_offset
+	crash_left = CRASH_LIFE
+	crash_burst.emit(at)
+
+
+## Середина ещё не собранного облака обломков (INF, если его нет).
+func crash_spot() -> Vector2:
+	if crash_left <= 0.0:
+		return Vector2.INF
+	var sum := Vector2.ZERO
+	var n := 0
+	for p in pebbles:
+		if p.life > 0.0:
+			sum += world_pos(p)
+			n += 1
+	return sum / n if n >= 4 else Vector2.INF
+
+
+## Сгусток: в кольце-ловушке мелочь сбивается в облако, которое сжимается
+## (потоковая неустойчивость в полную силу). Кто успел в центр — забирает
+## большую часть; что не собрали, к концу слипается в новый валун.
+func _update_clump(delta: float) -> void:
+	if clump_left > 0.0:
+		clump_left -= delta
+		clump_radius = _clump_r0 * lerpf(0.25, 1.0, clump_left / CLUMP_TIME)
+		if clump_left <= 0.0:
+			_clump_end()
+		return
+	if not GameState.is_boulder() or player.boulder_k < 1.0 or player.dead:
+		return
+	if GameData.trap_strength(player.position.length()) < 0.5:
+		return  # сгусток бывает только там, где копятся гальки
+	_clump_timer -= delta
+	if _clump_timer <= 0.0:
+		_clump_timer = CLUMP_INTERVAL * rng.randf_range(0.8, 1.2)
+		_start_clump()
+
+
+func _start_clump() -> void:
+	var view_r := dust_field.view_radius()
+	# Вдоль кольца, а не поперёк: сгусток остаётся в ловушке.
+	var pp := player.position
+	var along := pp.orthogonal().normalized() * (1.0 if rng.randf() < 0.5 else -1.0)
+	var center := pp + along * view_r * 0.26
+	center = center.normalized() * pp.length()
+	var count := mini(CLUMP_COUNT, MAX_PEBBLES - pebbles.size())
+	if count < 10:
+		_clump_timer = 20.0
+		return
+	_clump_r0 = view_r * 0.17
+	clump_radius = _clump_r0
+	clump_center = center - dust_field.frame_offset
+	clump_left = CLUMP_TIME
+	for k in count:
+		var p := Pebble.new()
+		p.pos = clump_center + Vector2.from_angle(rng.randf() * TAU) * _clump_r0 * sqrt(rng.randf())
+		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y)
+		p.food = true
+		p.clump = true
+		p.material = _pick_material(center.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.6, 0.6)
+		pebbles.append(p)
+	clump_started.emit(center)
+
+
+## Мелочь сгустка стягивается к центру и кружит; «Гравитационный коллапс»
+## уводит её в тебя, если ты внутри.
+func _clump_pull(p: Pebble, wp: Vector2, delta: float) -> void:
+	var c := clump_center + dust_field.frame_offset
+	var to_c := c - wp
+	var d := to_c.length()
+	if Skills.stat("collapse") > 0.0 and player.position.distance_to(c) < clump_radius * 1.3:
+		var to_me := player.position - wp
+		p.vel = p.vel.move_toward(to_me.normalized() * player.max_speed() * 0.9, player.max_speed() * 3.0 * delta)
+		return
+	var want := Vector2.ZERO
+	if d > 0.001:
+		# Внутрь, если за краем, и по кругу: облако живое, а не стоит.
+		# Каждая галька держится своей орбиты (по её вращению): облако сплошное, а не кольцо.
+		var orbit := clump_radius * (0.12 + 0.8 * absf(p.spin) / 0.6)
+		want = to_c / d * (d - orbit) * 0.8 + to_c.orthogonal() / d * orbit * 0.5
+	p.vel = p.vel.lerp(want, 1.0 - exp(-2.0 * delta))
+
+
+func _clump_end() -> void:
+	var left := 0
+	var mat := ""
+	for p in pebbles:
+		if p.clump:
+			left += 1
+			mat = p.material
+	var c := clump_center
+	var i := pebbles.size() - 1
+	while i >= 0:
+		if pebbles[i].clump:
+			pebbles.remove_at(i)
+		i -= 1
+	if left < 4:
+		return
+	# Несобранное слипается в одно тело: из сгустка родился валун.
+	var p := Pebble.new()
+	p.pos = c
+	p.r = player.radius * clampf(0.35 + 0.03 * left, 0.5, 1.3)
+	p.material = mat
+	p.cell = GameData.MATERIAL_ORDER.find(mat) * 4 + rng.randi() % 4
+	p.angle = rng.randf() * TAU
+	p.spin = rng.randf_range(-0.3, 0.3)
+	pebbles.append(p)
+
+
+## Сгусток виден как тёплое облако газа, которое сжимается.
+func _draw_clump() -> void:
+	if clump_left <= 0.0:
+		return
+	var c := clump_center + dust_field.frame_offset
+	var fade := clampf(clump_left / 2.0, 0.0, 1.0) * clampf((CLUMP_TIME - clump_left) / 1.5, 0.0, 1.0)
+	for k in 4:
+		var r := clump_radius * (1.25 - 0.22 * k)
+		_hint.draw_circle(c, r, Color(1.0, 0.82, 0.55, 0.022 * fade))
+	_hint.draw_arc(c, clump_radius * 1.25, 0.0, TAU, 64, Color(1.0, 0.85, 0.6, 0.22 * fade), 1.5 / camera.zoom.x, true)
