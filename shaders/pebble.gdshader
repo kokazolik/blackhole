@@ -48,7 +48,42 @@ void fragment() {
 	col = mix(col, vec3(0.82, 0.92, 1.0) * (lum * 1.2 + 0.05), v_frost * 0.4);
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 	vec4 outc = vec4(col, tex.a);
-	if (v_data.w > 0.5) {
+	if (v_data.w > 1.5) {
+		// Обломок: угловатый многоугольник с плоскими гранями вместо окатанной гальки.
+		vec2 q = (sp - 0.5) / 0.36;
+		float seed = fract(v_data.x * 0.618 + v_data.y * 0.137);
+		q *= 0.8;  // чуть крупнее: острые углы выходят за круг, а площадь как у гальки
+		q.y *= 1.0 + 0.6 * fract(seed * 5.3);  // вытянутый: обломки редко бывают ровными
+		float nv = 5.0 + floor(fract(seed * 3.7) * 3.0);
+		float step_a = 6.2832 / nv;
+		float th = atan(q.y, q.x) + 3.1416;
+		float i0 = floor(th / step_a);
+		float i1 = mod(i0 + 1.0, nv);
+		float r0 = 0.5 + 0.5 * fract(sin((i0 + seed * 13.0) * 78.233) * 43758.5453);
+		float r1 = 0.5 + 0.5 * fract(sin((i1 + seed * 13.0) * 78.233) * 43758.5453);
+		vec2 v0 = -vec2(cos(i0 * step_a), sin(i0 * step_a)) * r0;
+		vec2 v1 = -vec2(cos((i0 + 1.0) * step_a), sin((i0 + 1.0) * step_a)) * r1;
+		vec2 e = v1 - v0;
+		float rr = length(q);
+		vec2 u = q / max(rr, 0.0001);
+		// Где луч из центра пересекает ребро: это край обломка в этом направлении.
+		float edge = (v0.x * e.y - v0.y * e.x) / (u.x * e.y - u.y * e.x);
+		float aa = fwidth(rr) * 1.2;
+		float mask = 1.0 - smoothstep(edge - aa, edge + aa, rr);
+		// Грань освещена по своему наклону: у каждой своя яркость.
+		vec2 mid = normalize(v0 + v1);
+		vec3 fn = normalize(vec3(mid * 0.65 * (rr / max(edge, 0.001)), 0.75));
+		float fd = max(dot(fn, normalize(vec3(light_dir, 0.25))), 0.0);
+		float tone = 0.8 + 0.35 * fract(sin((i0 + seed * 31.0) * 12.9898) * 43758.5453);
+		vec3 base = texture(atlas, (cell + vec2(0.5) + q * 0.18) * 0.25).rgb;
+		vec3 scol = base * star_light * (0.25 + 1.3 * fd) * tone;
+		// Светлая кромка на свежем изломе.
+		scol += star_light * 0.25 * smoothstep(edge - 0.12, edge - 0.02, rr) * fd;
+		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
+		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * fd);
+		outc = vec4(scol, mask);
+	}
+	if (mod(v_data.w, 2.0) > 0.5) {
 		// Жеода: кристаллы вспыхивают по очереди, вокруг мягкий ореол.
 		vec3 gold = vec3(1.0, 0.85, 0.4);
 		float cells = 0.0;

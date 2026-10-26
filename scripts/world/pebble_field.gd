@@ -89,6 +89,7 @@ class Pebble:
 	var food := false   # мелочь на этапе «Валун»: прилипает на любой скорости
 	var chunk_mass := 0.0  # кусок, отбитый от крупной гальки: его масса задана при откалывании
 	var hit_cd := 0.0      # пауза после удара, чтобы одно касание не било много раз
+	var shard := false     # угловатый обломок, а не окатанная галька
 
 var player: Player
 var dust_field: DustField
@@ -551,6 +552,7 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 		c.angle = rng.randf() * TAU
 		c.spin = rng.randf_range(-1.2, 1.2)
 		c.geode = p.geode and k == 0
+		c.shard = true
 		c.hit_cd = 0.6
 		pebbles.append(c)
 	_debris(wp, n, impact, p.material, clampi(int(p.r * 2.0), 6, 18))
@@ -572,6 +574,7 @@ func _self_split(at: Vector2, n: Vector2, impact: float) -> void:
 		c.pos = player.position + d * (player.radius + c.r + 2.0) - dust_field.frame_offset
 		c.vel = d * maxf(impact, player.stick_speed()) * rng.randf_range(0.4, 0.8)
 		c.chunk_mass = lost / parts
+		c.shard = true
 		c.material = mat
 		c.cell = GameData.MATERIAL_ORDER.find(mat) * 4 + rng.randi() % 4
 		c.angle = rng.randf() * TAU
@@ -609,6 +612,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		c.pos = at + d * player.radius * 0.6 - dust_field.frame_offset
 		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
 		c.chunk_mass = total / count
+		c.shard = true
 		c.material = p.material
 		c.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		c.angle = rng.randf() * TAU
@@ -666,7 +670,7 @@ func _write() -> void:
 		_buf[b + 8] = p.cell
 		_buf[b + 9] = p.angle
 		_buf[b + 10] = 0.0
-		_buf[b + 11] = 1.0 if p.geode else 0.0
+		_buf[b + 11] = (1.0 if p.geode else 0.0) + (2.0 if p.shard else 0.0)
 	_mm.buffer = _buf
 	_mm.visible_instance_count = pebbles.size()
 
