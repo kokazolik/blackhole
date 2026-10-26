@@ -161,7 +161,7 @@ func _process(delta: float) -> void:
 	_update_eddy(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
-	var pull_r := player.pull_radius() * 1.5
+	var pull_r := player.pull_radius()  # не дальше края экрана, см. Player.pull_radius
 	var evap := GameData.sublimation_distance()
 	var i := pebbles.size() - 1
 	while i >= 0:
@@ -175,7 +175,10 @@ func _process(delta: float) -> void:
 			var to_p := player.position - wp
 			var dl := to_p.length()
 			if dl < pull_r and dl > 0.001:
-				p.vel += to_p / dl * player.pull_strength() * 0.6 * pull * (1.0 - dl / pull_r) * delta
+				# Гальки подплывают, а не летят снарядом: тянем слабее, чем пыль, и не
+				# разгоняем быстрее половины твоей скорости.
+				p.vel += to_p / dl * player.radius * 4.0 * pull * (1.0 - dl / pull_r) * delta
+				p.vel = p.vel.limit_length(player.max_speed() * 0.5)
 		p.pos += (p.vel + GameData.gas_drift(wp, p.r)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta

@@ -102,7 +102,13 @@ func target_radius() -> float:
 
 
 func pull_radius() -> float:
-	return radius * 7.0 * Skills.stat("reach") * sqrt(Skills.stat("gravity"))
+	var r := radius * 7.0 * Skills.stat("reach") * sqrt(Skills.stat("gravity"))
+	# С навыками на максимуме радиус уходил за край экрана, и пыль с гальками
+	# летели в тебя из невидимого. Тянем не дальше 70% половины высоты экрана.
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		r = minf(r, get_viewport_rect().size.y * 0.5 / cam.zoom.y * 0.7)
+	return r
 
 
 func pull_strength() -> float:
