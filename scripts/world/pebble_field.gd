@@ -35,7 +35,7 @@ const EASY_R := 0.2          # мельче этой доли твоего ра�
 # их можно доесть. Без навыков от сколов это всё же убыток.
 const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
 const CHUNK_MAX := 0.25      # больше этой доли галька за удар не теряет
-const CHUNK_R := Vector2(0.11, 0.19)  # размер куска в долях твоего радиуса
+const CHUNK_R := Vector2(0.22, 0.3)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 1.35                 # несъедобные — минимум на столько крупнее предела хватки
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
@@ -525,7 +525,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		var c := Pebble.new()
 		var side := 1.0 if rng.randf() < 0.5 else -1.0
 		var d := (-n).rotated(side * rng.randf_range(0.7, 1.7))
-		c.pos = at + d * player.radius * 0.3 - dust_field.frame_offset
+		c.pos = at + d * player.radius * 0.6 - dust_field.frame_offset
 		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
 		c.chunk_mass = total / count
 		c.material = p.material
@@ -533,8 +533,8 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		c.angle = rng.randf() * TAU
 		c.spin = rng.randf_range(-1.5, 1.5)
 		# Разлетаются в стороны от удара, а не прямо в тебя.
-		c.vel = d * impact * rng.randf_range(0.35, 0.7)
-		c.hit_cd = 0.5
+		c.vel = d * maxf(impact, player.stick_speed()) * rng.randf_range(0.6, 1.0)
+		c.hit_cd = 1.0
 		pebbles.append(c)
 	chunks_broken.emit(at)
 
