@@ -1,6 +1,7 @@
 """Текстуры гальки.
 
-assets/player/player_pebble.png — галька игрока (оттенки серого, цвет по составу задаёт игра)
+assets/player/pebble_<тип>.png  — галька игрока, свой облик для каждого типа тела
+                                  (каменная, металлическая, углистая, ледяная, хондрит)
 assets/pebbles/pebble_atlas.png — чужие гальки: строки — материалы (силикаты, металл,
                                   углерод, лёд), столбцы — 4 формы; клетка 128×128
 
@@ -34,7 +35,7 @@ def fbm(rng, size, base=4, octaves=5):
     return out / total
 
 
-def pebble(rng, size, palette, radius=0.36, chondrules=8, metal_specks=0, frost=0.0):
+def pebble(rng, size, palette, radius=0.36, chondrules=8, metal_specks=0, frost=0.0, sheen=0.0, cracks=0):
     """palette: (тёмный, светлый) цвет основы. Возвращает RGBA float."""
     yy, xx = (np.mgrid[0:size, 0:size] + 0.5) / size - 0.5
     # Неровный, но гладкий контур: эллипс с плавными буграми.
@@ -69,6 +70,19 @@ def pebble(rng, size, palette, radius=0.36, chondrules=8, metal_specks=0, frost=
         cx, cy = rng.uniform(-0.3, 0.3, 2)
         dd = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
         rgb += np.exp(-(dd / rng.uniform(0.006, 0.012)) ** 2)[..., None] * 0.6
+    # Металл: полосы отражений (видманштеттенова решётка на срезе железного метеорита).
+    if sheen > 0:
+        for a in rng.uniform(0, np.pi, 3):
+            band = np.sin((xx * np.cos(a) + yy * np.sin(a)) * rng.uniform(60, 90) + rng.uniform(0, 6.28))
+            rgb += (np.clip(band, 0.85, 1.0) - 0.85)[..., None] * sheen * fbm(rng, size, 4, 2)[..., None] * 2.0
+    # Углистое вещество: тонкие светлые прожилки (следы воды в старом теле).
+    for _ in range(cracks):
+        cx, cy = rng.uniform(-0.25, 0.25, 2)
+        a = rng.uniform(0, np.pi)
+        along = (xx - cx) * np.cos(a) + (yy - cy) * np.sin(a)
+        across = -(xx - cx) * np.sin(a) + (yy - cy) * np.cos(a) + 0.006 * np.sin(along * 30)
+        line = np.exp(-(across / 0.004) ** 2) * np.exp(-(along / rng.uniform(0.08, 0.16)) ** 2)
+        rgb += line[..., None] * np.array([0.35, 0.3, 0.26])[None, None]
     # Иней: светлые кристаллики по краю и пятнами.
     if frost > 0:
         f = fbm(rng, size, 10, 3)
@@ -87,10 +101,17 @@ def to_img(a):
 
 def main():
     rng = np.random.default_rng(7)
-    # Галька игрока: серая, цвет придёт из состава тела.
-    player = pebble(rng, 512, ((0.42, 0.42, 0.42), (0.95, 0.95, 0.95)), chondrules=14, metal_specks=10)
-    out = ROOT / "assets" / "player" / "player_pebble.png"
-    to_img(player).resize((256, 256), Image.LANCZOS).save(out)
+    # Галька игрока: облик зависит от типа тела.
+    bodies = {
+        "chondrite": dict(palette=((0.42, 0.38, 0.33), (0.92, 0.88, 0.8)), chondrules=22, metal_specks=12),
+        "silicate": dict(palette=((0.5, 0.4, 0.29), (0.98, 0.86, 0.66)), chondrules=8, metal_specks=3),
+        "metal": dict(palette=((0.36, 0.39, 0.45), (0.8, 0.84, 0.92)), chondrules=0, metal_specks=26, sheen=0.5),
+        "carbon": dict(palette=((0.2, 0.16, 0.14), (0.56, 0.46, 0.4)), chondrules=4, metal_specks=2, cracks=7),
+        "ice": dict(palette=((0.55, 0.68, 0.8), (0.93, 0.98, 1.0)), chondrules=2, frost=1.0),
+    }
+    for key, kw in bodies.items():
+        img = pebble(np.random.default_rng(11), 512, **kw)
+        to_img(img).resize((256, 256), Image.LANCZOS).save(ROOT / "assets" / "player" / f"pebble_{key}.png")
 
     palettes = {
         "silicate": dict(palette=((0.45, 0.37, 0.27), (0.9, 0.8, 0.62)), chondrules=10, metal_specks=3),

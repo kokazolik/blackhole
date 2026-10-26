@@ -4,6 +4,7 @@ extends Node2D
 const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экране в начале, px
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
+const PEBBLE_ZOOM := 1.3              # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
 
 var player: Player
 var dust_field: DustField
@@ -207,7 +208,8 @@ func _open_tree() -> void:
 
 func _target_zoom() -> float:
 	var start_zoom := SCREEN_RADIUS_AT_START / GameData.BASE_RADIUS
-	return start_zoom * pow(GameData.BASE_RADIUS / player.radius, ZOOM_GROWTH_EXP)
+	var z := start_zoom * pow(GameData.BASE_RADIUS / player.radius, ZOOM_GROWTH_EXP)
+	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k)
 
 
 func _process(delta: float) -> void:

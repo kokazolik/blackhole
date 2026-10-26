@@ -37,6 +37,8 @@ const DRAG := 0.55  # доля скорости, остающаяся через
 const SCAN_INTERVAL := 0.2  # как часто полный обход: удаление дальней пыли и поиск ближней
 const REBASE_DISTANCE := 20000.0
 const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
+# Рядом с галькой пылинки — микронная крапинка: на этапе «Галька» рисуем их мельче.
+const PEBBLE_DUST_SCALE := 0.4
 
 class Dust:
 	var pos: Vector2  # в системе отсчёта, летящей по орбите (мир = pos + frame_offset)
@@ -59,6 +61,7 @@ var _active_count := 0  # пыль в активной области на по�
 var _scan_timer := 0.0
 var _cluster_timer := 0.0
 var _filled := false
+var _size_scale := 1.0  # видимый размер пыли относительно настоящего
 var _clumps := FastNoiseLite.new()
 var _rare := FastNoiseLite.new()  # где встречаются плотные нити: ~2% пространства
 var _mm_node := MultiMeshInstance2D.new()
@@ -134,6 +137,14 @@ func _process(delta: float) -> void:
 	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
 	# Вспышка на звезде: пыль освещена ярче.
 	_mm_node.material.set_shader_parameter("star_light", STAR_LIGHT * (1.0 + 0.9 * Star.flare))
+
+	var want := lerpf(1.0, PEBBLE_DUST_SCALE, player.pebble_k)
+	if absf(want - _size_scale) > 0.001:
+		_size_scale = want
+		for d in dust:
+			_buf[d.idx * FLOATS] = d.r * QUAD_SCALE * _size_scale
+			_buf[d.idx * FLOATS + 5] = d.r * QUAD_SCALE * _size_scale
+		_dirty = true
 
 	var view_r := view_radius()
 	var active_r := view_r * 1.35
@@ -247,7 +258,7 @@ func _write_origin(d: Dust) -> void:
 
 func _write(d: Dust) -> void:
 	var k := d.idx * FLOATS
-	var s := d.r * QUAD_SCALE
+	var s := d.r * QUAD_SCALE * _size_scale
 	var col: Color = GameData.MATERIALS[d.material].color
 	_buf[k] = s
 	_buf[k + 1] = 0.0

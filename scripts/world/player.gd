@@ -11,7 +11,15 @@ signal burned_up
 const ACCEL_FACTOR := 3.0
 const PEBBLE_ACCEL_FACTOR := 1.4  # галька тяжелее: тяга разгоняет её дольше
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
-const PEBBLE_TEX := preload("res://assets/player/player_pebble.png")
+# Облик гальки по типу тела; смешанные и неоформленные тела выглядят как хондрит.
+const PEBBLE_TEX := {
+	"chondrite": preload("res://assets/player/pebble_chondrite.png"),
+	"silicate": preload("res://assets/player/pebble_silicate.png"),
+	"metal": preload("res://assets/player/pebble_metal.png"),
+	"carbon": preload("res://assets/player/pebble_carbon.png"),
+	"ice": preload("res://assets/player/pebble_ice.png"),
+}
+const LOOK_FADE_TIME := 1.5
 const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~70% её ширины; видимый размер как у пыли (~2.7 радиуса)
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
 const TRAIL_POINTS := 20
@@ -32,6 +40,9 @@ var _trail_timer := 0.0
 var _glow_tex := _make_glow()
 var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
 var _pebble := Sprite2D.new()  # облик гальки, проступает при переходе
+var _pebble_old := Sprite2D.new()  # прежний облик, гаснет под новым при смене типа тела
+var _look := ""
+var _look_fade := 1.0
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
 var dead := false
@@ -49,9 +60,12 @@ func _ready() -> void:
 	mat.shader = preload("res://shaders/lit_grain.gdshader")
 	_grain.material = mat
 	add_child(_grain)
-	_pebble.texture = PEBBLE_TEX
+	_pebble_old.material = mat.duplicate()
+	add_child(_pebble_old)
 	_pebble.material = mat.duplicate()
 	add_child(_pebble)
+	_look = _look_key()
+	_pebble.texture = PEBBLE_TEX[_look]
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	GameState.stage_reached.connect(_on_stage_reached)
 
@@ -156,6 +170,7 @@ func die() -> void:
 	GameState.burned_up = true
 	_grain.visible = false
 	_pebble.visible = false
+	_pebble_old.visible = false
 	queue_redraw()
 	burned_up.emit()
 
@@ -230,7 +245,14 @@ func _draw() -> void:
 func _update_grain(r: float) -> void:
 	var to_star := (-position).normalized().rotated(-_spin)
 	var heat_col := GameData.thermal_color(temperature)
-	for sprite in [_grain, _pebble]:
+	var look := _look_key()
+	if look != _look:
+		_look = look
+		_pebble_old.texture = _pebble.texture
+		_pebble.texture = PEBBLE_TEX[look]
+		_look_fade = 0.0
+	_look_fade = minf(_look_fade + get_process_delta_time() / LOOK_FADE_TIME, 1.0)
+	for sprite in [_grain, _pebble, _pebble_old]:
 		sprite.rotation = _spin
 		sprite.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
 		var mat := sprite.material as ShaderMaterial
@@ -239,6 +261,15 @@ func _update_grain(r: float) -> void:
 		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
 	# Галька темнее и плотнее рыхлой пылинки: цвет состава почти без осветления.
 	_grain.modulate = Color(body_color.lightened(0.5 + 0.3 * _pulse), 1.0 - pebble_k)
-	_pebble.modulate = Color(body_color.lightened(0.25 + 0.3 * _pulse), pebble_k)
+	# У гальки свой рисунок, цвет состава лишь чуть его подкрашивает.
+	var tint := Color.WHITE.lerp(body_color, 0.12).lightened(0.2 + 0.3 * _pulse)
+	_pebble.modulate = Color(tint, pebble_k * _look_fade)
+	_pebble_old.modulate = Color(tint, pebble_k)
+	_pebble_old.visible = pebble_k > 0.0 and _look_fade < 1.0
 	_grain.visible = pebble_k < 1.0
 	_pebble.visible = pebble_k > 0.0
+
+
+func _look_key() -> String:
+	var type := GameState.body_type()
+	return type if PEBBLE_TEX.has(type) else "chondrite"

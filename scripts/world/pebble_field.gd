@@ -16,7 +16,7 @@ signal evaporated(world_position: Vector2, grain_radius: float)
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
 const MAX_PEBBLES := 140
-const BASE_COUNT := 22               # галек в округе при плотности 1 (вне колец)
+const BASE_COUNT := 20               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
 # Радиусы чужих галек в долях радиуса игрока: тела одного размера дрейфуют вместе,
 # поэтому рядом в основном гальки, сравнимые с тобой.
