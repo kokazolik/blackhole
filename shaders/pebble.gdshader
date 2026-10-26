@@ -49,51 +49,70 @@ void fragment() {
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 	vec4 outc = vec4(col, tex.a);
 	if (v_data.w > 1.5) {
-		// Осколок шара: долька, у которой с одной стороны дуга прежней поверхности
-		// (с корочкой), а с остальных — плоские свежие изломы, сходящиеся к острию.
-		vec2 q = (sp - 0.5) / 0.36 * 0.85;
-		float seed = fract(v_data.x * 0.618 + v_data.y * 0.137);
-		float h1 = fract(sin(seed * 91.7) * 43758.5453);
-		float h2 = fract(sin(seed * 47.3 + 1.3) * 43758.5453);
-		float h3 = fract(sin(seed * 13.9 + 2.7) * 43758.5453);
-		vec2 dir = vec2(cos(seed * 6.2832), sin(seed * 6.2832));
-		vec2 perp = vec2(-dir.y, dir.x);
-		// Прежняя поверхность: большой круг, его дуга — внешний край осколка.
-		float rc = 1.25 + 0.6 * h1;
-		vec2 c = dir * (0.95 - rc);
-		float d_arc = length(q - c) - rc;
-		// Два излома от острия, раскрываются к дуге; иногда острие сколото третьим.
-		vec2 tip = -dir * (0.8 + 0.15 * h2) + perp * (h3 - 0.5) * 0.4;
-		float w1 = 0.35 + 0.4 * h2;
-		float w2 = 0.35 + 0.4 * h3;
-		vec2 e1 = dir * cos(w1) + perp * sin(w1);
-		vec2 e2 = dir * cos(w2) - perp * sin(w2);
-		vec2 v = q - tip;
-		float d1 = e1.x * v.y - e1.y * v.x;
-		float d2 = -(e2.x * v.y - e2.y * v.x);
-		float d3 = (h1 > 0.6 ? 0.25 * h1 : -1.0) - dot(v, dir);
-		float sd = max(max(d_arc, d3), max(d1, d2));
-		float aa = fwidth(q.x) * 1.5;
+		// Обломок после удара. Как в лабораторных опытах по разрушению и как валуны
+		// на Итокаве и Рюгу: угловатый, вытянутый (оси примерно 1 : 0,7 : 0,5),
+		// с плоскими гранями излома и острыми рёбрами. Рисуем выпуклый многогранник
+		// сверху: верх из двух граней по гребню, по краям скошенные боковые грани,
+		// у части обломков одна сторона — кусок прежней округлой поверхности.
+		float sd0 = fract(v_data.w);
+		// Квадрат обломка в SHARD_QUAD раз больше, поэтому q доходит до ~1,6.
+		vec2 q = (sp - 0.5) / 0.36;
+		q *= vec2(0.78 + 0.12 * fract(sd0 * 7.31), 1.15 + 0.2 * fract(sd0 * 3.17));
+		float nv = 5.0 + floor(fract(sd0 * 5.71) * 3.0);
+		bool crust = fract(sd0 * 11.3) < 0.65;
+		float sd = -10.0;
+		vec2 nf = vec2(1.0, 0.0);
+		float fi = 0.0;
+		for (int i = 0; i < 7; i++) {
+			float k = float(i);
+			if (k >= nv) {
+				break;
+			}
+			float hh = fract(sin((k + sd0 * 17.0) * 78.233) * 43758.5453);
+			float ang = k * 6.2832 / nv + (hh - 0.5) * 0.9;
+			vec2 n = vec2(cos(ang), sin(ang));
+			float dist = 0.62 + 0.3 * fract(hh * 9.7);
+			float v = dot(q, n) - dist;
+			if (i == 0 && crust) {
+				// Прежняя поверхность: дуга большого круга вместо плоского излома.
+				float rc = 1.3;
+				v = length(q + n * (rc - dist)) - rc;
+			}
+			if (v > sd) {
+				sd = v;
+				nf = n;
+				fi = k;
+			}
+		}
+		float aa = fwidth(q.y) * 1.3;
 		float mask = 1.0 - smoothstep(-aa, aa, sd);
-		vec3 ld = normalize(vec3(light_dir, 0.25));
-		vec3 tex_c = tex.a > 0.05 ? tex.rgb : texture(atlas, (cell + vec2(0.5)) * 0.25).rgb;
-		// Корочка у дуги — старая окатанная поверхность, освещена как часть шара.
-		float crust = 1.0 - smoothstep(0.06, 0.2, -d_arc);
-		vec3 n_crust = normalize(vec3((q - c) / rc * 0.85, 0.5));
-		vec3 crust_col = tex_c * star_light * (0.2 + 1.4 * max(dot(n_crust, ld), 0.0));
-		// Излом: две плоские грани по сторонам от гребня, светлее и ровнее корочки.
-		float side = sign(perp.x * v.y - perp.y * v.x + 0.0001);
-		vec3 n_face = normalize(vec3(perp * side * 0.55 - dir * 0.15, 0.8));
-		vec3 fresh = mix(tex_c, vec3(dot(tex_c, vec3(0.33))), 0.25) * 1.25;
-		vec3 face_col = fresh * star_light * (0.25 + 1.2 * max(dot(n_face, ld), 0.0));
-		// Тонкая светлая кромка там, где излом встречается с корочкой.
-		float rim = (1.0 - smoothstep(0.0, 0.05, abs(-d_arc - 0.13))) * 0.25;
-		vec3 scol = mix(face_col, crust_col, crust) + star_light * rim * max(dot(n_crust, ld), 0.0);
+		bool on_crust = crust && fi < 0.5;
+		// Скос: полоса у края — боковая грань, круто наклонённая наружу.
+		float bw = 0.2 + 0.1 * fract(sd0 * 23.1);
+		float side_k = smoothstep(-bw - aa, -bw + aa, sd);
+		// Верх ломается по гребню на две грани с разным наклоном.
+		vec2 ridge = vec2(cos(sd0 * 40.0), sin(sd0 * 40.0));
+		float rs = dot(q, vec2(-ridge.y, ridge.x)) - 0.15 * (fract(sd0 * 13.7) - 0.5);
+		float half_k = smoothstep(-aa, aa, rs);
+		vec2 tilt = vec2(-ridge.y, ridge.x) * 0.38;
+		vec3 n_top = normalize(vec3(mix(-tilt, tilt, half_k) + ridge * 0.12, 1.0));
+		vec3 n_side = on_crust ? normalize(vec3(nf * 1.1, 0.75)) : normalize(vec3(nf * 1.6, 0.55));
+		vec3 nrm = normalize(mix(n_top, n_side, side_k));
+		vec3 ld = normalize(vec3(light_dir, 0.35));
+		float diff = max(dot(nrm, ld), 0.0);
+		// Вещество: узор гальки из атласа. Свежий излом светлее и зернистее,
+		// старая поверхность темнее (космическое выветривание).
+		vec3 alb = texture(atlas, (cell + vec2(0.5) + clamp(q * 0.22, vec2(-0.3), vec2(0.3))) * 0.25).rgb;
+		alb = on_crust && side_k > 0.5 ? alb * 0.7 : mix(alb, vec3(dot(alb, vec3(0.33))), 0.2) * 1.15;
+		vec3 scol = alb * star_light * (0.12 + 1.55 * diff);
+		// Острые рёбра ловят свет тонкой линией.
+		float edge_line = 1.0 - smoothstep(0.0, aa * 2.0, abs(sd + bw));
+		scol += star_light * 0.18 * edge_line * diff;
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
-		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * 0.6;
+		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 		outc = vec4(scol, mask);
 	}
-	if (mod(v_data.w, 2.0) > 0.5) {
+	if (v_data.w > 0.5 && v_data.w < 1.5) {
 		// Жеода: кристаллы вспыхивают по очереди, вокруг мягкий ореол.
 		vec3 gold = vec3(1.0, 0.85, 0.4);
 		float cells = 0.0;

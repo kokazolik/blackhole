@@ -38,6 +38,7 @@ const EASY_R := 0.2          # мельче этой доли твоего ра�
 const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
 const CHUNK_MAX := 0.25      # больше этой доли галька за удар не теряет
 const CHUNK_R := Vector2(0.22, 0.3)
+const SHARD_QUAD := 1.2    # квадрат обломка крупнее: острые углы выступают за круг
 const SPLIT_FROM := 1.2      # удар быстрее предела слипания во столько раз — может расколоть
 const SPLIT_RANGE := 1.0     # ещё на столько быстрее — шанс максимальный
 const SPLIT_MAX := 0.6       # максимальный шанс расколоть гальку одного размера с тобой
@@ -89,11 +90,8 @@ class Pebble:
 	var food := false   # мелочь на этапе «Валун»: прилипает на любой скорости
 	var chunk_mass := 0.0  # кусок, отбитый от крупной гальки: его масса задана при откалывании
 	var hit_cd := 0.0      # пауза после удара, чтобы одно касание не било много раз
-	var shard := false     # обломок: рисуется своим многоугольником, а не кругом из атласа
-	var poly := PackedVector2Array()  # контур обломка вокруг его центра (без поворота)
-	var fresh := PackedByteArray()    # 1 у рёбер свежего излома, 0 у прежней поверхности
-	var tex_off := Vector2.ZERO       # где обломок был в исходной гальке (в её радиусах): текстура продолжается
-	var tex_scale := 1.0              # мировых единиц на радиус исходной гальки
+	var shard := false     # угловатый обломок (шейдер рисует гранёный камень вместо окатанной гальки)
+	var shard_seed := 0.0  # форма обломка
 
 var player: Player
 var dust_field: DustField
@@ -104,7 +102,6 @@ var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
-var _frags := Node2D.new()  # обломки-многоугольники (разбиение Вороного)
 var chain := 0           # шагов в текущей серии слипаний
 var _chain_timer := 0.0
 var _swarm_timer := -1.0  # до следующего роя; <0 — навыка нет
@@ -144,8 +141,6 @@ func _ready() -> void:
 	_eddy_fx.visible = false
 	add_child(_eddy_fx)
 	add_child(_mm_node)
-	_frags.draw.connect(_draw_frags)
-	add_child(_frags)
 	_hint.draw.connect(_draw_hints)
 	add_child(_hint)
 
@@ -191,7 +186,6 @@ func _process(delta: float) -> void:
 			_collide(p, i)
 		i -= 1
 	_write()
-	_frags.queue_redraw()
 	_hint.queue_redraw()
 
 
@@ -558,7 +552,7 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 		var share := absf(_area(cell)) / total_area * SPLIT_KEEP
 		var c := Pebble.new()
 		c.r = p.r * pow(share, 1.0 / 3.0)
-		var centre := _set_shape(c, cell, shape, p.r)
+		var centre := _set_shape(c, cell)
 		var out := centre.rotated(p.angle)
 		c.pos = wp + out * p.r - dust_field.frame_offset
 		var d := (out.normalized() * 0.6 + n * 0.4).normalized()  # разлетаются от центра и от удара
@@ -636,32 +630,11 @@ func _centroid(poly: PackedVector2Array) -> Vector2:
 	return c / (3.0 * a) if absf(a) > 1e-6 else poly[0]
 
 
-## Делает из ячейки форму обломка: контур вокруг центра в мировых единицах, подогнанный
-## под радиус c.r (масса считается по нему), и пометки, какие рёбра — свежий излом.
-## Возвращает центр ячейки в радиусах исходного тела.
-func _set_shape(c: Pebble, cell: PackedVector2Array, shape: PackedVector2Array, parent_r: float) -> Vector2:
-	var centre := _centroid(cell)
-	var r_eq := sqrt(absf(_area(cell)) / PI)  # в радиусах исходного тела
-	var k := c.r / maxf(r_eq, 0.001)          # мировых единиц на радиус исходного тела
+## Отмечает обломок и возвращает центр его ячейки (в радиусах исходного тела).
+func _set_shape(c: Pebble, cell: PackedVector2Array) -> Vector2:
 	c.shard = true
-	c.tex_off = centre
-	c.tex_scale = k
-	c.poly = PackedVector2Array()
-	c.fresh = PackedByteArray()
-	for i in cell.size():
-		c.poly.append((cell[i] - centre) * k)
-		var a := cell[i]
-		var b := cell[(i + 1) % cell.size()]
-		c.fresh.append(0 if _on_outline((a + b) * 0.5, shape) else 1)
-	return centre * (k / parent_r) if parent_r > 0.0 else centre
-
-
-func _on_outline(pt: Vector2, shape: PackedVector2Array) -> bool:
-	for i in shape.size():
-		var q := Geometry2D.get_closest_point_to_segment(pt, shape[i], shape[(i + 1) % shape.size()])
-		if q.distance_squared_to(pt) < 1e-5:
-			return true
-	return false
+	c.shard_seed = rng.randf() * 0.99
+	return _centroid(cell)
 
 
 ## Кусок, сколотый с поверхности тела радиуса 1 в сторону u: срезанная «шапка»,
@@ -694,7 +667,7 @@ func _self_split(at: Vector2, n: Vector2, impact: float) -> void:
 			break
 		var c := Pebble.new()
 		c.r = player.radius * rng.randf_range(0.3, 0.42)
-		var centre := _set_shape(c, cell, res[1], 0.0)
+		var centre := _set_shape(c, cell)
 		var d := (centre.normalized() * 0.7 + Vector2.from_angle(rng.randf() * TAU) * 0.3).normalized()
 		c.pos = player.position + centre * player.radius + d * 3.0 - dust_field.frame_offset
 		c.vel = (d - n * 0.5).normalized() * maxf(impact, player.stick_speed()) * rng.randf_range(0.4, 0.8)
@@ -737,7 +710,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	for cell in cells:
 		var c := Pebble.new()
 		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
-		var centre := _set_shape(c, cell, res[1], 0.0)
+		var centre := _set_shape(c, cell)
 		var out := centre.rotated(p.angle)
 		c.pos = wp + out * p.r - dust_field.frame_offset
 		c.chunk_mass = total / cells.size()
@@ -752,36 +725,6 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		c.hit_cd = 1.0
 		pebbles.append(c)
 	chunks_broken.emit(at)
-
-
-## Обломки: многоугольники с текстурой исходной гальки. Свежий излом светлее,
-## прежняя поверхность обведена тенью.
-func _draw_frags() -> void:
-	var px := 1.0 / camera.zoom.x
-	var to_star := -player.position.normalized()
-	for p in pebbles:
-		if not p.shard or p.poly.is_empty():
-			continue
-		var wp := world_pos(p)
-		_frags.draw_set_transform(wp, p.angle, Vector2.ONE)
-		var cell_xy := Vector2(p.cell % 4, p.cell / 4)
-		var uvs := PackedVector2Array()
-		for v in p.poly:
-			uvs.append((cell_xy + Vector2(0.5, 0.5) + (p.tex_off + v / p.tex_scale) * 0.24) * 0.25)  # внутри узора атласа, где он непрозрачный
-		# Грани освещены звездой: та, что смотрит на неё, ярче.
-		var lit := 0.75 + 0.35 * to_star.rotated(-p.angle).dot(Vector2.from_angle(p.spin * 3.0))
-		var col := Color(1.0, 0.93, 0.82) * lit
-		col.a = 1.0
-		_frags.draw_polygon(p.poly, PackedColorArray([col]), uvs, ATLAS)
-		var cnt := p.poly.size()
-		for i in cnt:
-			var a := p.poly[i]
-			var b := p.poly[(i + 1) % cnt]
-			if p.fresh[i] == 1:
-				_frags.draw_line(a, b, Color(1.0, 0.95, 0.85, 0.55), 1.0 * px)
-			else:
-				_frags.draw_line(a, b, Color(0.0, 0.0, 0.0, 0.35), 1.0 * px)
-	_frags.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Отскок: у кого меньше масса, того отбрасывает сильнее.
@@ -816,7 +759,7 @@ func _write() -> void:
 	var off := dust_field.frame_offset
 	for k in pebbles.size():
 		var p := pebbles[k]
-		var s := 0.0 if p.shard else p.r * QUAD  # обломки рисует _frags
+		var s := p.r * QUAD * (SHARD_QUAD if p.shard else 1.0)
 		var b := k * 12
 		var pos := p.pos + off
 		_buf[b] = s
@@ -830,7 +773,8 @@ func _write() -> void:
 		_buf[b + 8] = p.cell
 		_buf[b + 9] = p.angle
 		_buf[b + 10] = 0.0
-		_buf[b + 11] = 1.0 if p.geode else 0.0
+		# 1 — жеода, 2 + доля — обломок с формой по этой доле.
+		_buf[b + 11] = 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0)
 	_mm.buffer = _buf
 	_mm.visible_instance_count = pebbles.size()
 
