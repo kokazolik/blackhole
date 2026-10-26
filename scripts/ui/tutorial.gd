@@ -566,7 +566,7 @@ func _prepare_focus(step: Dictionary) -> bool:
 				# Рядом нет такой — подкладываем, чтобы было что показать. Ближе к звезде:
 				# туда сносит, туда и смотреть.
 				var side := Vector2.from_angle(pl.position.angle() + PI + randf_range(-0.8, 0.8))
-				var r := pl.radius * (0.5 if kind == "small" else 1.15)
+				var r := pl.radius * (minf(Skills.stat("grip"), 0.95) * 0.85 if kind == "small" else 1.15)
 				p = pf.spawn_for_guide(pl.position + side * pl.radius * 7.0, r)
 			_focus = {"pebble": p, "r": maxf(p.r * 2.6, pl.radius * 1.3)}
 			if kind == "small":
@@ -617,7 +617,7 @@ func _nearest_pebble(small: bool) -> PebbleField.Pebble:
 	var best: PebbleField.Pebble = null
 	var bd := INF
 	for p in pf.pebbles:
-		if pf.absorbable(p) != small or (small and p.r < main.player.radius * 0.3):
+		if pf.absorbable(p) != small or (small and p.r < main.player.radius * minf(Skills.stat("grip"), 0.95) * 0.6):
 			continue  # крошечную показывать не стоит: её легко спутать с пылью
 		var d := pf.world_pos(p).distance_to(pp)
 		if d < bd and d < lim:
