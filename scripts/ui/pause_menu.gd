@@ -2,9 +2,11 @@ class_name PauseMenu
 extends Control
 ## Меню паузы поверх игры: продолжить, выйти в главное меню или начать заново.
 ## Игра стоит, пока меню открыто.
+## Пять касаний по заголовку «Пауза» открывают меню разработчика: прыжки по этапам.
 
 var _panel: PanelContainer
 var _box: VBoxContainer
+var _title_taps := 0
 
 
 func _ready() -> void:
@@ -44,7 +46,14 @@ func close() -> void:
 
 func _show_main() -> void:
 	_clear()
-	_title("Пауза")
+	_title_taps = 0
+	var t := _title("Пауза")
+	t.mouse_filter = Control.MOUSE_FILTER_STOP
+	t.gui_input.connect(func(e: InputEvent):
+		if (e is InputEventMouseButton or e is InputEventScreenTouch) and e.pressed:
+			_title_taps += 1
+			if _title_taps >= 5:
+				_show_dev())
 	_note("Пылинка ждёт. Звезда тоже подождёт.")
 	_button("Продолжить", true, close)
 	_button("Главное меню", false, func(): Fader.go(Fader.MENU))
@@ -61,6 +70,45 @@ func _show_confirm() -> void:
 	_button("Отмена", false, _show_main)
 
 
+func _show_dev() -> void:
+	_clear()
+	_title("Разработчик")
+	_note("Прыжок сразу в нужный момент. Состав и навыки сохраняются.")
+	_button("Пылинка перед галькой", true, func(): _jump(29.6, 0))
+	_button("Галька: начало", false, func(): _jump(31.0, 1))
+	_button("Галька: середина (~100)", false, func(): _jump(100.0, 1))
+	_button("Галька перед валуном", false, func(): _jump(2900.0, 1))
+	_button("+10 000 звёздной пыли", false, func():
+		GameState.add_currency(10000.0)
+		close())
+	_button("Все доступные навыки на максимум", false, func():
+		for id in Skills.order:
+			if int(Skills.nodes[id].get("requires_stage", 0)) <= GameState.stage:
+				GameState.skill_levels[id] = Skills.max_level(id)
+		Skills.recompute()
+		GameState.skills_changed.emit()
+		close())
+	_button("Назад", false, _show_main)
+
+
+## Ставит массу и этап, состав растягивается под новую массу, игра перезапускается.
+func _jump(mass: float, stage: int) -> void:
+	var total := 0.0
+	for key in GameState.materials:
+		total += float(GameState.materials[key])
+	if total <= 0.0:
+		GameState.materials = {"silicate": 0.5, "metal": 0.15, "carbon": 0.2, "ice": 0.15}
+		total = 1.0
+	for key in GameState.materials:
+		GameState.materials[key] = float(GameState.materials[key]) * mass / total
+	GameState.mass = mass
+	GameState.stage = stage
+	GameState.tutorial_done = true
+	GameState.pebble_intro_done = stage >= 1
+	GameState.save_game()
+	Fader.go(Fader.GAME)
+
+
 func _clear() -> void:
 	for c in _box.get_children():
 		_box.remove_child(c)
@@ -69,7 +117,7 @@ func _clear() -> void:
 	_panel.set_offsets_preset(Control.PRESET_CENTER)
 
 
-func _title(text: String) -> void:
+func _title(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -77,6 +125,7 @@ func _title(text: String) -> void:
 	l.add_theme_font_size_override("font_size", 38)
 	l.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
 	_box.add_child(l)
+	return l
 
 
 func _note(text: String) -> void:
