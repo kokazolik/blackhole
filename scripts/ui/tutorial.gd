@@ -728,11 +728,11 @@ func _draw_marks() -> void:
 		var rs := maxf(r * sc, 18.0)
 		var start := -PI * 0.5
 		if m.get("dashed", false):
-			for k in 16:
-				var a0 := start + k * TAU / 16.0
+			for k in 28:
+				var a0 := start + k * TAU / 28.0
 				if a0 - start > TAU * grow:
 					break
-				_pointer.draw_arc(c, rs, a0, a0 + TAU / 32.0, 6, col, 3.0, true)
+				_pointer.draw_arc(c, rs, a0, a0 + TAU / 84.0, 3, col, 2.0, true)
 		else:
 			_pointer.draw_arc(c, rs + 2.0, start, start + TAU * grow, 64, Color(col, 0.22), 9.0, true)
 			_pointer.draw_arc(c, rs, start, start + TAU * grow, 64, col, 2.5, true)

@@ -486,9 +486,10 @@ func _draw_hints() -> void:
 		var fade := clampf((range_r - dist) / (range_r * 0.4), 0.0, 1.0)
 		var rr := p.r * 1.25
 		if not absorbable(p):
-			for s in 12:
-				var a0 := s * TAU / 12.0
-				_hint.draw_arc(wp, rr, a0, a0 + TAU / 24.0, 4, Color(0.8, 0.85, 1.0, 0.35 * fade), 1.5 * px, true)
+			# Мелкий пунктир вплотную к гальке: заметно, но не спорит с самой галькой.
+			for s in 24:
+				var a0 := s * TAU / 24.0
+				_hint.draw_arc(wp, p.r * 1.1, a0, a0 + TAU / 72.0, 3, Color(0.8, 0.85, 1.0, 0.3 * fade), 1.0 * px, true)
 			continue
 		var n := to / maxf(dist, 0.001)
 		var approach := (player.motion() - GameData.gas_drift(wp, p.r)).dot(n)
