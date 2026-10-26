@@ -2,7 +2,8 @@ shader_type canvas_item;
 // Чужая галька из атласа для MultiMesh: освещена звездой как шар, медленно вращается,
 // у снеговой линии покрывается инеем, у звезды тлеет.
 //
-// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — скорость вращения.
+// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — скорость вращения,
+//                  w — 1 у жеоды: сквозь трещины сверкают кристаллы, вокруг золотистый ореол.
 
 uniform sampler2D atlas : filter_linear_mipmap;
 uniform vec2 light_dir = vec2(-1.0, 0.0);
@@ -46,5 +47,22 @@ void fragment() {
 	float lum = dot(col, vec3(0.3, 0.5, 0.2));
 	col = mix(col, vec3(0.82, 0.92, 1.0) * (lum * 1.2 + 0.05), v_frost * 0.4);
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
-	COLOR = vec4(col, tex.a);
+	vec4 outc = vec4(col, tex.a);
+	if (v_data.w > 0.5) {
+		// Жеода: кристаллы вспыхивают по очереди, вокруг мягкий ореол.
+		vec3 gold = vec3(1.0, 0.85, 0.4);
+		float cells = 0.0;
+		for (int i = 0; i < 5; i++) {
+			float fi = float(i);
+			vec2 c2 = vec2(sin(fi * 2.4 + 0.7), cos(fi * 1.7 + 0.3)) * 0.22;
+			float tw = pow(max(sin(TIME * 2.2 + fi * 1.9), 0.0), 6.0);
+			cells += exp(-dot(sp - 0.5 - c2, sp - 0.5 - c2) * 900.0) * (0.4 + 1.6 * tw);
+		}
+		outc.rgb += gold * cells * tex.a;
+		float d = length(p) / 0.36;
+		float halo = exp(-max(d - 0.9, 0.0) * 4.0) * (0.55 + 0.25 * sin(TIME * 3.0));
+		outc.rgb = mix(gold * halo, outc.rgb, tex.a);
+		outc.a = max(tex.a, halo * 0.6 * (1.0 - tex.a));
+	}
+	COLOR = outc;
 }

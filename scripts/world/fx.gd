@@ -80,6 +80,13 @@ func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
 	_popups.append({"pos": at, "text": text, "color": color, "t": 0.0, "drift": randf_range(-0.4, 0.4)})
 
 
+## Всплывающая надпись в мировых координатах: серия, жеода и т. п.
+func popup(at: Vector2, text: String, color: Color, size := 20) -> void:
+	if _popups.size() >= LIMIT:
+		_popups.pop_front()
+	_popups.append({"pos": at, "text": text, "color": color, "t": 0.0, "drift": 0.0, "size": size})
+
+
 func _process(delta: float) -> void:
 	if _hits.is_empty() and _motes.is_empty() and _popups.is_empty():
 		return
@@ -147,7 +154,7 @@ func _draw() -> void:
 	for p in _popups:
 		var k: float = p.t / POPUP_TIME
 		var pop := 1.0 + 0.5 * exp(-k * 14.0) * sin(k * 30.0) if k < 0.3 else 1.0
-		var font_size := roundi(20.0 * pop)
+		var font_size := roundi(float(p.get("size", 20)) * pop)
 		var pos: Vector2 = p.pos + Vector2(p.drift * 20.0 * k, -36.0 * (1.0 - pow(1.0 - k, 2.0)) - 8.0) * px
 		var alpha := 1.0 if k < 0.6 else 1.0 - (k - 0.6) / 0.4
 		var w := font.get_string_size(p.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x

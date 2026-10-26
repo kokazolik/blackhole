@@ -14,6 +14,7 @@ var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
 var pause_menu: PauseMenu
 var pebble_field: PebbleField
+var fx: AbsorbFx
 var sky_events: Node2D
 var _intro_time := 0.0
 var _caption: Control
@@ -57,7 +58,7 @@ func _ready() -> void:
 	wind.camera = camera
 	add_child(wind)
 	add_child(player)
-	var fx := AbsorbFx.new()
+	fx = AbsorbFx.new()
 	fx.player = player
 	fx.camera = camera
 	add_child(fx)
@@ -67,6 +68,11 @@ func _ready() -> void:
 	burn_fx.finished.connect(_show_burned_screen)
 	dust_field.evaporated.connect(burn_fx.puff)
 	pebble_field.evaporated.connect(burn_fx.puff)
+	pebble_field.combo_changed.connect(_on_combo)
+	pebble_field.geode_found.connect(func(at: Vector2, value: float) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.0), "Жеода! +%s" % GameData.format_number(value), GameData.GEODE_GLOW, 26))
+	pebble_field.swarm_started.connect(func(_at: Vector2) -> void:
+		_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
 	GameState.stage_reached.connect(_on_stage_reached)
 
 	camera.position = player.position
@@ -134,6 +140,11 @@ func _start_pebble_intro(delay: float) -> void:
 	tutorial.start_delay = delay
 	$UI.add_child(tutorial)
 	$UI.move_child(pause_menu, -1)
+
+
+func _on_combo(chain: int, multiplier: float) -> void:
+	if chain >= 2:
+		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Серия %d · ×%.2f" % [chain, multiplier], Color(1.0, 0.8, 0.45), 22)
 
 
 func _show_caption(title: String, subtitle: String) -> void:

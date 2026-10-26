@@ -21,7 +21,8 @@ const BRANCH_STAGGER := 0.25
 
 const COLOR_AVAILABLE := Color(0.62, 0.72, 0.95)
 const COLOR_AFFORDABLE := Color(1.0, 0.82, 0.45)
-const COLOR_OWNED := Color(1.0, 0.88, 0.6)
+const COLOR_OWNED := Color(0.78, 0.62, 0.42)
+const COLOR_MAXED := Color(0.55, 0.88, 0.72)
 const BRANCH_COLOR := Color(0.95, 0.78, 0.45)
 
 var _canvas: Control
@@ -244,6 +245,8 @@ func _refresh() -> void:
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
+		if node.get("legendary", false):
+			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")
 		if Skills.is_maxed(_selected):
 			_buy_button.text = "Изучено"
 			_buy_button.disabled = true
@@ -339,18 +342,32 @@ func _draw_branch(a: Vector2, b: Vector2, t: float, seed_hash: int) -> void:
 func _draw_node(id: String, p: Vector2, k: float) -> void:
 	var owned := Skills.is_owned(id)
 	var affordable := Skills.can_buy(id)
+	# Порядок важен: изученный до конца — спокойный нефритовый, доступный к покупке —
+	# пульсирующее золото (даже если часть уровней уже куплена), начатый — тусклая бронза.
+	var maxed := Skills.is_maxed(id)
 	var col := COLOR_AVAILABLE
-	if owned:
-		col = COLOR_OWNED
+	if maxed:
+		col = COLOR_MAXED
 	elif affordable:
 		col = COLOR_AFFORDABLE
+	elif owned:
+		col = COLOR_OWNED
 	var c1 := k - 1.0
 	var pop := 1.0 + 2.70158 * c1 * c1 * c1 + 1.70158 * c1 * c1  # упругий выход за 1 и назад
 	_canvas.draw_set_transform(p, 0.0, Vector2(pop, pop))
-	var r := NODE_RADIUS
+	var legendary: bool = Skills.nodes[id].get("legendary", false)
+	var r := NODE_RADIUS * (1.3 if legendary else 1.0)
 	var pulse := 0.5 + 0.5 * sin(_time * 3.0)
+	if legendary:
+		# Легендарный навык: золотой венец из медленно вращающихся лучей.
+		var gold := Color(1.0, 0.78, 0.3, 0.75 if owned else 0.45)
+		for i in 16:
+			var ang := _time * 0.15 + i * TAU / 16.0
+			var ray_len := r * (1.45 + (0.2 if i % 2 == 0 else 0.0) + 0.06 * pulse)
+			_canvas.draw_line(Vector2.from_angle(ang) * (r + 6.0), Vector2.from_angle(ang) * ray_len, gold, 2.0, true)
+		_canvas.draw_arc(Vector2.ZERO, r + 5.0, 0.0, TAU, 56, gold, 2.5, true)
 
-	var glow_a := 0.35 if owned else (0.25 + 0.2 * pulse if affordable else 0.12)
+	var glow_a := 0.25 + 0.2 * pulse if affordable else (0.3 if maxed else (0.2 if owned else 0.12))
 	var gr := r * (2.6 + (0.25 * pulse if affordable else 0.0))
 	_canvas.draw_texture_rect(_glow, Rect2(-Vector2(gr, gr), Vector2(gr, gr) * 2.0), false, Color(col, glow_a))
 	if k < 1.0:
@@ -385,7 +402,7 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 			var d := Vector2.from_angle(ang) * 3.5
 			var o := d.orthogonal() * 0.6
 			_canvas.draw_colored_polygon(PackedVector2Array([c - d, c + o, c + d, c - o]), col)
-	_draw_icon(id, col.lightened(0.15) if owned or affordable else Color(col, 0.85))
+	_draw_icon(Skills.nodes[id].get("icon", id), col.lightened(0.15) if owned or affordable else Color(col, 0.85))
 
 	var max_lvl := Skills.max_level(id)
 	if max_lvl > 1:
@@ -497,6 +514,68 @@ func _draw_icon(id: String, col: Color) -> void:
 			for v in [Vector2(-8, -5), Vector2(7, -8), Vector2(9, 7), Vector2(-6, 9), Vector2(0, 0)]:
 				var rr := 4.2 if v == Vector2.ZERO else 3.2
 				_ellipse(v, Vector2(rr, rr * 0.7), v.x * 0.1, col)
+		"grip":
+			# Крупное тело обволакивает камешек поменьше.
+			_canvas.draw_circle(Vector2(-3, 2), 9.0, col)
+			_canvas.draw_arc(Vector2(-3, 2), 13.0, -0.9, 1.6, 16, Color(col, 0.7), w, true)
+			_ellipse(Vector2(11, -9), Vector2(4.5, 3.6), 0.4, col)
+		"armor":
+			var pts := PackedVector2Array()
+			for i in 7:
+				pts.append(Vector2.from_angle(i * TAU / 6.0) * 15.0)
+			_canvas.draw_polyline(pts, col, w, true)
+			_canvas.draw_arc(Vector2.ZERO, 9.0, 0.0, TAU, 24, Color(col, 0.7), 1.6, true)
+			_canvas.draw_circle(Vector2.ZERO, 3.5, col)
+		"combo":
+			# Цепочка камешков, каждый следующий ярче.
+			for i in 4:
+				var v := Vector2(-15 + i * 10, 8 - i * 5)
+				_canvas.draw_circle(v, 2.5 + i * 0.9, Color(col, 0.45 + 0.18 * i))
+		"geode":
+			# Расколотая жеода: кристаллы внутри скорлупы.
+			_canvas.draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 28, col, w, true)
+			for i in 7:
+				var d := Vector2.from_angle(i * TAU / 7.0 + 0.2)
+				_canvas.draw_colored_polygon(PackedVector2Array([d * 3.0 + d.orthogonal() * 2.2, d * 11.0, d * 3.0 - d.orthogonal() * 2.2]), Color(col, 0.85))
+		"swarm":
+			# Рой галек стягивается в сгусток.
+			for i in 9:
+				var a := i * TAU / 9.0 + _time * 0.4
+				var r := 8.0 + 8.0 * fmod(i * 0.37, 1.0)
+				_canvas.draw_circle(Vector2.from_angle(a) * r, 2.2, Color(col, 0.8))
+			_canvas.draw_circle(Vector2.ZERO, 4.0, col)
+		"selective":
+			# Сито: из потока проходит только нужное.
+			_canvas.draw_polyline(PackedVector2Array([Vector2(-16, -12), Vector2(16, -12), Vector2(4, 4), Vector2(4, 15), Vector2(-4, 15), Vector2(-4, 4), Vector2(-16, -12)]), col, w, true)
+			for v in [Vector2(-8, -17), Vector2(1, -19), Vector2(10, -16)]:
+				_canvas.draw_circle(v, 2.2, Color(col, 0.75))
+		"mat_metal":
+			# Подкова магнита.
+			_canvas.draw_arc(Vector2(0, 2), 11.0, 0.0, PI, 20, col, 5.0, true)
+			_canvas.draw_line(Vector2(-11, 2), Vector2(-11, -12), col, 5.0, true)
+			_canvas.draw_line(Vector2(11, 2), Vector2(11, -12), col, 5.0, true)
+			_canvas.draw_line(Vector2(-14, -12), Vector2(-8, -12), Color(col, 0.6), 3.0, true)
+			_canvas.draw_line(Vector2(8, -12), Vector2(14, -12), Color(col, 0.6), 3.0, true)
+		"mat_ice":
+			for i in 3:
+				var d := Vector2.from_angle(i * PI / 3.0)
+				_canvas.draw_line(-d * 16.0, d * 16.0, col, w, true)
+				for sgn in [-1.0, 1.0]:
+					var t: Vector2 = d * 10.0 * sgn
+					_canvas.draw_line(t, t + (d * sgn).rotated(0.8) * 5.0, Color(col, 0.75), 1.5, true)
+					_canvas.draw_line(t, t + (d * sgn).rotated(-0.8) * 5.0, Color(col, 0.75), 1.5, true)
+		"mat_silicate":
+			# Кристалл кварца: вытянутая шестигранная призма.
+			var pts := PackedVector2Array([Vector2(0, -17), Vector2(8, -9), Vector2(8, 10), Vector2(0, 17), Vector2(-8, 10), Vector2(-8, -9), Vector2(0, -17)])
+			_canvas.draw_polyline(pts, col, w, true)
+			_canvas.draw_line(Vector2(0, -17), Vector2(0, 17), Color(col, 0.55), 1.3, true)
+		"mat_carbon":
+			# Бензольное кольцо — знак органики.
+			var pts := PackedVector2Array()
+			for i in 7:
+				pts.append(Vector2.from_angle(i * TAU / 6.0 + PI / 6.0) * 15.0)
+			_canvas.draw_polyline(pts, col, w, true)
+			_canvas.draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 24, Color(col, 0.75), 1.6, true)
 		_:
 			for i in 4:
 				var d := Vector2.from_angle(i * TAU / 4.0)

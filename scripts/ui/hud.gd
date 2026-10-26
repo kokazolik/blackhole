@@ -24,6 +24,11 @@ var _zone_label: Label
 var _zone_desc: Label
 var _zone_name := ""
 var _wind_label: Label
+var _disc_map := Control.new()  # полоска диска от звезды наружу: где какое вещество
+var _map_dist := 0.0
+var _map_rings := 0.0  # видимость колец-ловушек на карте (появляются у гальки)
+const MAP_RANGE := Vector2(2600.0, 12500.0)
+const MAP_SIZE := Vector2(250.0, 36.0)
 var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
@@ -95,6 +100,14 @@ func _build() -> void:
 	zone_box.add_child(_zone_label)
 	_zone_desc = _label(13, UiTheme.TEXT_DIM)
 	zone_box.add_child(_zone_desc)
+	var map_pad := MarginContainer.new()
+	map_pad.add_theme_constant_override("margin_top", 8)
+	map_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_disc_map.custom_minimum_size = MAP_SIZE
+	_disc_map.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_disc_map.draw.connect(_draw_disc_map)
+	map_pad.add_child(_disc_map)
+	zone_box.add_child(map_pad)
 	# У гальки: встречный ветер газа и снос к звезде.
 	_wind_label = _label(14, Color(0.75, 0.88, 1.0), UiTheme.FONT_SEMI)
 	_wind_label.visible = false
@@ -238,6 +251,9 @@ func set_zone(zone: Dictionary) -> void:
 
 ## Встречный ветер у гальки: сила сноса к звезде или затишье в ловушке давления.
 func set_wind(drift: Vector2, pos: Vector2, pebble_k: float) -> void:
+	_map_dist = pos.length()
+	_map_rings = pebble_k
+	_disc_map.queue_redraw()
 	_wind_label.visible = pebble_k > 0.5
 	if not _wind_label.visible:
 		return
@@ -334,6 +350,51 @@ func _refresh() -> void:
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()
 	_badge.visible = Skills.any_affordable()
+
+
+func _map_x(dist: float) -> float:
+	return clampf((dist - MAP_RANGE.x) / (MAP_RANGE.y - MAP_RANGE.x), 0.0, 1.0) * MAP_SIZE.x
+
+
+## Карта диска: полоса окрашена в цвета вещества, которое водится на этом расстоянии.
+## Слева звезда и зона испарения, отметка снеговой линии, кольца-ловушки, маркер «ты здесь».
+func _draw_disc_map() -> void:
+	var h := 12.0
+	var y := 12.0
+	var steps := 60
+	var w := MAP_SIZE.x / steps
+	for i in steps:
+		var dist := MAP_RANGE.x + (i + 0.5) / steps * (MAP_RANGE.y - MAP_RANGE.x)
+		# Столбик делится по долям материалов: видно, чего здесь больше.
+		var weights := GameData.material_weights(dist)
+		var total := 0.0
+		for key in weights:
+			total += weights[key]
+		var yy := y
+		for key in GameData.MATERIAL_ORDER:
+			if not weights.has(key):
+				continue
+			var hh: float = h * weights[key] / total
+			var col: Color = GameData.MATERIALS[key].color
+			if dist < GameData.sublimation_distance():
+				col = col.lerp(Color(1.0, 0.35, 0.1), 0.75)
+			_disc_map.draw_rect(Rect2(i * w, yy, w + 0.5, hh), Color(col, 0.9))
+			yy += hh
+	_disc_map.draw_rect(Rect2(0, y, MAP_SIZE.x, h), Color(1, 1, 1, 0.25), false, 1.0)
+	var font: Font = UiTheme.FONT_SEMI
+	# Снеговая линия.
+	var sx := _map_x(GameData.SNOW_LINE)
+	_disc_map.draw_line(Vector2(sx, y - 3), Vector2(sx, y + h + 3), Color(0.85, 0.95, 1.0), 1.5)
+	_disc_map.draw_string(font, Vector2(sx + 3, y + h + 12), "снеговая линия", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.9, 1.0, 0.75))
+	_disc_map.draw_string(font, Vector2(0, y + h + 12), "← звезда", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.75, 0.5, 0.75))
+	if _map_rings > 0.01:
+		for ring in GameData.PRESSURE_RINGS:
+			var rx := _map_x(ring)
+			_disc_map.draw_circle(Vector2(rx, y + h * 0.5), 2.2, Color(0.9, 1.0, 0.75, 0.8 * _map_rings))
+	# Ты здесь.
+	var px := _map_x(_map_dist)
+	var marker := PackedVector2Array([Vector2(px, y - 1), Vector2(px - 5, y - 9), Vector2(px + 5, y - 9)])
+	_disc_map.draw_colored_polygon(marker, UiTheme.GOLD)
 
 
 func _draw_currency_icon() -> void:

@@ -12,18 +12,25 @@ extends Node2D
 ## переписывается каждый кадр.
 
 signal evaporated(world_position: Vector2, grain_radius: float)
+signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорвалась или угасла
+signal swarm_started(world_position: Vector2)
+signal geode_found(world_position: Vector2, value: float)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
 const MAX_PEBBLES := 140
-const BASE_COUNT := 20               # галек в округе при плотности 1 (вне колец)
+const BASE_COUNT := 8               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
-# Радиусы чужих галек в долях радиуса игрока: тела одного размера дрейфуют вместе,
-# поэтому рядом в основном гальки, сравнимые с тобой.
-const R_RANGE := Vector2(0.35, 1.3)
+# Радиусы чужих галек в долях радиуса игрока. Мелких обломков больше, чем крупных
+# (распределение как после дробления), но встречаются и тела крупнее тебя.
+const R_RANGE := Vector2(0.12, 1.25)
+const R_SKEW := 2.2
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
-const VALUE_PER_MASS := 4.2           # звёздная пыль за единицу массы гальки
+# Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
+# насколько крупную гальку удалось присоединить.
+const VALUE_PER_PEBBLE := 16.0
+const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
 const HINT_RANGE := 7.0               # в радиусах игрока: где видно кольцо-подсказку удара
 
@@ -35,6 +42,8 @@ class Pebble:
 	var cell: int
 	var angle: float
 	var spin: float
+	var geode := false
+	var swarm := false  # из роя: рассеивается, когда рой кончился
 
 var player: Player
 var dust_field: DustField
@@ -45,6 +54,10 @@ var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
+var chain := 0           # шагов в текущей серии слипаний
+var _chain_timer := 0.0
+var _swarm_timer := -1.0  # до следующего роя; <0 — навыка нет
+var swarm_left := 0.0     # сколько ещё длится текущий рой
 
 
 func _ready() -> void:
@@ -83,13 +96,23 @@ func _process(delta: float) -> void:
 	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
 	_mm_node.material.set_shader_parameter("star_light", DustField.STAR_LIGHT * (1.0 + 0.9 * Star.flare))
 	_maintain()
+	_update_combo(delta)
+	_update_swarm(delta)
 	var drag := pow(DRAG, delta)
+	var pull := Skills.stat("pebble_pull")
+	var pull_r := player.pull_radius() * 1.5
 	var evap := GameData.sublimation_distance()
 	var i := pebbles.size() - 1
 	while i >= 0:
 		var p := pebbles[i]
 		var wp := world_pos(p)
 		p.vel *= drag
+		if pull > 0.0 and absorbable(p):
+			# «Вихрь в газе»: подходящие гальки сами плывут к тебе.
+			var to_p := player.position - wp
+			var dl := to_p.length()
+			if dl < pull_r and dl > 0.001:
+				p.vel += to_p / dl * player.pull_strength() * 0.6 * pull * (1.0 - dl / pull_r) * delta
 		p.pos += (p.vel + GameData.gas_drift(wp, p.r)) * delta
 		p.angle += p.spin * delta
 		if wp.length() < evap:
@@ -131,17 +154,87 @@ func _spawn(at: Vector2) -> void:
 		return
 	var p := Pebble.new()
 	p.pos = at - dust_field.frame_offset
-	p.r = player.radius * lerpf(R_RANGE.x, R_RANGE.y, pow(rng.randf(), 1.4))
-	p.material = GameData.pick_weighted(GameData.material_weights(dist), rng)
+	p.r = player.radius * lerpf(R_RANGE.x, R_RANGE.y, pow(rng.randf(), R_SKEW))
+	p.geode = rng.randf() < Skills.stat("geode")
+	p.material = _pick_material(dist)
 	p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 	p.angle = rng.randf() * TAU
 	p.spin = rng.randf_range(-0.25, 0.25)
 	pebbles.append(p)
 
 
-## Можно ли присоединить гальку: она должна быть заметно меньше тебя.
+## Материал новой гальки: что водится в этой зоне, с перевесом в сторону навыков
+## ветви «Состав». Льда у звезды не бывает при любых навыках.
+func _pick_material(dist: float) -> String:
+	var weights := GameData.material_weights(dist)
+	for key in weights:
+		weights[key] *= Skills.stat("affinity_" + key)
+	return GameData.pick_weighted(weights, rng)
+
+
+## Можно ли присоединить гальку: предел размера растёт с навыками ветви «Захват».
 func absorbable(p: Pebble) -> bool:
-	return p.r < player.radius * 0.92
+	return p.r < player.radius * minf(Skills.stat("grip"), 0.95)
+
+
+## Серия гаснет, если долго не слипаться.
+func _update_combo(delta: float) -> void:
+	if chain > 0:
+		_chain_timer -= delta
+		if _chain_timer <= 0.0:
+			chain = 0
+			combo_changed.emit(0, 1.0)
+
+
+func combo_multiplier() -> float:
+	return 1.0 + Skills.stat("combo") * minf(maxf(chain - 1, 0), Skills.stat("combo_cap"))
+
+
+## Потоковая неустойчивость: раз в интервал рядом сбивается рой мелких галек.
+func _update_swarm(delta: float) -> void:
+	var lvl := Skills.stat("swarm")
+	if lvl <= 0.0:
+		return
+	if swarm_left > 0.0:
+		swarm_left -= delta
+		if swarm_left <= 0.0:
+			# Рой рассеивается: оставшиеся гальки газ уносит.
+			for p in pebbles:
+				if p.swarm:
+					p.swarm = false
+					p.vel += Vector2.from_angle(rng.randf() * TAU) * 30.0
+	var interval := GameData.SWARM_INTERVAL / (1.0 + 0.12 * (lvl - 1.0))
+	if _swarm_timer < 0.0:
+		_swarm_timer = interval * 0.5
+	_swarm_timer -= delta
+	if _swarm_timer <= 0.0 and not player.dead:
+		_swarm_timer = interval
+		_spawn_swarm(lvl)
+
+
+func _spawn_swarm(lvl: float) -> void:
+	var view_r := dust_field.view_radius()
+	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
+	var center := player.position + dir.rotated(rng.randf_range(-0.6, 0.6)) * view_r * 0.75
+	if center.length() < GameData.sublimation_distance() * 1.3:
+		center = player.position + player.position.normalized() * view_r * 0.75
+	var spread := view_r * (0.12 + 0.02 * lvl)
+	var count := mini(int(SWARM_COUNT * (1.0 + 0.35 * (lvl - 1.0))), MAX_PEBBLES - pebbles.size())
+	var grip := minf(Skills.stat("grip"), 0.95)
+	for k in count:
+		var p := Pebble.new()
+		p.pos = center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread)) - dust_field.frame_offset
+		# Рой из галек, которые ты способен присоединить: гоняться за ним есть смысл.
+		p.r = player.radius * rng.randf_range(0.12, grip * 0.95)
+		p.material = _pick_material(center.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.4, 0.4)
+		p.geode = rng.randf() < Skills.stat("geode") * 2.0
+		p.swarm = true
+		pebbles.append(p)
+	swarm_left = GameData.SWARM_DURATION
+	swarm_started.emit(center)
 
 
 func _collide(p: Pebble, index: int) -> void:
@@ -155,11 +248,20 @@ func _collide(p: Pebble, index: int) -> void:
 	var drift_p := GameData.gas_drift(wp, p.r)
 	var rel := player.motion() - (p.vel + drift_p)
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
-	var stick := player.stick_speed()
+	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
 	if absorbable(p) and impact <= stick:
 		var m := GameData.pebble_mass(p.r)
-		GameState.absorb_mass(m, m * VALUE_PER_MASS, p.material, at)
+		chain += 1
+		_chain_timer = GameData.COMBO_WINDOW
+		var size_rel := p.r / player.radius
+		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, 0.9) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
+		if p.geode:
+			value *= Skills.stat("geode_value")
+			geode_found.emit(wp, value)
+		GameState.absorb_mass(m, value, p.material, at)
+		if Skills.stat("combo") > 0.0 and chain >= 2:
+			combo_changed.emit(chain, combo_multiplier())
 		pebbles.remove_at(index)
 		return
 	if impact > stick:
@@ -167,6 +269,9 @@ func _collide(p: Pebble, index: int) -> void:
 		var m_other := GameData.pebble_mass(p.r)
 		var loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * GameData.CHIP_MAX) * Skills.stat("chip")
 		var player_mat := _main_material()
+		if chain > 0:
+			chain = 0
+			combo_changed.emit(0, 1.0)
 		GameState.chip(loss, at)
 		_debris(at, n * -1.0, impact, player_mat, clampi(int(loss * 6.0), 3, 14))
 		if absorbable(p) and excess > GameData.SHATTER_FACTOR:
@@ -228,7 +333,7 @@ func _write() -> void:
 		_buf[b + 8] = p.cell
 		_buf[b + 9] = p.angle
 		_buf[b + 10] = 0.0
-		_buf[b + 11] = 0.0
+		_buf[b + 11] = 1.0 if p.geode else 0.0
 	_mm.buffer = _buf
 	_mm.visible_instance_count = pebbles.size()
 
@@ -257,8 +362,10 @@ func _draw_hints() -> void:
 			continue
 		var n := to / maxf(dist, 0.001)
 		var approach := (player.motion() - GameData.gas_drift(wp, p.r)).dot(n)
-		var ok := approach <= stick
+		var ok := approach <= stick * Skills.stat("glue_" + p.material)
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
 		var face := (-to).angle()
 		_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), 2.5 * px, true)
-		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(col, 0.2 * fade), 1.2 * px, true)
+		# Остаток кольца — цвет материала: нужное вещество видно издалека.
+		var mat_col: Color = GameData.MATERIALS[p.material].color
+		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), 1.6 * px, true)

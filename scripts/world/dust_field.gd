@@ -44,6 +44,9 @@ const PEBBLE_DUST_SCALE := 0.4
 const CLOUD_GRAINS := Vector2i(3, 6)   # сколько пылинок несёт одно облачко
 const CLOUD_RADIUS := 2.6              # радиус облачка в радиусах пылинки его уровня
 const PEBBLE_MAX_DUST := 800           # потолок числа объектов пыли на этапе «Галька»
+# Когда в диске появились гальки, мелкая пыль уже в основном слиплась в них:
+# свободной пыли вокруг в несколько раз меньше.
+const PEBBLE_DUST_LEFT := 0.15
 
 class Dust:
 	var pos: Vector2  # в системе отсчёта, летящей по орбите (мир = pos + frame_offset)
@@ -180,7 +183,8 @@ func _process(delta: float) -> void:
 			var dist := sqrt(dist_sq)
 			var dir := to / dist
 			if edible:
-				# Тянет только наша гравитация, прямо к центру: чем ближе, тем сильнее.
+				# Гравитации у пылинки нет: пыль тянут электрические силы, прямо к центру,
+				# и чем ближе, тем сильнее.
 				var k := 0.35 + 0.65 * (1.0 - dist / pull_r)
 				d.vel += dir * strength * k * delta
 			elif dist < pr + d.r + 0.7:
@@ -307,7 +311,7 @@ func _rewrite_all() -> void:
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
 	# Облачко несёт несколько пылинок, поэтому объектов нужно во столько же раз меньше.
-	var per_object := lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5, _cloud_share())
+	var per_object := lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5 / PEBBLE_DUST_LEFT, _cloud_share())
 	var cap := int(lerpf(MAX_DUST, PEBBLE_MAX_DUST, _cloud_share())) - CLUSTER_SIZE.y
 	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale / per_object), cap)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
