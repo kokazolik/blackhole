@@ -31,7 +31,17 @@ const PATH_COLORS := {
 }
 const BRANCH_COLOR := Color(0.95, 0.78, 0.45)
 
-var _canvas: Node2D
+var _canvas: Node2D  # общий сдвиг и масштаб древа; рисуют три слоя внутри
+# Слои: под узлами — свечение и искры (каждый кадр), сами узлы, ветки и подписи
+# (только когда что-то поменялось), поверх — вращающиеся украшения (каждый кадр).
+# Подписи с обводкой и сглаженные дуги дороги, поэтому статичное не перерисовывается.
+var _layer_under := Node2D.new()
+var _layer_static := Node2D.new()
+var _layer_over := Node2D.new()
+var _g: CanvasItem  # слой, в который сейчас рисуем
+var _colors := {}   # цвет узла, считается при перерисовке статичного слоя
+var _anim_until := 0.0  # до этого времени ветки растут и узлы распускаются
+var _view := Rect2()    # видимая часть древа в его координатах (с запасом)
 var _currency_label: Label
 var _info: PanelContainer
 var _info_title: Label
@@ -120,6 +130,8 @@ func _sync_branches(animate: bool) -> void:
 				delay += BRANCH_STAGGER
 			if not _node_shown.has(id):
 				_node_shown[id] = start + GROW_TIME
+				_anim_until = maxf(_anim_until, start + GROW_TIME + APPEAR_TIME + 0.1)
+	_layer_static.queue_redraw()
 
 
 func close() -> void:
@@ -145,8 +157,12 @@ func _build() -> void:
 	# Node2D, а не Control: Control отсекает рисование по своему (нулевому) размеру,
 	# и древо пропадало целиком, когда его начало уезжало за верх экрана.
 	_canvas = Node2D.new()
-	_canvas.draw.connect(_draw_tree)
 	add_child(_canvas)
+	for layer in [_layer_under, _layer_static, _layer_over]:
+		_canvas.add_child(layer)
+	_layer_under.draw.connect(_draw_under)
+	_layer_static.draw.connect(_draw_static)
+	_layer_over.draw.connect(_draw_over)
 
 	_currency_label = Label.new()
 	_currency_label.position = Vector2(28, 20)
@@ -274,7 +290,7 @@ func _refresh() -> void:
 				var lv := int(node.get("requires_level", 1))
 				if not req.is_empty():
 					_buy_button.text = "Нужно: %s ур. %d" % [Skills.nodes[req[0]].title, lv]
-	_canvas.queue_redraw()
+	_layer_static.queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -282,7 +298,12 @@ func _process(delta: float) -> void:
 	if visible:
 		_time += delta
 		_layout_bg()
-		_canvas.queue_redraw()
+		var inv := 1.0 / _canvas.scale.x
+		_view = Rect2(-_canvas.position * inv, size * inv).grow(NODE_RADIUS * 4.0)
+		_layer_under.queue_redraw()
+		_layer_over.queue_redraw()
+		if _time < _anim_until:
+			_layer_static.queue_redraw()
 
 
 func _layout_bg() -> void:
@@ -296,18 +317,46 @@ func _is_visible_node(id: String) -> bool:
 	return _node_shown.has(id) and _time >= float(_node_shown[id])
 
 
-func _draw_tree() -> void:
+func _draw_under() -> void:
+	_g = _layer_under
 	for key in _edges:
-		var parts: PackedStringArray = (key as String).split(">")
 		var t: float = (_time - float(_edges[key])) / GROW_TIME
 		if t > 0.0:
+			var parts: PackedStringArray = (key as String).split(">")
+			var a := _node_pos(parts[0])
+			var b := _node_pos(parts[1])
+			if _view.intersects(Rect2(a, Vector2.ZERO).expand(b)):
+				_draw_branch_fx(a, b, minf(t, 1.0), absi((key as String).hash()))
+	for id in Skills.order:
+		if _is_visible_node(id) and _view.has_point(_node_pos(id)):
+			_draw_node_under(id, _node_pos(id), _appear(id))
+	_g.draw_set_transform(Vector2.ZERO)
+
+
+func _draw_static() -> void:
+	_g = _layer_static
+	for key in _edges:
+		var t: float = (_time - float(_edges[key])) / GROW_TIME
+		if t > 0.0:
+			var parts: PackedStringArray = (key as String).split(">")
 			_draw_branch(_node_pos(parts[0]), _node_pos(parts[1]), minf(t, 1.0), absi((key as String).hash()))
 	for id in Skills.order:
 		if _is_visible_node(id):
-			var k := clampf((_time - float(_node_shown[id])) / APPEAR_TIME, 0.0, 1.0)
-			_draw_node(id, _node_pos(id), k)
-	_canvas.draw_set_transform(Vector2.ZERO)
+			_draw_node(id, _node_pos(id), _appear(id))
+	_g.draw_set_transform(Vector2.ZERO)
 	_draw_path_fork()
+
+
+func _draw_over() -> void:
+	_g = _layer_over
+	for id in Skills.order:
+		if _is_visible_node(id) and _view.has_point(_node_pos(id)):
+			_draw_node_over(id, _node_pos(id), _appear(id))
+	_g.draw_set_transform(Vector2.ZERO)
+
+
+func _appear(id: String) -> float:
+	return clampf((_time - float(_node_shown[id])) / APPEAR_TIME, 0.0, 1.0)
 
 
 ## Над четырьмя ветками веществ — надпись о развилке: выбрать можно только одну.
@@ -333,16 +382,16 @@ func _draw_path_fork() -> void:
 	# Пунктирная скобка над ветками.
 	var x := a
 	while x < b:
-		_canvas.draw_line(Vector2(x, ly + 12.0), Vector2(minf(x + 10.0, b), ly + 12.0), col, 2.0, true)
+		_g.draw_line(Vector2(x, ly + 12.0), Vector2(minf(x + 10.0, b), ly + 12.0), col, 2.0, true)
 		x += 18.0
-	_canvas.draw_line(Vector2(a, ly + 12.0), Vector2(a, ly + 22.0), col, 2.0, true)
-	_canvas.draw_line(Vector2(b, ly + 12.0), Vector2(b, ly + 22.0), col, 2.0, true)
+	_g.draw_line(Vector2(a, ly + 12.0), Vector2(a, ly + 22.0), col, 2.0, true)
+	_g.draw_line(Vector2(b, ly + 12.0), Vector2(b, ly + 22.0), col, 2.0, true)
 	var font: Font = UiTheme.FONT_SERIF_ITALIC
 	var fs := 20
 	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var mid := (a + b) * 0.5
-	_canvas.draw_rect(Rect2(mid - w * 0.5 - 8.0, ly - 10.0, w + 16.0, 28.0), Color(0.05, 0.03, 0.1, 0.85))
-	_canvas.draw_string(font, Vector2(mid - w * 0.5, ly + 10.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+	_g.draw_rect(Rect2(mid - w * 0.5 - 8.0, ly - 10.0, w + 16.0, 28.0), Color(0.05, 0.03, 0.1, 0.85))
+	_g.draw_string(font, Vector2(mid - w * 0.5, ly + 10.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 ## Ветка — изогнутый золотой стебель с почками. Пока растёт, на кончике искра;
@@ -368,9 +417,9 @@ func _draw_branch(a: Vector2, b: Vector2, t: float, seed_hash: int) -> void:
 		pts.append(tip)
 	if pts.size() < 2:
 		return
-	_canvas.draw_polyline(pts, Color(BRANCH_COLOR, 0.10), 12.0, true)
-	_canvas.draw_polyline(pts, Color(BRANCH_COLOR, 0.25), 6.0, true)
-	_canvas.draw_polyline(pts, Color(BRANCH_COLOR.lightened(0.2), 0.9), 2.5, true)
+	_g.draw_polyline(pts, Color(BRANCH_COLOR, 0.10), 12.0, true)
+	_g.draw_polyline(pts, Color(BRANCH_COLOR, 0.25), 6.0, true)
+	_g.draw_polyline(pts, Color(BRANCH_COLOR.lightened(0.2), 0.9), 2.5, true)
 	# Почки-завитки вдоль ветки.
 	for j in 3:
 		var u := 0.25 + 0.22 * j
@@ -379,23 +428,35 @@ func _draw_branch(a: Vector2, b: Vector2, t: float, seed_hash: int) -> void:
 		var p := a.lerp(ctrl, u).lerp(ctrl.lerp(b, u), u)
 		var side := (b - a).normalized().orthogonal() * (1.0 if j % 2 == 0 else -1.0)
 		var bud := p + side * 11.0
-		_canvas.draw_line(p, bud, Color(BRANCH_COLOR, 0.7), 1.5, true)
-		_canvas.draw_circle(bud, 2.6, Color(BRANCH_COLOR.lightened(0.3), 0.9))
+		_g.draw_line(p, bud, Color(BRANCH_COLOR, 0.7), 1.5, true)
+		_g.draw_circle(bud, 2.6, Color(BRANCH_COLOR.lightened(0.3), 0.9))
+
+
+## Живая часть ветки: искра на растущем кончике, огонёк по выросшей ветке.
+func _draw_branch_fx(a: Vector2, b: Vector2, t: float, seed_hash: int) -> void:
+	var grow := 1.0 - pow(1.0 - t, 3.0)
+	var bend := (b - a).orthogonal() * (0.16 if seed_hash % 2 == 0 else -0.16)
+	var ctrl := (a + b) * 0.5 + bend
+	a += (ctrl - a).normalized() * NODE_RADIUS
+	b += (ctrl - b).normalized() * NODE_RADIUS
 	if t < 1.0:
-		_canvas.draw_texture_rect(_glow, Rect2(tip - Vector2(18, 18), Vector2(36, 36)), false, Color(1.0, 0.9, 0.6, 0.9))
-		_canvas.draw_circle(tip, 3.0, Color.WHITE)
+		var tip := a.lerp(ctrl, grow).lerp(ctrl.lerp(b, grow), grow)
+		_g.draw_texture_rect(_glow, Rect2(tip - Vector2(18, 18), Vector2(36, 36)), false, Color(1.0, 0.9, 0.6, 0.9))
+		_g.draw_circle(tip, 3.0, Color.WHITE)
 	else:
 		var run := fmod(_time * 0.45 + float(seed_hash % 97) / 97.0, 1.0)
 		if run < 0.6:
 			var u := run / 0.6
 			var p := a.lerp(ctrl, u).lerp(ctrl.lerp(b, u), u)
 			var a_run := sin(u * PI)
-			_canvas.draw_texture_rect(_glow, Rect2(p - Vector2(10, 10), Vector2(20, 20)), false, Color(1.0, 0.92, 0.7, 0.7 * a_run))
+			_g.draw_texture_rect(_glow, Rect2(p - Vector2(10, 10), Vector2(20, 20)), false, Color(1.0, 0.92, 0.7, 0.7 * a_run))
 
 
 ## Узел: свечение, тёмный медальон с двойным золотым ободком, значок навыка,
 ## точки уровней снизу. k — прогресс появления (упругое «распускание»).
-func _draw_node(id: String, p: Vector2, k: float) -> void:
+## Рисуется в три слоя: _draw_node_under (свечение, венец), _draw_node (сам медальон
+## и подпись, кешируется), _draw_node_over (вращающиеся украшения, выбор, вспышки).
+func _node_color(id: String) -> Color:
 	var owned := Skills.is_owned(id)
 	var affordable := Skills.can_buy(id)
 	# Порядок важен: изученный до конца — спокойный нефритовый, доступный к покупке —
@@ -412,9 +473,21 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 		col = COLOR_AFFORDABLE
 	elif owned:
 		col = COLOR_OWNED
+	return col
+
+
+func _pop(p: Vector2, k: float) -> void:
 	var c1 := k - 1.0
 	var pop := 1.0 + 2.70158 * c1 * c1 * c1 + 1.70158 * c1 * c1  # упругий выход за 1 и назад
-	_canvas.draw_set_transform(p, 0.0, Vector2(pop, pop))
+	_g.draw_set_transform(p, 0.0, Vector2(pop, pop))
+
+
+func _draw_node_under(id: String, p: Vector2, k: float) -> void:
+	var owned := Skills.is_owned(id)
+	var affordable := Skills.can_buy(id)
+	var maxed := Skills.is_maxed(id)
+	var col: Color = _colors.get(id, COLOR_AVAILABLE)
+	_pop(p, k)
 	var legendary: bool = Skills.nodes[id].get("legendary", false)
 	var r := NODE_RADIUS * (1.3 if legendary else 1.0)
 	var pulse := 0.5 + 0.5 * sin(_time * 3.0)
@@ -424,36 +497,39 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 		for i in 16:
 			var ang := _time * 0.15 + i * TAU / 16.0
 			var ray_len := r * (1.45 + (0.2 if i % 2 == 0 else 0.0) + 0.06 * pulse)
-			_canvas.draw_line(Vector2.from_angle(ang) * (r + 6.0), Vector2.from_angle(ang) * ray_len, gold, 2.0, true)
-		_canvas.draw_arc(Vector2.ZERO, r + 5.0, 0.0, TAU, 56, gold, 2.5, true)
+			_g.draw_line(Vector2.from_angle(ang) * (r + 6.0), Vector2.from_angle(ang) * ray_len, gold, 2.0, true)
+		_g.draw_arc(Vector2.ZERO, r + 5.0, 0.0, TAU, 56, gold, 2.5, true)
 
 	var glow_a := 0.25 + 0.2 * pulse if affordable else (0.3 if maxed else (0.2 if owned else 0.12))
 	var gr := r * (2.6 + (0.25 * pulse if affordable else 0.0))
-	_canvas.draw_texture_rect(_glow, Rect2(-Vector2(gr, gr), Vector2(gr, gr) * 2.0), false, Color(col, glow_a))
+	_g.draw_texture_rect(_glow, Rect2(-Vector2(gr, gr), Vector2(gr, gr) * 2.0), false, Color(col, glow_a))
+
+
+func _draw_node_over(id: String, p: Vector2, k: float) -> void:
+	var owned := Skills.is_owned(id)
+	var col: Color = _colors.get(id, COLOR_AVAILABLE)
+	_pop(p, k)
+	var legendary: bool = Skills.nodes[id].get("legendary", false)
+	var r := NODE_RADIUS * (1.3 if legendary else 1.0)
 	if k < 1.0:
 		# Вспышка при появлении.
 		var fr := r * (1.0 + 1.5 * k)
-		_canvas.draw_arc(Vector2.ZERO, fr, 0.0, TAU, 48, Color(1.0, 0.9, 0.65, 1.0 - k), 3.0, true)
+		_g.draw_arc(Vector2.ZERO, fr, 0.0, TAU, 48, Color(1.0, 0.9, 0.65, 1.0 - k), 3.0, true)
 	if _bursts.has(id):
 		var bt: float = (_time - float(_bursts[id])) / 0.7
 		if bt < 1.0:
-			_canvas.draw_arc(Vector2.ZERO, r * (1.1 + 1.4 * bt), 0.0, TAU, 48, Color(1.0, 0.9, 0.6, 0.9 * (1.0 - bt)), 4.0 * (1.0 - bt) + 1.0, true)
-			_canvas.draw_texture_rect(_glow, Rect2(-Vector2(r, r) * 3.0, Vector2(r, r) * 6.0), false, Color(1.0, 0.9, 0.6, 0.5 * (1.0 - bt)))
+			_g.draw_arc(Vector2.ZERO, r * (1.1 + 1.4 * bt), 0.0, TAU, 48, Color(1.0, 0.9, 0.6, 0.9 * (1.0 - bt)), 4.0 * (1.0 - bt) + 1.0, true)
+			_g.draw_texture_rect(_glow, Rect2(-Vector2(r, r) * 3.0, Vector2(r, r) * 6.0), false, Color(1.0, 0.9, 0.6, 0.5 * (1.0 - bt)))
 		else:
 			_bursts.erase(id)
 
 	if id == _selected:
-		_canvas.draw_arc(Vector2.ZERO, r + 13.0, 0.0, TAU, 56, Color(col, 0.85), 2.0, true)
+		_g.draw_arc(Vector2.ZERO, r + 13.0, 0.0, TAU, 56, Color(col, 0.85), 2.0, true)
 		# Бегущие засечки вокруг выбранного узла.
 		for i in 12:
 			var ang := _time * 0.6 + i * TAU / 12.0
-			_canvas.draw_line(Vector2.from_angle(ang) * (r + 9.0), Vector2.from_angle(ang) * (r + 17.0), Color(col, 0.6), 1.5, true)
+			_g.draw_line(Vector2.from_angle(ang) * (r + 9.0), Vector2.from_angle(ang) * (r + 17.0), Color(col, 0.6), 1.5, true)
 
-	_canvas.draw_circle(Vector2.ZERO, r, Color(0.07, 0.045, 0.13))
-	_canvas.draw_circle(Vector2(-r * 0.12, -r * 0.15), r * 0.78, Color(0.16, 0.1, 0.26, 0.6))
-	_canvas.draw_circle(Vector2(-r * 0.2, -r * 0.25), r * 0.45, Color(0.26, 0.17, 0.38, 0.35))
-	_canvas.draw_arc(Vector2.ZERO, r, 0.0, TAU, 56, col, 3.0, true)
-	_canvas.draw_arc(Vector2.ZERO, r - 6.0, 0.0, TAU, 48, Color(col, 0.45), 1.2, true)
 	if owned:
 		# Орнамент: ромбики вокруг купленного узла медленно вращаются.
 		for i in 8:
@@ -461,7 +537,23 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 			var c := Vector2.from_angle(ang) * (r + 4.0)
 			var d := Vector2.from_angle(ang) * 3.5
 			var o := d.orthogonal() * 0.6
-			_canvas.draw_colored_polygon(PackedVector2Array([c - d, c + o, c + d, c - o]), col)
+			_g.draw_colored_polygon(PackedVector2Array([c - d, c + o, c + d, c - o]), col)
+
+
+func _draw_node(id: String, p: Vector2, k: float) -> void:
+	var owned := Skills.is_owned(id)
+	var affordable := Skills.can_buy(id)
+	var blocked := Skills.blocked_by(id) != ""
+	var col := _node_color(id)
+	_colors[id] = col
+	_pop(p, k)
+	var legendary: bool = Skills.nodes[id].get("legendary", false)
+	var r := NODE_RADIUS * (1.3 if legendary else 1.0)
+	_g.draw_circle(Vector2.ZERO, r, Color(0.07, 0.045, 0.13))
+	_g.draw_circle(Vector2(-r * 0.12, -r * 0.15), r * 0.78, Color(0.16, 0.1, 0.26, 0.6))
+	_g.draw_circle(Vector2(-r * 0.2, -r * 0.25), r * 0.45, Color(0.26, 0.17, 0.38, 0.35))
+	_g.draw_arc(Vector2.ZERO, r, 0.0, TAU, 56, col, 3.0, true)
+	_g.draw_arc(Vector2.ZERO, r - 6.0, 0.0, TAU, 48, Color(col, 0.45), 1.2, true)
 	_draw_icon(Skills.nodes[id].get("icon", id), col.lightened(0.15) if owned or affordable else Color(col, 0.85))
 
 	var max_lvl := Skills.max_level(id)
@@ -471,25 +563,25 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 			var ang := PI * 0.5 + (i - (max_lvl - 1) * 0.5) * 0.22
 			var dp := Vector2.from_angle(ang) * (r - 12.0)
 			if i < lvl:
-				_canvas.draw_circle(dp, 3.2, col.lightened(0.3))
+				_g.draw_circle(dp, 3.2, col.lightened(0.3))
 			else:
-				_canvas.draw_arc(dp, 2.8, 0.0, TAU, 12, Color(col, 0.5), 1.0, true)
+				_g.draw_arc(dp, 2.8, 0.0, TAU, 12, Color(col, 0.5), 1.0, true)
 	if blocked:
 		# Путь закрыт: тёмная вуаль, перечёркнутый круг и замочек.
-		_canvas.draw_circle(Vector2.ZERO, r, Color(0.03, 0.02, 0.06, 0.55))
+		_g.draw_circle(Vector2.ZERO, r, Color(0.03, 0.02, 0.06, 0.55))
 		var dg := Vector2(r, -r) * 0.62
-		_canvas.draw_line(-dg, dg, Color(0.75, 0.35, 0.35, 0.8), 3.0, true)
+		_g.draw_line(-dg, dg, Color(0.75, 0.35, 0.35, 0.8), 3.0, true)
 		var lp := Vector2(r * 0.62, r * 0.62)
-		_canvas.draw_rect(Rect2(lp - Vector2(8, 4), Vector2(16, 12)), Color(0.8, 0.75, 0.7))
-		_canvas.draw_arc(lp - Vector2(0, 4), 5.0, PI, TAU, 12, Color(0.8, 0.75, 0.7), 2.5, true)
+		_g.draw_rect(Rect2(lp - Vector2(8, 4), Vector2(16, 12)), Color(0.8, 0.75, 0.7))
+		_g.draw_arc(lp - Vector2(0, 4), 5.0, PI, TAU, 12, Color(0.8, 0.75, 0.7), 2.5, true)
 
 	var font: Font = UiTheme.FONT_SERIF_BOLD
 	var title: String = Skills.nodes[id].title
 	var w := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21).x
 	var tp := Vector2(-w * 0.5, r + 30.0)
-	_canvas.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, 5, Color(0.03, 0.02, 0.06, 0.85))
-	_canvas.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(col.lightened(0.2), 0.95))
-	_canvas.draw_set_transform(Vector2.ZERO)
+	_g.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, 5, Color(0.03, 0.02, 0.06, 0.85))
+	_g.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(col.lightened(0.2), 0.95))
+	_g.draw_set_transform(Vector2.ZERO)
 
 
 ## Значки навыков рисуются линиями, в стиле гравюры.
@@ -501,52 +593,52 @@ func _draw_icon(id: String, col: Color) -> void:
 			for i in 40:
 				var t := i / 39.0
 				pts.append(Vector2.from_angle(t * TAU * 2.2 + _time * 0.3) * (2.0 + 15.0 * t))
-			_canvas.draw_polyline(pts, col, w, true)
-			_canvas.draw_circle(Vector2.ZERO, 3.0, col)
+			_g.draw_polyline(pts, col, w, true)
+			_g.draw_circle(Vector2.ZERO, 3.0, col)
 		"gravity_1":
-			_canvas.draw_circle(Vector2.ZERO, 4.5, col)
-			_canvas.draw_arc(Vector2.ZERO, 11.0, 0.0, TAU, 32, Color(col, 0.6), 1.4, true)
+			_g.draw_circle(Vector2.ZERO, 4.5, col)
+			_g.draw_arc(Vector2.ZERO, 11.0, 0.0, TAU, 32, Color(col, 0.6), 1.4, true)
 			for i in 4:
 				var d := Vector2.from_angle(i * TAU / 4.0 + PI / 4.0)
 				var tip := d * 9.0
-				_canvas.draw_line(d * 19.0, tip, col, w, true)
-				_canvas.draw_line(tip, tip + d.rotated(0.6) * 5.0, col, w, true)
-				_canvas.draw_line(tip, tip + d.rotated(-0.6) * 5.0, col, w, true)
+				_g.draw_line(d * 19.0, tip, col, w, true)
+				_g.draw_line(tip, tip + d.rotated(0.6) * 5.0, col, w, true)
+				_g.draw_line(tip, tip + d.rotated(-0.6) * 5.0, col, w, true)
 		"reach_1":
-			_canvas.draw_circle(Vector2.ZERO, 4.0, col)
+			_g.draw_circle(Vector2.ZERO, 4.0, col)
 			for i in 10:
 				var a0 := i * TAU / 10.0
-				_canvas.draw_arc(Vector2.ZERO, 17.0, a0, a0 + TAU / 20.0, 6, col, w, true)
-			_canvas.draw_arc(Vector2.ZERO, 10.0, 0.0, TAU, 28, Color(col, 0.5), 1.2, true)
+				_g.draw_arc(Vector2.ZERO, 17.0, a0, a0 + TAU / 20.0, 6, col, w, true)
+			_g.draw_arc(Vector2.ZERO, 10.0, 0.0, TAU, 28, Color(col, 0.5), 1.2, true)
 		"drift_1":
 			for i in 3:
 				var y := -8.0 + i * 8.0
-				_canvas.draw_line(Vector2(-18.0 + i * 3.0, y), Vector2(4.0 - i * 2.0, y), Color(col, 0.5 + 0.25 * i), w, true)
-			_canvas.draw_circle(Vector2(10.0, 0.0), 6.0, col)
+				_g.draw_line(Vector2(-18.0 + i * 3.0, y), Vector2(4.0 - i * 2.0, y), Color(col, 0.5 + 0.25 * i), w, true)
+			_g.draw_circle(Vector2(10.0, 0.0), 6.0, col)
 		"density_1":
 			for v in [Vector2(0, 0), Vector2(-9, -6), Vector2(8, -8), Vector2(11, 5), Vector2(-7, 9), Vector2(2, 13), Vector2(-14, 2), Vector2(3, -15)]:
-				_canvas.draw_circle(v, 2.8 if v == Vector2.ZERO else 2.0, col)
+				_g.draw_circle(v, 2.8 if v == Vector2.ZERO else 2.0, col)
 		"value_1":
 			var top := Vector2(0, -16)
 			var bottom := Vector2(0, 16)
 			var l := Vector2(-11, -3)
 			var rr := Vector2(11, -3)
-			_canvas.draw_polyline(PackedVector2Array([top, rr, bottom, l, top]), col, w, true)
-			_canvas.draw_line(l, rr, Color(col, 0.7), 1.4, true)
-			_canvas.draw_line(top, Vector2(-4, -3), Color(col, 0.6), 1.2, true)
-			_canvas.draw_line(top, Vector2(4, -3), Color(col, 0.6), 1.2, true)
-			_canvas.draw_line(Vector2(-4, -3), bottom, Color(col, 0.6), 1.2, true)
-			_canvas.draw_line(Vector2(4, -3), bottom, Color(col, 0.6), 1.2, true)
+			_g.draw_polyline(PackedVector2Array([top, rr, bottom, l, top]), col, w, true)
+			_g.draw_line(l, rr, Color(col, 0.7), 1.4, true)
+			_g.draw_line(top, Vector2(-4, -3), Color(col, 0.6), 1.2, true)
+			_g.draw_line(top, Vector2(4, -3), Color(col, 0.6), 1.2, true)
+			_g.draw_line(Vector2(-4, -3), bottom, Color(col, 0.6), 1.2, true)
+			_g.draw_line(Vector2(4, -3), bottom, Color(col, 0.6), 1.2, true)
 		"cluster_1":
 			for v in [Vector2(-6, 4), Vector2(6, 4), Vector2(0, -6)]:
-				_canvas.draw_arc(v, 7.5, 0.0, TAU, 24, col, w, true)
-			_canvas.draw_circle(Vector2.ZERO, 2.5, col)
+				_g.draw_arc(v, 7.5, 0.0, TAU, 24, col, w, true)
+			_g.draw_circle(Vector2.ZERO, 2.5, col)
 		"dust_3":
-			_canvas.draw_line(Vector2(-9, 6), Vector2(9, 6), Color(col, 0.7), w, true)
-			_canvas.draw_line(Vector2(-9, 6), Vector2(0, -9), Color(col, 0.7), w, true)
-			_canvas.draw_line(Vector2(9, 6), Vector2(0, -9), Color(col, 0.7), w, true)
+			_g.draw_line(Vector2(-9, 6), Vector2(9, 6), Color(col, 0.7), w, true)
+			_g.draw_line(Vector2(-9, 6), Vector2(0, -9), Color(col, 0.7), w, true)
+			_g.draw_line(Vector2(9, 6), Vector2(0, -9), Color(col, 0.7), w, true)
 			for v in [Vector2(-9, 6), Vector2(9, 6), Vector2(0, -9)]:
-				_canvas.draw_circle(v, 5.0, col)
+				_g.draw_circle(v, 5.0, col)
 		"pebble_root":
 			# Гладкая галька, газ обтекает её линиями.
 			_ellipse(Vector2(4, 0), Vector2(9.0, 6.5), 0.0, col)
@@ -555,106 +647,106 @@ func _draw_icon(id: String, col: Color) -> void:
 				for i in 12:
 					var x := -18.0 + i * 3.4
 					pts.append(Vector2(x, y * (0.55 + 0.45 * absf(x - 4.0) / 22.0)))
-				_canvas.draw_polyline(pts, Color(col, 0.7), 1.6, true)
-			_canvas.draw_line(Vector2(-18, 0), Vector2(-8, 0), Color(col, 0.7), 1.6, true)
+				_g.draw_polyline(pts, Color(col, 0.7), 1.6, true)
+			_g.draw_line(Vector2(-18, 0), Vector2(-8, 0), Color(col, 0.7), 1.6, true)
 		"toughness":
 			# Плотно спечённый камень: многогранник с внутренними гранями.
 			var pts := PackedVector2Array()
 			for i in 7:
 				pts.append(Vector2.from_angle(i * TAU / 6.0 + 0.3) * 14.0)
-			_canvas.draw_polyline(pts, col, w, true)
+			_g.draw_polyline(pts, col, w, true)
 			for i in 3:
-				_canvas.draw_line(Vector2.ZERO, pts[i * 2], Color(col, 0.6), 1.4, true)
-			_canvas.draw_circle(Vector2.ZERO, 3.0, col)
+				_g.draw_line(Vector2.ZERO, pts[i * 2], Color(col, 0.6), 1.4, true)
+			_g.draw_circle(Vector2.ZERO, 3.0, col)
 		"thrust":
-			_canvas.draw_circle(Vector2(6, 0), 6.5, col)
-			_canvas.draw_arc(Vector2(6, 0), 12.0, PI * 0.65, PI * 1.35, 14, Color(col, 0.7), w, true)
-			_canvas.draw_line(Vector2(-6, -12), Vector2(-16, -12), Color(col, 0.6), w, true)
-			_canvas.draw_line(Vector2(-6, 12), Vector2(-16, 12), Color(col, 0.6), w, true)
+			_g.draw_circle(Vector2(6, 0), 6.5, col)
+			_g.draw_arc(Vector2(6, 0), 12.0, PI * 0.65, PI * 1.35, 14, Color(col, 0.7), w, true)
+			_g.draw_line(Vector2(-6, -12), Vector2(-16, -12), Color(col, 0.6), w, true)
+			_g.draw_line(Vector2(-6, 12), Vector2(-16, 12), Color(col, 0.6), w, true)
 		"ice_crust":
-			_canvas.draw_circle(Vector2.ZERO, 7.0, col)
+			_g.draw_circle(Vector2.ZERO, 7.0, col)
 			for i in 6:
 				var d := Vector2.from_angle(i * TAU / 6.0)
-				_canvas.draw_line(d * 10.0, d * 17.0, col, w, true)
-				_canvas.draw_line(d * 14.0, d * 14.0 + d.rotated(0.9) * 4.0, Color(col, 0.7), 1.4, true)
-				_canvas.draw_line(d * 14.0, d * 14.0 + d.rotated(-0.9) * 4.0, Color(col, 0.7), 1.4, true)
+				_g.draw_line(d * 10.0, d * 17.0, col, w, true)
+				_g.draw_line(d * 14.0, d * 14.0 + d.rotated(0.9) * 4.0, Color(col, 0.7), 1.4, true)
+				_g.draw_line(d * 14.0, d * 14.0 + d.rotated(-0.9) * 4.0, Color(col, 0.7), 1.4, true)
 		"pebble_swarm":
 			for v in [Vector2(-8, -5), Vector2(7, -8), Vector2(9, 7), Vector2(-6, 9), Vector2(0, 0)]:
 				var rr := 4.2 if v == Vector2.ZERO else 3.2
 				_ellipse(v, Vector2(rr, rr * 0.7), v.x * 0.1, col)
 		"grip":
 			# Крупное тело обволакивает камешек поменьше.
-			_canvas.draw_circle(Vector2(-3, 2), 9.0, col)
-			_canvas.draw_arc(Vector2(-3, 2), 13.0, -0.9, 1.6, 16, Color(col, 0.7), w, true)
+			_g.draw_circle(Vector2(-3, 2), 9.0, col)
+			_g.draw_arc(Vector2(-3, 2), 13.0, -0.9, 1.6, 16, Color(col, 0.7), w, true)
 			_ellipse(Vector2(11, -9), Vector2(4.5, 3.6), 0.4, col)
 		"armor":
 			var pts := PackedVector2Array()
 			for i in 7:
 				pts.append(Vector2.from_angle(i * TAU / 6.0) * 15.0)
-			_canvas.draw_polyline(pts, col, w, true)
-			_canvas.draw_arc(Vector2.ZERO, 9.0, 0.0, TAU, 24, Color(col, 0.7), 1.6, true)
-			_canvas.draw_circle(Vector2.ZERO, 3.5, col)
+			_g.draw_polyline(pts, col, w, true)
+			_g.draw_arc(Vector2.ZERO, 9.0, 0.0, TAU, 24, Color(col, 0.7), 1.6, true)
+			_g.draw_circle(Vector2.ZERO, 3.5, col)
 		"combo":
 			# Цепочка камешков, каждый следующий ярче.
 			for i in 4:
 				var v := Vector2(-15 + i * 10, 8 - i * 5)
-				_canvas.draw_circle(v, 2.5 + i * 0.9, Color(col, 0.45 + 0.18 * i))
+				_g.draw_circle(v, 2.5 + i * 0.9, Color(col, 0.45 + 0.18 * i))
 		"geode":
 			# Расколотая жеода: кристаллы внутри скорлупы.
-			_canvas.draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 28, col, w, true)
+			_g.draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 28, col, w, true)
 			for i in 7:
 				var d := Vector2.from_angle(i * TAU / 7.0 + 0.2)
-				_canvas.draw_colored_polygon(PackedVector2Array([d * 3.0 + d.orthogonal() * 2.2, d * 11.0, d * 3.0 - d.orthogonal() * 2.2]), Color(col, 0.85))
+				_g.draw_colored_polygon(PackedVector2Array([d * 3.0 + d.orthogonal() * 2.2, d * 11.0, d * 3.0 - d.orthogonal() * 2.2]), Color(col, 0.85))
 		"swarm":
 			# Рой галек стягивается в сгусток.
 			for i in 9:
 				var a := i * TAU / 9.0 + _time * 0.4
 				var r := 8.0 + 8.0 * fmod(i * 0.37, 1.0)
-				_canvas.draw_circle(Vector2.from_angle(a) * r, 2.2, Color(col, 0.8))
-			_canvas.draw_circle(Vector2.ZERO, 4.0, col)
+				_g.draw_circle(Vector2.from_angle(a) * r, 2.2, Color(col, 0.8))
+			_g.draw_circle(Vector2.ZERO, 4.0, col)
 		"selective":
 			# Сито: из потока проходит только нужное.
-			_canvas.draw_polyline(PackedVector2Array([Vector2(-16, -12), Vector2(16, -12), Vector2(4, 4), Vector2(4, 15), Vector2(-4, 15), Vector2(-4, 4), Vector2(-16, -12)]), col, w, true)
+			_g.draw_polyline(PackedVector2Array([Vector2(-16, -12), Vector2(16, -12), Vector2(4, 4), Vector2(4, 15), Vector2(-4, 15), Vector2(-4, 4), Vector2(-16, -12)]), col, w, true)
 			for v in [Vector2(-8, -17), Vector2(1, -19), Vector2(10, -16)]:
-				_canvas.draw_circle(v, 2.2, Color(col, 0.75))
+				_g.draw_circle(v, 2.2, Color(col, 0.75))
 		"mat_metal":
 			# Подкова магнита.
-			_canvas.draw_arc(Vector2(0, 2), 11.0, 0.0, PI, 20, col, 5.0, true)
-			_canvas.draw_line(Vector2(-11, 2), Vector2(-11, -12), col, 5.0, true)
-			_canvas.draw_line(Vector2(11, 2), Vector2(11, -12), col, 5.0, true)
-			_canvas.draw_line(Vector2(-14, -12), Vector2(-8, -12), Color(col, 0.6), 3.0, true)
-			_canvas.draw_line(Vector2(8, -12), Vector2(14, -12), Color(col, 0.6), 3.0, true)
+			_g.draw_arc(Vector2(0, 2), 11.0, 0.0, PI, 20, col, 5.0, true)
+			_g.draw_line(Vector2(-11, 2), Vector2(-11, -12), col, 5.0, true)
+			_g.draw_line(Vector2(11, 2), Vector2(11, -12), col, 5.0, true)
+			_g.draw_line(Vector2(-14, -12), Vector2(-8, -12), Color(col, 0.6), 3.0, true)
+			_g.draw_line(Vector2(8, -12), Vector2(14, -12), Color(col, 0.6), 3.0, true)
 		"mat_ice":
 			for i in 3:
 				var d := Vector2.from_angle(i * PI / 3.0)
-				_canvas.draw_line(-d * 16.0, d * 16.0, col, w, true)
+				_g.draw_line(-d * 16.0, d * 16.0, col, w, true)
 				for sgn in [-1.0, 1.0]:
 					var t: Vector2 = d * 10.0 * sgn
-					_canvas.draw_line(t, t + (d * sgn).rotated(0.8) * 5.0, Color(col, 0.75), 1.5, true)
-					_canvas.draw_line(t, t + (d * sgn).rotated(-0.8) * 5.0, Color(col, 0.75), 1.5, true)
+					_g.draw_line(t, t + (d * sgn).rotated(0.8) * 5.0, Color(col, 0.75), 1.5, true)
+					_g.draw_line(t, t + (d * sgn).rotated(-0.8) * 5.0, Color(col, 0.75), 1.5, true)
 		"mat_silicate":
 			# Кристалл кварца: вытянутая шестигранная призма.
 			var pts := PackedVector2Array([Vector2(0, -17), Vector2(8, -9), Vector2(8, 10), Vector2(0, 17), Vector2(-8, 10), Vector2(-8, -9), Vector2(0, -17)])
-			_canvas.draw_polyline(pts, col, w, true)
-			_canvas.draw_line(Vector2(0, -17), Vector2(0, 17), Color(col, 0.55), 1.3, true)
+			_g.draw_polyline(pts, col, w, true)
+			_g.draw_line(Vector2(0, -17), Vector2(0, 17), Color(col, 0.55), 1.3, true)
 		"mat_carbon":
 			# Бензольное кольцо — знак органики.
 			var pts := PackedVector2Array()
 			for i in 7:
 				pts.append(Vector2.from_angle(i * TAU / 6.0 + PI / 6.0) * 15.0)
-			_canvas.draw_polyline(pts, col, w, true)
-			_canvas.draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 24, Color(col, 0.75), 1.6, true)
+			_g.draw_polyline(pts, col, w, true)
+			_g.draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 24, Color(col, 0.75), 1.6, true)
 		_:
 			for i in 4:
 				var d := Vector2.from_angle(i * TAU / 4.0)
-				_canvas.draw_colored_polygon(PackedVector2Array([Vector2.ZERO + d.orthogonal() * 3.0, d * 16.0, -d.orthogonal() * 3.0]), col)
+				_g.draw_colored_polygon(PackedVector2Array([Vector2.ZERO + d.orthogonal() * 3.0, d * 16.0, -d.orthogonal() * 3.0]), col)
 
 
 func _ellipse(c: Vector2, radii: Vector2, rot: float, col: Color) -> void:
 	var pts := PackedVector2Array()
 	for i in 20:
 		pts.append(c + (Vector2.from_angle(i * TAU / 20.0) * radii).rotated(rot))
-	_canvas.draw_colored_polygon(pts, col)
+	_g.draw_colored_polygon(pts, col)
 
 
 func _hit_test(screen_pos: Vector2) -> String:
@@ -685,7 +777,6 @@ func _gui_input(event: InputEvent) -> void:
 			_dragging = true
 		if _dragging:
 			_canvas.position += event.relative
-			_canvas.queue_redraw()
 	elif event is InputEventMagnifyGesture:
 		_zoom_at(event.position, event.factor)
 
@@ -734,4 +825,3 @@ func _zoom_at(screen_pos: Vector2, factor: float) -> void:
 	var new_scale := clampf(old * factor, ZOOM_RANGE.x, ZOOM_RANGE.y)
 	_canvas.position = screen_pos - (screen_pos - _canvas.position) * (new_scale / old)
 	_canvas.scale = Vector2(new_scale, new_scale)
-	_canvas.queue_redraw()

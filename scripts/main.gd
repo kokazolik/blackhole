@@ -12,6 +12,7 @@ var camera: Camera2D
 var hud: Hud
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
+var _hidden_world: Array[Node] = []
 var pause_menu: PauseMenu
 var pebble_field: PebbleField
 var fx: AbsorbFx
@@ -97,6 +98,7 @@ func _ready() -> void:
 	hud.tree_requested.connect(_open_tree)
 	hud.menu_requested.connect(_open_pause)
 	tree_screen.closed.connect(hud.play_purchase_spark)
+	tree_screen.closed.connect(_set_world_visible.bind(true))
 
 	# Вход в игру: камера издалека приближается к пылинке, проступает подпись.
 	camera.zoom *= INTRO_ZOOM
@@ -215,6 +217,25 @@ func _open_tree() -> void:
 	joystick.reset()
 	player.move_input = Vector2.ZERO
 	tree_screen.open()
+	_set_world_visible(false)
+
+
+## Под книгой навыков мир не виден, но рисовался бы каждый кадр: пыль, гальки,
+## фон с шейдерами. Пока книга открыта, прячем его — книга идёт плавнее.
+func _set_world_visible(on: bool) -> void:
+	if not on:
+		_hidden_world.clear()
+		for c in get_children():
+			if c is CanvasLayer and (c as CanvasLayer).layer >= 10:
+				continue  # интерфейс
+			if (c is CanvasItem or c is CanvasLayer) and c.visible:
+				c.visible = false
+				_hidden_world.append(c)
+	else:
+		for c in _hidden_world:
+			if is_instance_valid(c):
+				c.visible = true
+		_hidden_world.clear()
 
 
 func _target_zoom() -> float:
