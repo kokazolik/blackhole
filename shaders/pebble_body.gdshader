@@ -46,6 +46,47 @@ float fbm(vec2 p) {
 	return v;
 }
 
+// Ячейки Вороного: расстояния до ближайшей и второй точки и номер ячейки.
+vec3 voronoi(vec2 x, out vec2 cell_id) {
+	vec2 xi = floor(x);
+	vec2 xf = fract(x);
+	float f1 = 8.0;
+	float f2 = 8.0;
+	cell_id = xi;
+	for (int y = -1; y <= 1; y++) {
+		for (int xx = -1; xx <= 1; xx++) {
+			vec2 g = vec2(float(xx), float(y));
+			vec2 o = vec2(hash(xi + g + 3.3), hash(xi + g + 9.1));
+			float d = length(g + o - xf);
+			if (d < f1) {
+				f2 = f1;
+				f1 = d;
+				cell_id = xi + g;
+			} else if (d < f2) {
+				f2 = d;
+			}
+		}
+	}
+	return vec3(f1, f2, f2 - f1);
+}
+
+// Силуэт валуна: выпуклая глыба из нескольких плоскостей скола.
+// Возвращает «радиус» многоугольника в направлении u.
+float block_edge(vec2 u) {
+	float r = 10.0;
+	for (int k = 0; k < 7; k++) {
+		float fk = float(k);
+		float a = fk * 0.8976 + seed * 6.0 + (hash(vec2(fk, 3.7)) - 0.5) * 0.7;
+		vec2 nk = vec2(cos(a), sin(a));
+		float dk = 0.86 + 0.14 * hash(vec2(fk, 8.1));
+		float c = dot(u, nk);
+		if (c > 0.05) {
+			r = min(r, dk / c);
+		}
+	}
+	return r;
+}
+
 float height(vec2 p) {
 	return fbm(p * 2.2);
 }
@@ -57,6 +98,12 @@ void fragment() {
 	float amp = 0.07 + 0.05 * growth + 0.05 * boulder;
 	float edge = 1.0 + amp * (0.55 * sin(2.0 * th + seed * 6.0) + 0.3 * sin(3.0 * th + seed * 11.0)
 			+ 0.15 * sin(5.0 * th + seed * 17.0)) + 0.05 * (noise(vec2(cos(th), sin(th)) * 2.5 + seed * 10.0) - 0.5);
+	if (boulder > 0.0) {
+		// Валун угловатый: грани скола со скруглёнными рёбрами и сколами по краю.
+		float poly = block_edge(vec2(cos(th), sin(th)));
+		poly = min(poly, 1.12) * 0.97 + 0.04 * (noise(vec2(cos(th), sin(th)) * 7.0 + seed * 3.0) - 0.5);
+		edge = mix(edge, poly, smoothstep(0.0, 0.6, boulder));
+	}
 	float r = length(p);
 	float aa = fwidth(r) * 1.2;
 	// Ледяная галька — рыхлый комок, как снежок: край пушистый и полупрозрачный.
@@ -105,36 +152,56 @@ void fragment() {
 		}
 	}
 	vec3 chondrule = mix(CHONDRULE, base * 1.3, 0.25) * (0.9 + 0.2 * noise(p * 30.0));
-	vec3 albedo = mix(base, chondrule, chond * (1.0 - 0.6 * boulder));
+	vec3 albedo = mix(base, chondrule, chond * (1.0 - 0.85 * boulder));
 
-	// Валун: глыба из слипшихся кусков, между ними тёмные трещины-швы.
+	// Валун: как глыбы на Рюгу и Бенну и как брекчии-метеориты. Крупные плоские
+	// грани скола, вкрапления угловатых обломков другого тона, трещины,
+	// мелкие поры и светлая реголитовая пыль в углублениях.
 	if (boulder > 0.0) {
-		// Координаты чуть искривлены шумом: швы неровные, как у настоящих трещин.
-		vec2 bp = p * 2.0 + vec2(seed * 7.0) + (vec2(noise(p * 3.1), noise(p * 3.1 + 5.2)) - 0.5) * 0.9;
-		vec2 bi = floor(bp);
-		vec2 bf = fract(bp);
-		float f1 = 8.0;
-		float f2 = 8.0;
-		float shade = 0.0;
-		for (int y = -1; y <= 1; y++) {
-			for (int x = -1; x <= 1; x++) {
-				vec2 g = vec2(float(x), float(y));
-				vec2 o = vec2(hash(bi + g + 3.3), hash(bi + g + 9.1));
-				float d = length(g + o - bf);
-				if (d < f1) {
-					f2 = f1;
-					f1 = d;
-					shade = hash(bi + g + 21.7);
-				} else if (d < f2) {
-					f2 = d;
-				}
-			}
-		}
-		float seam = (1.0 - smoothstep(0.01, 0.06, f2 - f1)) * smoothstep(0.35, 0.65, noise(p * 4.0 + 11.0));
-		albedo *= 1.0 - boulder * (0.4 * seam - 0.14 * (shade - 0.5));
-		n = normalize(n + vec3((bf - 0.5) * 0.12 * boulder, 0.0));
+		float b = boulder;
+		// Мелкие детали гаснут, когда тело на экране маленькое: иначе рябят.
+		float fine = clamp(1.4 - fwidth(p.x) * 45.0, 0.0, 1.0);
+		// Грани: тело — многогранник. Каждая крупная ячейка освещена как плоскость,
+		// касательная к телу в своём центре, плюс небольшой случайный наклон скола.
+		vec2 fid;
+		vec2 fo = vec2(seed * 5.0);
+		vec3 fv = voronoi(p * 2.1 + fo, fid);
+		vec2 fc = (fid + vec2(hash(fid + 3.3), hash(fid + 9.1)) - fo) / 2.1;
+		vec2 fq = fc / edge;
+		fq *= min(1.0, 0.92 / max(length(fq), 0.001));
+		vec3 nf = normalize(vec3(fq, sqrt(max(1.0 - dot(fq, fq), 0.0)) + 0.05));
+		nf = normalize(nf + vec3((vec2(hash(fid + 1.3), hash(fid + 7.9)) - 0.5) * 0.35, 0.0));
+		float ridge = 1.0 - smoothstep(0.0, 0.04, fv.z);
+		n = normalize(mix(n, nf, 0.75 * b));
+		// Обломки в цементе: угловатые зёрна светлее или темнее основы.
+		vec2 cid;
+		vec2 wp = p * 5.5 + vec2(seed * 11.0) + (vec2(noise(p * 6.0), noise(p * 6.0 + 3.1)) - 0.5) * 0.35;
+		vec3 cv = voronoi(wp, cid);
+		float is_clast = step(hash(cid + 2.2), 0.3);
+		float tone = hash(cid + 5.5);
+		vec3 clast_col = base * mix(vec3(0.7, 0.68, 0.66), vec3(1.25, 1.22, 1.12), tone);
+		float clast = is_clast * smoothstep(0.02, 0.06, cv.z);
+		albedo = mix(albedo, clast_col, clast * b);
+		albedo *= 1.0 - 0.35 * b * is_clast * (1.0 - smoothstep(0.0, 0.03, cv.z));  // тонкий шов вокруг обломка
+		// Трещины: длинные неровные линии по границам крупных блоков.
+		vec2 kid;
+		vec2 kp = p * 2.4 + vec2(seed * 7.0) + (vec2(noise(p * 3.1), noise(p * 3.1 + 5.2)) - 0.5) * 0.8;
+		vec3 kv = voronoi(kp, kid);
+		float crack = (1.0 - smoothstep(0.0, 0.035, kv.z)) * smoothstep(0.35, 0.6, noise(p * 3.5 + 11.0));
+		albedo *= 1.0 - 0.7 * b * crack;
+		// Поры и ямки.
+		float pit = smoothstep(0.78, 0.86, noise(p * 22.0 + 7.0));
+		albedo *= 1.0 - 0.45 * b * pit * fine;
+		// Рельеф грубее, чем у гальки.
+		float hb = fbm(p * 9.0 + 4.0);
+		vec2 gb = vec2(fbm(p * 9.0 + 4.0 + vec2(0.02, 0.0)) - hb, fbm(p * 9.0 + 4.0 + vec2(0.0, 0.02)) - hb) / 0.02;
+		n = normalize(n - vec3(gb * 0.05 * b * fine, 0.0));
+		// Рёбра граней ловят свет, а в ямках копится светлая пыль.
+		albedo *= 1.0 + 0.18 * b * ridge;
+		float dust = smoothstep(0.1, 0.5, 0.48 - h) * (1.0 - clast);
+		albedo = mix(albedo, mix(base, vec3(0.72, 0.68, 0.62), 0.5), dust * 0.35 * b);
 	}
-	n = normalize(n + vec3(dome * 0.35 * chond, 0.0));
+	n = normalize(n + vec3(dome * 0.35 * chond * (1.0 - boulder), 0.0));
 
 	// Лёд: светлая пушистая изморозь поверх всего, гуще в ямках рельефа.
 	float frost = smoothstep(0.4, 0.95, mix_w.w + 0.35 * (fbm(p * 7.0) - 0.5) + 0.2 * (0.5 - h));

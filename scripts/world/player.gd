@@ -290,7 +290,7 @@ func _update_grain(r: float) -> void:
 		var body := _pebble.material as ShaderMaterial
 		body.set_shader_parameter("mix_w", _mix)
 		body.set_shader_parameter("growth", clampf(log(maxf(GameState.mass, 30.0) / 30.0) / log(100.0), 0.0, 1.0))
-		body.set_shader_parameter("boulder", boulder_k * clampf(0.4 + 0.6 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
+		body.set_shader_parameter("boulder", boulder_k * clampf(0.75 + 0.25 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
 		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.12 * _pulse), pebble_k)
 
 
