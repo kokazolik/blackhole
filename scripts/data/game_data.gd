@@ -66,8 +66,8 @@ const BODY_TYPES := {
 const STAGES := [
 	{"name": "Пылинка", "mass": 0.0},
 	{"name": "Галька", "mass": 30.0},
-	{"name": "Валун", "mass": 300.0},
-	{"name": "Планетезималь", "mass": 3000.0},
+	{"name": "Валун", "mass": 3000.0},        # ~1 м: в сто раз крупнее гальки
+	{"name": "Планетезималь", "mass": 3000000.0},  # ~1 км: здесь уже правит гравитация
 ]
 
 
@@ -160,6 +160,27 @@ static func format_number(v: float) -> String:
 	if tier <= suffixes.size():
 		return "%.2f%s" % [v / pow(1000.0, tier), suffixes[tier - 1]]
 	return "%.2fe%d" % [v / pow(10.0, floor(log(v) / log(10.0))), int(floor(log(v) / log(10.0)))]
+
+
+## Примерный реальный размер тела по массе. Шкала логарифмическая, как и рост:
+## масса 1 — пылинка ~0.1 мм, 30 — галька ~1 см, 3000 — валун ~1 м, 3·10⁶ — ~1 км.
+static func real_size_cm(m: float) -> float:
+	if m < 30.0:
+		return 0.01 * pow(100.0, log(maxf(m, 0.001)) / log(30.0))
+	return m / 30.0
+
+
+static func format_size(m: float) -> String:
+	var cm := real_size_cm(m)
+	if cm < 0.1:
+		return "≈ %d мкм" % roundi(cm * 10000.0)
+	if cm < 1.0:
+		return "≈ %.1f мм" % (cm * 10.0)
+	if cm < 100.0:
+		return "≈ %d см" % roundi(cm) if cm >= 10.0 else "≈ %.1f см" % cm
+	if cm < 100000.0:
+		return "≈ %.1f м" % (cm / 100.0) if cm < 1000.0 else "≈ %d м" % roundi(cm / 100.0)
+	return "≈ %.1f км" % (cm / 100000.0)
 
 
 static func format_mass(v: float) -> String:

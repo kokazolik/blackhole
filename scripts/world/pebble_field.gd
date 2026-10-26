@@ -19,7 +19,7 @@ signal geode_found(world_position: Vector2, value: float)
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
 const MAX_PEBBLES := 140
-const BASE_COUNT := 8               # галек в округе при плотности 1 (вне колец)
+const BASE_COUNT := 6               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
 # Радиусы чужих галек в долях радиуса игрока. Мелких обломков больше, чем крупных
 # (распределение как после дробления), но встречаются и тела крупнее тебя.

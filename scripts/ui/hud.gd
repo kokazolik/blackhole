@@ -329,13 +329,18 @@ func play_purchase_spark() -> void:
 
 
 func _refresh() -> void:
-	_mass_label.text = "масса " + GameData.format_mass(GameState.mass)
+	_mass_label.text = "масса %s · %s" % [GameData.format_mass(GameState.mass), GameData.format_size(GameState.mass)]
 	var idx := maxi(GameData.stage_index(GameState.mass), GameState.stage)
 	var stage: Dictionary = GameData.STAGES[idx]
 	if idx + 1 < GameData.STAGES.size():
 		var next: Dictionary = GameData.STAGES[idx + 1]
 		_stage_label.text = "%s → %s" % [stage.name, next.name]
-		_stage_progress = clampf(inverse_lerp(stage.mass, next.mass, GameState.mass), 0.0, 1.0)
+		# Рост экспоненциальный, поэтому шкала этапа логарифмическая.
+		if stage.mass > 0.0:
+			var lo := log(stage.mass)
+			_stage_progress = clampf((log(maxf(GameState.mass, 1.0)) - lo) / (log(next.mass) - lo), 0.0, 1.0)
+		else:
+			_stage_progress = clampf(inverse_lerp(stage.mass, next.mass, GameState.mass), 0.0, 1.0)
 	else:
 		_stage_label.text = stage.name
 		_stage_progress = 1.0
