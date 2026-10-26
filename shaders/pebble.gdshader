@@ -55,14 +55,20 @@ void fragment() {
 		for (int i = 0; i < 5; i++) {
 			float fi = float(i);
 			vec2 c2 = vec2(sin(fi * 2.4 + 0.7), cos(fi * 1.7 + 0.3)) * 0.22;
-			float tw = pow(max(sin(TIME * 2.2 + fi * 1.9), 0.0), 6.0);
+			float tw = pow(max(sin(mod(TIME, 28.56) * 2.2 + fi * 1.9), 0.0), 6.0);
 			cells += exp(-dot(sp - 0.5 - c2, sp - 0.5 - c2) * 900.0) * (0.4 + 1.6 * tw);
 		}
 		outc.rgb += gold * cells * tex.a;
+		// Ореол гаснет до нуля, не доходя до края квадрата: иначе на некоторых
+		// телефонах квадрат проступал золотой плашкой.
 		float d = length(p) / 0.36;
-		float halo = exp(-max(d - 0.9, 0.0) * 4.0) * (0.55 + 0.25 * sin(TIME * 3.0));
-		outc.rgb = mix(gold * halo, outc.rgb, tex.a);
+		float pulse = 0.55 + 0.25 * sin(mod(TIME, 6.2832) * 3.0);
+		float halo = exp(-max(d - 0.9, 0.0) * 4.0) * pulse * (1.0 - smoothstep(1.0, 1.35, d));
+		outc.rgb = mix(gold, outc.rgb, tex.a);
 		outc.a = max(tex.a, halo * 0.6 * (1.0 - tex.a));
+	}
+	if (outc.a < 0.004) {
+		discard;
 	}
 	COLOR = outc;
 }

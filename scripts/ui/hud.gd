@@ -10,6 +10,10 @@ const TOP_WIDTH := 380.0
 const BOOK_ICON := preload("res://assets/ui/book.png")
 
 var star_screen_pos := Vector2.ZERO
+static var show_fps := false  # включается в меню разработчика
+var _fps_label: Label
+var _fps_t := 0.0
+var _fps_worst := 0.0
 var _currency_label: Label
 var _currency_icon: Control
 var _mass_label: Label
@@ -50,6 +54,12 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	theme = UiTheme.get_theme()
 	_build()
+	_fps_label = Label.new()
+	_fps_label.add_theme_font_size_override("font_size", 13)
+	_fps_label.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
+	_fps_label.position = Vector2(12.0, 300.0)
+	_fps_label.visible = false
+	add_child(_fps_label)
 	_last_currency = GameState.currency
 	_shown_currency = GameState.currency
 	GameState.skills_changed.connect(func(): _spark_pending = true)
@@ -510,6 +520,19 @@ func _draw_badge() -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_fps_label.visible = show_fps
+	if show_fps:
+		_fps_worst = maxf(_fps_worst, delta)
+		_fps_t += delta
+		if _fps_t > 1.0:
+			var cs := get_tree().current_scene
+			var pf: Variant = cs.get("pebble_field") if cs else null
+			_fps_label.text = "FPS %d · худший кадр %d мс · скрипты %.1f мс · гальки %d" % [
+				Engine.get_frames_per_second(), int(_fps_worst * 1000.0),
+				Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+				pf.pebbles.size() if pf else 0]
+			_fps_t = 0.0
+			_fps_worst = 0.0
 	_currency_icon.queue_redraw()
 	# Валюта «докручивается» до нового значения, полоса стадии плавно растёт.
 	var target := GameState.currency

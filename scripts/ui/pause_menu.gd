@@ -80,6 +80,9 @@ func _show_dev() -> void:
 	_button("Галька перед валуном", false, func(): _jump(2900.0, 1))
 	_button("Валун: начало", false, func(): _jump(3001.0, 2))
 	_button("Валун: середина (~100 000)", false, func(): _jump(100000.0, 2))
+	_button("Скрыть FPS" if Hud.show_fps else "Показывать FPS", false, func():
+		Hud.show_fps = not Hud.show_fps
+		close())
 	_button("+10 000 звёздной пыли", false, func():
 		GameState.add_currency(10000.0)
 		close())

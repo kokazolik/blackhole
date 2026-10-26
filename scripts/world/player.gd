@@ -10,6 +10,8 @@ signal burned_up
 
 const ACCEL_FACTOR := 3.0
 const PEBBLE_ACCEL_FACTOR := 1.4  # галька тяжелее: тяга разгоняет её дольше
+const PEBBLE_SPEED := 60.0         # предельная скорость свежей гальки (без навыков), ед./с
+const PEBBLE_SPEED_EXP := 0.6      # как растёт скорость гальки с радиусом
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
 # Галька рисуется шейдером: обломки окрашены по составу, и вид перетекает за ним.
 const MIX_SMOOTH_TIME := 1.5
@@ -108,7 +110,11 @@ func pull_strength() -> float:
 
 
 func max_speed() -> float:
-	return 28.0 * pow(radius, 0.75) * Skills.stat("speed") * GameState.body_bonus("speed")
+	# Галька медленнее пылинки и с ростом разгоняется слабо: к гальке подкатываешь
+	# аккуратно, а диск из конца в конец за секунды не пролетишь.
+	var dust := 28.0 * pow(radius, 0.75)
+	var pebble := PEBBLE_SPEED * pow(radius / GameData.PEBBLE_REF_RADIUS, PEBBLE_SPEED_EXP)
+	return lerpf(dust, pebble, pebble_k) * Skills.stat("speed") * GameState.body_bonus("speed")
 
 
 ## Скорость удара, до которой гальки слипаются. Лёд липкий: чем больше льда в

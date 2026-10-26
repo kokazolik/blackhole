@@ -32,11 +32,11 @@ const QUAD := 2.8                     # сторона квадрата в ра�
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
 # насколько крупную гальку удалось присоединить.
-const VALUE_PER_PEBBLE := 10.0
+const VALUE_PER_PEBBLE := 13.0
 # При слипании прирастает не всё: часть вещества разлетается пылью и осколками
 # (в опытах с пылевыми агрегатами прилипает лишь доля). Это и держит темп этапа.
-const ACCRETION := 0.6
-const VALUE_MASS_EXP := 0.45          # доход растёт с массой медленнее её самой: книга не скупается за минуту
+const ACCRETION := 0.5
+const VALUE_MASS_EXP := 0.52          # доход растёт с массой медленнее её самой: книга не скупается за минуту
 const MASS_THINNING := 0.3
 const THINNING_FROM := 3.33          # в массах начала этапа: до неё тел вокруг столько же, сколько в начале
 # Валун: гальки вокруг стали мелочью-едой. Масса с них небольшая, зато звёздной
@@ -528,6 +528,10 @@ func _draw_hints() -> void:
 		return
 	var px := 1.0 / camera.zoom.x
 	var stick := player.stick_speed()
+	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон
+	# не тянул, когда вокруг рой крупных галек.
+	var dash_pts := PackedVector2Array()
+	var dash_cols := PackedColorArray()
 	for p in pebbles:
 		if p.food:
 			continue  # мелочь прилипает всегда: подсказка не нужна
@@ -545,9 +549,12 @@ func _draw_hints() -> void:
 		var rr := p.r * 1.12 + (w_face * 0.5 + 1.0) * px
 		if not absorbable(p):
 			# Мелкий пунктир вплотную к гальке: заметно, но не спорит с самой галькой.
-			for s in 24:
-				var a0 := s * TAU / 24.0
-				_hint.draw_arc(wp, p.r * 1.1, a0, a0 + TAU / 72.0, 3, Color(0.8, 0.85, 1.0, 0.3 * fade), 1.0 * px, true)
+			var dash_col := Color(0.8, 0.85, 1.0, 0.3 * fade)
+			for k in 24:
+				var a0 := k * TAU / 24.0
+				dash_pts.append(wp + Vector2.from_angle(a0) * p.r * 1.1)
+				dash_pts.append(wp + Vector2.from_angle(a0 + TAU / 72.0) * p.r * 1.1)
+				dash_cols.append(dash_col)
 			continue
 		var n := to / maxf(dist, 0.001)
 		var approach := (player.motion() - GameData.gas_drift(wp, p.r)).dot(n)
@@ -558,3 +565,5 @@ func _draw_hints() -> void:
 		# Остаток кольца — цвет материала: нужное вещество видно издалека.
 		var mat_col: Color = GameData.MATERIALS[p.material].color
 		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
+	if not dash_pts.is_empty():
+		_hint.draw_multiline_colors(dash_pts, dash_cols, -1.0)
