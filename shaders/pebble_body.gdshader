@@ -20,7 +20,7 @@ const vec3 SILICATE = vec3(0.76, 0.64, 0.47);
 const vec3 METAL = vec3(0.62, 0.64, 0.7);
 const vec3 CARBON = vec3(0.3, 0.22, 0.2);
 const vec3 ICE = vec3(0.8, 0.9, 1.0);
-const vec3 CHONDRULE = vec3(0.95, 0.88, 0.74);
+const vec3 CHONDRULE = vec3(0.86, 0.87, 0.66);  // светлый оливин
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7)) + seed * 91.3) * 43758.5453);
@@ -58,7 +58,11 @@ void fragment() {
 			+ 0.15 * sin(5.0 * th + seed * 17.0)) + 0.05 * (noise(vec2(th * 2.5, seed * 10.0)) - 0.5);
 	float r = length(p);
 	float aa = fwidth(r) * 1.2;
-	float alpha = 1.0 - smoothstep(edge - aa, edge + aa, r);
+	// Ледяная галька — рыхлый комок, как снежок: край пушистый и полупрозрачный.
+	float fluff = smoothstep(0.3, 0.8, mix_w.w);
+	float fr = r + fluff * 0.12 * (noise(p * 13.0 + seed * 5.0) - 0.5);
+	float soft = aa + fluff * 0.09;
+	float alpha = 1.0 - smoothstep(edge - soft, edge + soft * 0.6, fr);
 	if (alpha <= 0.0) {
 		discard;
 	}
@@ -118,6 +122,10 @@ void fragment() {
 	// Мягкий блик по всему телу и блеск изморози.
 	col += star_light * pow(nh, 20.0) * 0.12;
 	col += star_light * frost * pow(nh, 10.0) * 0.25;
+	// Хондры — стекловатые капли: ловят свет искоркой.
+	col += star_light * chond * pow(nh, 30.0) * 0.4;
+	// Пушистый край ледяной гальки подсвечен звездой насквозь.
+	col += vec3(0.6, 0.78, 1.0) * star_light * fluff * smoothstep(edge - 0.2, edge, fr) * (0.25 + 0.6 * diff);
 
 	col *= COLOR.rgb;
 	float luma = dot(albedo, vec3(0.3, 0.5, 0.2));

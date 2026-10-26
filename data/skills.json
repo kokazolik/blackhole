@@ -790,7 +790,7 @@
 			"cost_growth": 1.5,
 			"max_level": 5,
 			"pos": [
-				-6,
+				-7.0,
 				3
 			],
 			"requires": [
@@ -810,7 +810,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-7.6,
+				-8.8,
 				4
 			],
 			"requires": [
@@ -831,7 +831,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-7.6,
+				-8.8,
 				5
 			],
 			"requires": [
@@ -852,7 +852,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-6.7,
+				-7.6,
 				4
 			],
 			"requires": [
@@ -873,7 +873,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-6.7,
+				-7.6,
 				5
 			],
 			"requires": [
@@ -894,7 +894,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-5.8,
+				-6.4,
 				4
 			],
 			"requires": [
@@ -915,7 +915,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-5.8,
+				-6.4,
 				5
 			],
 			"requires": [
@@ -936,7 +936,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-4.9,
+				-5.2,
 				4
 			],
 			"requires": [
@@ -957,7 +957,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-4.9,
+				-5.2,
 				5
 			],
 			"requires": [
