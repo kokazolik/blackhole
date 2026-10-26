@@ -41,6 +41,7 @@ const REBASE_DISTANCE := 20000.0
 const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
 # Рядом с галькой пылинки — микронная крапинка: на этапе «Галька» рисуем их мельче.
 const PEBBLE_DUST_SCALE := 0.25
+const AMBIENT_FADE := Vector2(100.0, 3000.0)  # с какой массы пыли меньше и где её остаётся 15%
 const CLOUD_GRAINS := Vector2i(3, 6)   # сколько пылинок несёт одно облачко
 const CLOUD_RADIUS := 2.6              # радиус облачка в радиусах пылинки его уровня
 const PEBBLE_MAX_DUST := 800           # потолок числа объектов пыли на этапе «Галька»
@@ -308,12 +309,23 @@ func _rewrite_all() -> void:
 		_write(d)
 
 
+## Сколько новой пыли появляется вокруг. Растущей гальке пыль уже мелочь: к концу
+## этапа её всё меньше, а у валуна свежей нет вовсе, только крошки от твоих сколов.
+func ambient_k() -> float:
+	if player.pebble_k <= 0.0:
+		return 1.0
+	var m := GameState.mass
+	var k := 1.0 - clampf(log(maxf(m, AMBIENT_FADE.x) / AMBIENT_FADE.x) / log(AMBIENT_FADE.y / AMBIENT_FADE.x), 0.0, 1.0) * 0.85
+	return lerpf(1.0, k, player.pebble_k) * (1.0 - player.boulder_k)
+
+
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
 	# Облачко несёт несколько пылинок, поэтому объектов нужно во столько же раз меньше.
 	var per_object := lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5 / PEBBLE_DUST_LEFT, _cloud_share())
 	var cap := int(lerpf(MAX_DUST, PEBBLE_MAX_DUST, _cloud_share())) - CLUSTER_SIZE.y
-	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale / per_object), cap)
+	var ambient := ambient_k()
+	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale * ambient / per_object), cap)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
 	if not _filled:
 		# Первое заполнение: пыль сразу по всему экрану, а не только за краем.
@@ -336,7 +348,7 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	_cluster_timer -= delta
 	if _cluster_timer <= 0.0:
 		_cluster_timer = CLUSTER_CHECK
-		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster"):
+		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster") * ambient:
 			_spawn_cluster(_random_point(view_r * 1.15, active_r * 0.95), view_r)
 
 

@@ -15,6 +15,7 @@ signal evaporated(world_position: Vector2, grain_radius: float)
 signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорвалась или угасла
 signal swarm_started(world_position: Vector2)
 signal geode_found(world_position: Vector2, value: float)
+signal chunks_broken(world_position: Vector2)
 signal eddy_started(world_position: Vector2)
 signal pebble_absorbed(world_position: Vector2)
 
@@ -29,6 +30,12 @@ const RING_BOOST := 2.5               # в кольце-ловушке гале�
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
 const R_RANGE := Vector2(0.17, 1.25)
 const R_SKEW := 2.2
+const EASY_R := 0.2          # мельче этой доли твоего радиуса гальки прилипают на любой скорости, как пыль
+# Удар о крупную гальку откалывает от неё куски. Ты теряешь своё, а куски — мелочь,
+# их можно доесть. Без навыков от сколов это всё же убыток.
+const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
+const CHUNK_MAX := 0.25      # больше этой доли галька за удар не теряет
+const CHUNK_R := Vector2(0.11, 0.19)  # размер куска в долях твоего радиуса
 const SIZE_GAP := 1.35                 # несъедобные — минимум на столько крупнее предела хватки
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
@@ -72,6 +79,8 @@ class Pebble:
 	var swarm := false  # из роя: рассеивается, когда рой кончился
 	var eddy := false   # кружится в вихре
 	var food := false   # мелочь на этапе «Валун»: прилипает на любой скорости
+	var chunk_mass := 0.0  # кусок, отбитый от крупной гальки: его масса задана при откалывании
+	var hit_cd := 0.0      # пауза после удара, чтобы одно касание не било много раз
 
 var player: Player
 var dust_field: DustField
@@ -158,6 +167,7 @@ func _process(delta: float) -> void:
 				p.vel += to_p / dl * player.pull_strength() * 0.6 * pull * (1.0 - dl / pull_r) * delta
 		p.pos += (p.vel + GameData.gas_drift(wp, p.r)) * delta
 		p.angle += p.spin * delta
+		p.hit_cd -= delta
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
 			pebbles.remove_at(i)
@@ -191,7 +201,7 @@ func _maintain() -> void:
 	for p in pebbles:
 		if p.food:
 			food += 1
-		else:
+		elif p.chunk_mass <= 0.0:  # отбитые куски не в счёт: они не вместо новых галек
 			bodies += 1
 	var budget := 8
 	while (bodies < target or food < food_target) and budget > 0 and pebbles.size() < MAX_PEBBLES:
@@ -271,6 +281,11 @@ func _pick_material(dist: float) -> String:
 ## Можно ли присоединить гальку: предел размера растёт с навыками ветви «Захват».
 func absorbable(p: Pebble) -> bool:
 	return p.food or p.r < player.radius * minf(Skills.stat("grip"), 0.95)
+
+
+## Мелочь, которая прилипает на любой скорости: еда валуна, отбитые куски и крошечные гальки.
+func is_easy(p: Pebble) -> bool:
+	return p.food or p.chunk_mass > 0.0 or p.r < player.radius * EASY_R
 
 
 ## Серия гаснет, если долго не слипаться.
@@ -430,9 +445,15 @@ func _collide(p: Pebble, index: int) -> void:
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
-	if p.food or (absorbable(p) and impact <= stick):
-		var m := GameData.pebble_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass) * ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
-		if not p.food:  # серию держат только настоящие слипания, мелочь её не продлевает
+	if p.chunk_mass > 0.0 and p.hit_cd > 0.0:
+		return  # только что отбитый кусок ещё разлетается
+	var easy := is_easy(p)
+	if easy or (absorbable(p) and impact <= stick):
+		var m := GameData.pebble_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
+		if p.chunk_mass > 0.0:
+			m = p.chunk_mass
+		m *= ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
+		if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 			chain += 1
 			_chain_timer = GameData.COMBO_WINDOW
 		var size_rel := p.r * (FOOD_MASS_R if p.food else 1.0) / player.radius
@@ -448,14 +469,18 @@ func _collide(p: Pebble, index: int) -> void:
 			geode_found.emit(wp, value)
 		GameState.absorb_mass(m, value, p.material, at)
 		pebble_absorbed.emit(wp)
-		if Skills.stat("combo") > 0.0 and chain >= 2 and not p.food:
+		if Skills.stat("combo") > 0.0 and chain >= 2 and not easy:
 			combo_changed.emit(chain, combo_multiplier())
 		pebbles.remove_at(index)
 		return
-	if impact > stick:
+	if impact > stick and p.hit_cd <= 0.0:
+		p.hit_cd = 0.3
 		var excess := impact / stick
 		var m_other := GameData.pebble_mass(p.r, GameState.mass)
-		var loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * GameData.CHIP_MAX) * Skills.stat("chip")
+		var raw_loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * GameData.CHIP_MAX)
+		var loss := raw_loss * Skills.stat("chip")
+		if not absorbable(p):
+			_break_chunks(p, wp, n, impact, minf(raw_loss * CHUNK_SHARE, m_other * CHUNK_MAX), m_other)
 		var player_mat := _main_material()
 		if chain > 0:
 			chain = 0
@@ -473,6 +498,45 @@ func _collide(p: Pebble, index: int) -> void:
 	var push := contact - dist + 0.5
 	player.position -= n * push * 0.5
 	p.pos += n * push * 0.5
+
+
+## Середина ещё не съеденных отбитых кусков (INF, если их нет).
+func chunk_center() -> Vector2:
+	var sum := Vector2.ZERO
+	var n := 0
+	for p in pebbles:
+		if p.chunk_mass > 0.0:
+			sum += world_pos(p)
+			n += 1
+	return sum / n if n > 0 else Vector2.INF
+
+
+## От крупной гальки отлетают куски: она худеет, а куски можно доесть.
+func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: float, m_other: float) -> void:
+	if total <= 0.0:
+		return
+	p.r *= pow(maxf(1.0 - total / m_other, 0.05), 1.0 / 3.0)
+	var avg_r := player.radius * (CHUNK_R.x + CHUNK_R.y) * 0.5
+	var avg_m := GameData.pebble_mass(avg_r, GameState.mass)
+	var count := clampi(int(round(total / maxf(avg_m, 0.0001))), 2, 6)
+	count = mini(count, MAX_PEBBLES - pebbles.size())
+	var at := wp - n * p.r  # точка удара на поверхности гальки
+	for k in count:
+		var c := Pebble.new()
+		var side := 1.0 if rng.randf() < 0.5 else -1.0
+		var d := (-n).rotated(side * rng.randf_range(0.7, 1.7))
+		c.pos = at + d * player.radius * 0.3 - dust_field.frame_offset
+		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
+		c.chunk_mass = total / count
+		c.material = p.material
+		c.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		c.angle = rng.randf() * TAU
+		c.spin = rng.randf_range(-1.5, 1.5)
+		# Разлетаются в стороны от удара, а не прямо в тебя.
+		c.vel = d * impact * rng.randf_range(0.35, 0.7)
+		c.hit_cd = 0.5
+		pebbles.append(c)
+	chunks_broken.emit(at)
 
 
 ## Отскок: у кого меньше масса, того отбрасывает сильнее.
@@ -539,7 +603,7 @@ func _draw_hints() -> void:
 	var dash_pts := PackedVector2Array()
 	var dash_cols := PackedColorArray()
 	for p in pebbles:
-		if p.food:
+		if is_easy(p):
 			continue  # мелочь прилипает всегда: подсказка не нужна
 		var wp := world_pos(p)
 		var to := wp - player.position

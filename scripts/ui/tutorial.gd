@@ -184,6 +184,13 @@ const TIPS := {
 		"pause": true,
 		"focus": "chip",
 	},
+	"chunks": {
+		"id": "t_chunks",
+		"text": "Ты врезался в гальку, которую пока не удержать, и отбил от неё куски. Они мелкие: собирай их на любой скорости. Только помни, что и сам при ударе теряешь вещество. Мелочь вроде этой прилипает всегда, как пыль.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
 	"geode": {
 		"id": "t_geode",
 		"text": "Жеода! Внутри этой гальки были кристаллы, поэтому она принесла намного больше звёздной пыли. Такие попадаются редко, а знание «Жеоды» в книге поможет находить их чаще.",
@@ -660,7 +667,7 @@ func _prepare_focus(step: Dictionary) -> bool:
 				return false
 			var r: float = main.dust_field.view_radius() * (0.25 if tip == "swarm" else 0.1)
 			_focus = {"pos": tip_pos, "r": r}
-			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода"}.get(tip, ""), "color": GOLD}]
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски"}.get(tip, ""), "color": GOLD}]
 		"chip":
 			_focus = {"pos": pl.position, "r": pl.radius * 4.0}
 			_marks = [{"pos": pl.position, "r": pl.radius * 3.2, "label": "осколки", "color": Color(1.0, 0.55, 0.4)}]

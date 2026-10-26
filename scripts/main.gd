@@ -23,6 +23,8 @@ var _zoom_ease := 0.0  # с какого момента камера снова 
 var _caption: Control
 var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
 var _chip_time := -10.0
+var _chunk_time := -10.0
+var _chunk_pos := Vector2.ZERO
 var _geode_time := -10.0
 var _geode_pos := Vector2.ZERO
 var _swarm_pos := Vector2.ZERO
@@ -92,6 +94,9 @@ func _ready() -> void:
 			_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
+	pebble_field.chunks_broken.connect(func(at: Vector2) -> void:
+		_chunk_time = _intro_time
+		_chunk_pos = at)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -304,7 +309,9 @@ func _check_tips() -> void:
 		"geode": _intro_time - _geode_time < 1.5,
 		"eddy": pebble_field.eddy_left > 5.0,
 		"swarm": pebble_field.swarm_left > 5.0,
-		"ice": player.ice_vapor > 0.0 and hud._heat_label.visible,
+		"chunks": _intro_time - _chunk_time > 0.7 and _intro_time - _chunk_time < 5.0 \
+				and pebble_field.chunk_center() != Vector2.INF,  # дать кускам разлететься
+		"ice": player.ice_vapor > 0.0 and hud._ice_label.visible,
 	}
 	for kind in found:
 		if found[kind] and not kind in GameState.tips_seen:
@@ -312,7 +319,7 @@ func _check_tips() -> void:
 			tip.main = self
 			tip.steps = [Tutorial.TIPS[kind]]
 			tip.tip = kind
-			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos}.get(kind, Vector2.INF)
+			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center()}.get(kind, Vector2.INF)
 			tip.start_delay = 0.1
 			$UI.add_child(tip)
 			$UI.move_child(pause_menu, -1)

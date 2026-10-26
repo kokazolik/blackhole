@@ -108,6 +108,13 @@ func _draw_light() -> void:
 	var pp := player.position
 	var pr := player.radius
 	var px := 1.0 / camera.zoom.x  # один пиксель экрана в мировых единицах
+	# Свет складывается: когда ешь пыль горстями, десятки вспышек сливались в белое
+	# пятно поверх тела. Делим общую яркость между ними, а свечение комка берём
+	# по самой яркой вспышке, а не суммой.
+	var hit_k := minf(1.0, 2.5 / maxf(float(_hits.size()), 1.0))
+	var mote_k := minf(1.0, 8.0 / maxf(float(_motes.size()), 1.0))
+	var body_glow := 0.0
+	var body_col := Color.WHITE
 
 	for h in _hits:
 		var col: Color = (h.color as Color).lightened(0.35)
@@ -117,20 +124,24 @@ func _draw_light() -> void:
 		var kf := clampf(h.t / FLASH_TIME, 0.0, 1.0)
 		var flash := sin(minf(kf * 1.6, 1.0) * PI * 0.5) * (1.0 - kf)
 		var fs := pr * (2.0 + 3.0 * kf)
-		_light.draw_texture_rect(_glow, Rect2(contact - Vector2(fs, fs), Vector2(fs, fs) * 2.0), false, Color(col, 0.6 * flash))
-		_light.draw_circle(contact, maxf(pr * 0.2, 2.0 * px) * (1.0 - kf), Color(1, 1, 1, flash))
+		_light.draw_texture_rect(_glow, Rect2(contact - Vector2(fs, fs), Vector2(fs, fs) * 2.0), false, Color(col, 0.6 * flash * hit_k))
+		_light.draw_circle(contact, maxf(pr * 0.2, 2.0 * px) * (1.0 - kf), Color(1, 1, 1, flash * hit_k))
 		# Световая волна обегает край комка в обе стороны и сходится на другой стороне.
 		var kw: float = h.t / WAVE_TIME
 		var travel := PI * (1.0 - pow(1.0 - kw, 2.0))
 		var span := 0.5 * (1.0 - kw) + 0.15
-		var wa := (1.0 - kw) * 0.85
+		var wa := (1.0 - kw) * 0.85 * hit_k
 		var w := maxf(pr * 0.22 * (1.0 - kw * 0.6), 2.0 * px)
 		var rr := pr * 1.15
 		_light.draw_arc(pp, rr, a0 + travel - span, a0 + travel, 12, Color(col, wa), w, true)
 		_light.draw_arc(pp, rr, a0 - travel, a0 - travel + span, 12, Color(col, wa), w, true)
-		# Мягкое свечение всего комка.
+		if 1.0 - kw > body_glow:
+			body_glow = 1.0 - kw
+			body_col = col
+	if body_glow > 0.0:
+		# Мягкое свечение всего комка — одно на все вспышки.
 		var gs := pr * 4.0
-		_light.draw_texture_rect(_glow, Rect2(pp - Vector2(gs, gs), Vector2(gs, gs) * 2.0), false, Color(col, 0.2 * (1.0 - kw)))
+		_light.draw_texture_rect(_glow, Rect2(pp - Vector2(gs, gs), Vector2(gs, gs) * 2.0), false, Color(body_col, 0.2 * body_glow))
 
 	for m in _motes:
 		if m.t < 0.0:
@@ -140,7 +151,7 @@ func _draw_light() -> void:
 		var lift: float = sin(k * PI) * m.height * pr
 		var p := pp + Vector2.from_angle(ang) * (pr + lift)
 		var col: Color = Color.WHITE.lerp(m.color, 0.35)
-		var a := 1.0 - k * k
+		var a := (1.0 - k * k) * mote_k
 		var s := maxf(pr * 0.5, 5.0 * px)
 		_light.draw_texture_rect(_glow, Rect2(p - Vector2(s, s), Vector2(s, s) * 2.0), false, Color(col, 0.5 * a))
 		_light.draw_circle(p, maxf(pr * 0.1, 1.3 * px), Color(col, a))
