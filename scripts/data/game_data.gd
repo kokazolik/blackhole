@@ -30,6 +30,11 @@ const DUST_LEVELS := [
 	{"radius": 3.3, "mass": 0.135, "value": 5.0, "spawn_weight": 0.1, "cluster_weight": 0.25, "color": Color(0.61, 0.55, 1.0)},
 ]
 
+# Множители пыли на этапе пылинки: этап шёл ~16 минут почти ровным темпом,
+# ужимаем до ~11, не уменьшая число покупок.
+const DUST_STAGE_MASS := 1.5
+const DUST_STAGE_VALUE := 1.45
+
 const MATERIALS := {
 	"silicate": {"name": "Силикаты", "color": Color(0.87, 0.77, 0.58)},
 	"metal": {"name": "Металл", "color": Color(0.66, 0.74, 0.86)},

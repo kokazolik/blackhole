@@ -48,7 +48,10 @@ func _notification(what: int) -> void:
 ## grains > 1 — облачко из нескольких пылинок.
 func absorb(level: int, material: String, at: Vector2, grains := 1) -> void:
 	var data := GameData.level_data(level)
-	absorb_mass(data.mass * grains, data.value * grains, material, at)
+	# Этап пылинки ужат: каждая пылинка весит и стоит больше, чем пыль вокруг гальки.
+	var mk := GameData.DUST_STAGE_MASS if stage == 0 else 1.0
+	var vk := GameData.DUST_STAGE_VALUE if stage == 0 else 1.0
+	absorb_mass(data.mass * grains * mk, data.value * grains * vk, material, at)
 
 
 ## Присоединить вещество: масса растит тело, ценность даёт звёздную пыль.
