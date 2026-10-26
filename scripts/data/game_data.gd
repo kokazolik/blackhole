@@ -326,3 +326,16 @@ static func barrier_drift(m: float) -> float:
 	if m <= BOULDER_MASS:
 		return 1.0
 	return BARRIER_PEAK * pow(m / BOULDER_MASS, -BARRIER_FADE)
+
+# На этапе «Валун» тело уже само весит как тысячи галек, и каждое слипание
+# прибавляет ему лишь малую долю: рост к планетезимали растянут на ~25 минут.
+const BOULDER_GAIN := 0.26
+const BOULDER_GAIN_FADE := 0.2
+# Звёздной пыли за слипание валун получает меньше: тел вокруг много, ветка дорогая.
+const BOULDER_VALUE := 0.03
+
+
+static func boulder_gain(m: float) -> float:
+	if m <= BOULDER_MASS:
+		return 1.0
+	return BOULDER_GAIN * pow(m / BOULDER_MASS, -BOULDER_GAIN_FADE)

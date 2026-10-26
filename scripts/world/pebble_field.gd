@@ -42,7 +42,8 @@ const THINNING_FROM := 3.33          # в массах начала этапа: 
 # Валун: гальки вокруг стали мелочью-едой. Масса с них небольшая, зато звёздной
 # пыли много и они прилипают на любой скорости. Растёт валун на малых валунах.
 const FOOD_COUNT := 16
-const FOOD_R := Vector2(0.09, 0.18)   # в долях радиуса игрока
+const FOOD_R := Vector2(0.18, 0.34)   # в долях радиуса игрока
+const FOOD_MASS_R := 0.52            # еда рисуется крупнее, чем весит: иначе её не разглядеть
 const FOOD_VALUE := 3.0
 const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
@@ -224,7 +225,7 @@ func _spawn(at: Vector2) -> void:
 func _spawn_food(at: Vector2) -> void:
 	if at.length() < GameData.sublimation_distance() * 1.1:
 		return
-	var n := 1 if rng.randf() < 0.6 else rng.randi_range(2, 4)
+	var n := mini(1 if rng.randf() < 0.6 else rng.randi_range(2, 4), MAX_PEBBLES - pebbles.size())
 	for k in n:
 		var p := Pebble.new()
 		p.pos = at + Vector2(rng.randfn(0.0, 1.0), rng.randfn(0.0, 1.0)) * player.radius * 0.8 - dust_field.frame_offset
@@ -424,16 +425,18 @@ func _collide(p: Pebble, index: int) -> void:
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
 	if p.food or (absorbable(p) and impact <= stick):
-		var m := GameData.pebble_mass(p.r, GameState.mass) * ACCRETION * Skills.stat("accretion")
+		var m := GameData.pebble_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass) * ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
 		if not p.food:  # серию держат только настоящие слипания, мелочь её не продлевает
 			chain += 1
 			_chain_timer = GameData.COMBO_WINDOW
-		var size_rel := p.r / player.radius
+		var size_rel := p.r * (FOOD_MASS_R if p.food else 1.0) / player.radius
 		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
 		if p.eddy:
 			value *= EDDY_VALUE
 		if p.food:
 			value *= FOOD_VALUE
+		if GameState.is_boulder():
+			value *= GameData.BOULDER_VALUE
 		if p.geode:
 			value *= Skills.stat("geode_value")
 			geode_found.emit(wp, value)

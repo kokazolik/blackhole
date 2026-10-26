@@ -161,6 +161,9 @@ func recompute() -> void:
 				stats.dust_level = maxi(int(stats.dust_level), int(effects[key]))
 			else:
 				stats[key] = float(stats.get(key, 1.0)) + float(effects[key]) * lvl
+	# Скидки складываются, но совсем убрать сколы и ветер нельзя.
+	stats.chip = maxf(stats.chip, 0.1)
+	stats.drift = maxf(stats.drift, 0.2)
 	stats_changed.emit()
 
 
