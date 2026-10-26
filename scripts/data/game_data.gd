@@ -229,7 +229,7 @@ const SHATTER_FACTOR := 1.7           # во столько раз быстре�
 # больше CHIP_MAX от своей массы за один удар.
 const CHIP_K := 0.35
 const CHIP_MAX := 0.04
-const PEBBLE_DUST_FACTOR := 0.58     # доля массы пылинки, которая прилипает к гальке
+const PEBBLE_DUST_FACTOR := 0.5      # доля массы пылинки, которая прилипает к гальке
 const PEBBLE_DENSITY := 0.0085         # чужие гальки — рыхлые пористые комки: масса = (r / BASE_RADIUS)^3 * плотность
 
 

@@ -41,11 +41,12 @@ func _notification(what: int) -> void:
 		save_game()
 
 
-func absorb(level: int, material: String, at: Vector2) -> void:
+## grains > 1 — облачко из нескольких пылинок.
+func absorb(level: int, material: String, at: Vector2, grains := 1) -> void:
 	var data := GameData.level_data(level)
 	# Гальку мелкая пыль чаще огибает вместе с газом, поэтому пылью она растёт медленно.
 	var k := GameData.PEBBLE_DUST_FACTOR if is_pebble() else 1.0
-	absorb_mass(data.mass * k, data.value, material, at)
+	absorb_mass(data.mass * k * grains, data.value * grains, material, at)
 
 
 ## Присоединить вещество: масса растит тело, ценность даёт звёздную пыль.

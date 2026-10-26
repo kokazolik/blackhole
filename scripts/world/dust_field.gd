@@ -13,7 +13,9 @@ extends Node2D
 ## - вся пыль рисуется одним MultiMesh (один вызов отрисовки), вращение в шейдере;
 ## - пыль хранится в координатах орбитальной системы отсчёта: общий полёт по орбите —
 ##   это сдвиг одного узла, а не перезапись тысяч позиций;
-## - каждый кадр обрабатывается только пыль рядом с игроком, полный обход редкий.
+## - каждый кадр обрабатывается только пыль рядом с игроком, полный обход редкий;
+## - на этапе «Галька» пыль идёт облачками: одно облачко несёт несколько пылинок,
+##   поэтому объектов в разы меньше, а масса пыли вокруг та же.
 
 # Плотность пыли на единицу площади мира при spawn = 1. Число пылинок вокруг считается
 # от площади активной области, поэтому плотность в мире не зависит от приближения камеры.
@@ -39,6 +41,9 @@ const REBASE_DISTANCE := 20000.0
 const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
 # Рядом с галькой пылинки — микронная крапинка: на этапе «Галька» рисуем их мельче.
 const PEBBLE_DUST_SCALE := 0.4
+const CLOUD_GRAINS := Vector2i(3, 6)   # сколько пылинок несёт одно облачко
+const CLOUD_RADIUS := 2.6              # радиус облачка в радиусах пылинки его уровня
+const PEBBLE_MAX_DUST := 800           # потолок числа объектов пыли на этапе «Галька»
 
 class Dust:
 	var pos: Vector2  # в системе отсчёта, летящей по орбите (мир = pos + frame_offset)
@@ -49,6 +54,8 @@ class Dust:
 	var idx: int  # место в массиве и в буфере MultiMesh, -1 у удалённой
 	var cell: int
 	var phase: float
+	var grains := 1        # >1 у облачка
+	var keep_size := false  # облачка и осколки не уменьшаются рядом с галькой
 
 var player: Player
 var camera: Camera2D
@@ -142,9 +149,11 @@ func _process(delta: float) -> void:
 	if absf(want - _size_scale) > 0.001:
 		_size_scale = want
 		for d in dust:
-			_buf[d.idx * FLOATS] = d.r * QUAD_SCALE * _size_scale
-			_buf[d.idx * FLOATS + 5] = d.r * QUAD_SCALE * _size_scale
+			_buf[d.idx * FLOATS] = d.r * QUAD_SCALE * _vis(d)
+			_buf[d.idx * FLOATS + 5] = d.r * QUAD_SCALE * _vis(d)
 		_dirty = true
+		# Мелкие крапинки рисуются упрощённо: точка со свечением, без атласа и бликов.
+		_mm_node.material.set_shader_parameter("simple", _size_scale < 0.6)
 
 	var view_r := view_radius()
 	var active_r := view_r * 1.35
@@ -184,7 +193,7 @@ func _process(delta: float) -> void:
 			d.pos += d.vel * delta
 			_write_origin(d)
 		if edible and d.pos.distance_squared_to(pp) < pow(pr + d.r * 0.5, 2):
-			GameState.absorb(d.level, d.material, world_pos(d))
+			GameState.absorb(d.level, d.material, world_pos(d), d.grains)
 			_remove(d)
 
 	if _dirty:
@@ -258,7 +267,7 @@ func _write_origin(d: Dust) -> void:
 
 func _write(d: Dust) -> void:
 	var k := d.idx * FLOATS
-	var s := d.r * QUAD_SCALE * _size_scale
+	var s := d.r * QUAD_SCALE * _vis(d)
 	var col: Color = GameData.MATERIALS[d.material].color
 	_buf[k] = s
 	_buf[k + 1] = 0.0
@@ -272,11 +281,21 @@ func _write(d: Dust) -> void:
 	_buf[k + 9] = col.g
 	_buf[k + 10] = col.b
 	_buf[k + 11] = 1.0
-	_buf[k + 12] = d.cell
+	# Облачко помечено отрицательной клеткой: шейдер рисует его дымкой.
+	_buf[k + 12] = d.cell if d.grains == 1 else -1.0
 	_buf[k + 13] = 1.0 if d.level <= Skills.max_dust_level() else 0.4
 	_buf[k + 14] = d.level
 	_buf[k + 15] = d.phase
 	_dirty = true
+
+
+func _vis(d: Dust) -> float:
+	return 1.0 if d.keep_size else _size_scale
+
+
+## Доля облачков среди новой пыли: растёт вместе с превращением в гальку.
+func _cloud_share() -> float:
+	return player.pebble_k
 
 
 ## После покупки навыка меняется, какая пыль доступна: обновляем всё.
@@ -287,7 +306,10 @@ func _rewrite_all() -> void:
 
 func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	var density_scale := clampf(GameData.radial_density(player.position.length()), 0.35, MAX_DENSITY_SCALE)
-	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale), MAX_DUST - CLUSTER_SIZE.y)
+	# Облачко несёт несколько пылинок, поэтому объектов нужно во столько же раз меньше.
+	var per_object := lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5, _cloud_share())
+	var cap := int(lerpf(MAX_DUST, PEBBLE_MAX_DUST, _cloud_share())) - CLUSTER_SIZE.y
+	var target := mini(int(DUST_PER_AREA * PI * active_r * active_r * Skills.stat("spawn") * density_scale / per_object), cap)
 	var spawn_budget := MAX_SPAWN_PER_FRAME
 	if not _filled:
 		# Первое заполнение: пыль сразу по всему экрану, а не только за краем.
@@ -377,7 +399,8 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 	var material: String = GameData.pick_weighted(GameData.material_weights(center.length()), rng)
 	var spread := view_r * 0.1
 	var size_k := clampf(Skills.stat("spawn"), 0.3, 1.0)
-	for n in roundi(rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y) * size_k):
+	size_k /= lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5, _cloud_share())
+	for n in maxi(roundi(rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y) * size_k), 2):
 		var pos := center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread))
 		# Части скопления, попавшие на экран, не появляются из воздуха.
 		if not _screen_rect_world().has_point(pos):
@@ -390,6 +413,10 @@ func add_debris(pos: Vector2, vel: Vector2, level: int, material: String) -> voi
 	if _add_dust(pos, maxi(level, 1), material):
 		var d: Dust = dust.back()
 		d.vel = vel
+		d.grains = 1
+		d.keep_size = true
+		d.r = GameData.level_data(d.level).radius * rng.randf_range(0.85, 1.15)
+		_write(d)
 		_near.append(d)
 
 
@@ -409,6 +436,10 @@ func _add_dust(pos: Vector2, level: int, material: String) -> bool:
 	d.r = data.radius * rng.randf_range(0.85, 1.15)
 	d.cell = GameData.MATERIAL_ORDER.find(material) * ATLAS_VARIANTS + rng.randi() % ATLAS_VARIANTS
 	d.phase = rng.randf() * TAU
+	if rng.randf() < _cloud_share():
+		d.grains = rng.randi_range(CLOUD_GRAINS.x, CLOUD_GRAINS.y)
+		d.keep_size = true
+		d.r *= CLOUD_RADIUS * sqrt(d.grains / 4.5)
 	d.idx = dust.size()
 	dust.append(d)
 	_write(d)
