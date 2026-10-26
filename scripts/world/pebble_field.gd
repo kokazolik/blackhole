@@ -16,6 +16,8 @@ signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорв
 signal swarm_started(world_position: Vector2)
 signal geode_found(world_position: Vector2, value: float)
 signal chunks_broken(world_position: Vector2)
+signal pebble_split(world_position: Vector2)
+signal self_split(world_position: Vector2)
 signal eddy_started(world_position: Vector2)
 signal pebble_absorbed(world_position: Vector2)
 
@@ -35,7 +37,13 @@ const EASY_R := 0.2          # мельче этой доли твоего ра�
 # их можно доесть. Без навыков от сколов это всё же убыток.
 const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
 const CHUNK_MAX := 0.25      # больше этой доли галька за удар не теряет
-const CHUNK_R := Vector2(0.22, 0.3)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
+const CHUNK_R := Vector2(0.22, 0.3)
+const SPLIT_FROM := 1.2      # удар быстрее предела слипания во столько раз — может расколоть
+const SPLIT_RANGE := 1.0     # ещё на столько быстрее — шанс максимальный
+const SPLIT_MAX := 0.6       # максимальный шанс расколоть гальку одного размера с тобой
+const SPLIT_KEEP := 0.85     # доля вещества, что остаётся в частях (остальное — пыль)
+const SELF_SPLIT_K := 0.2    # во сколько раз реже трескаешься ты сам
+const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 1.35                 # несъедобные — минимум на столько крупнее предела хватки
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
@@ -477,9 +485,19 @@ func _collide(p: Pebble, index: int) -> void:
 		p.hit_cd = 0.3
 		var excess := impact / stick
 		var m_other := GameData.pebble_mass(p.r, GameState.mass)
-		var raw_loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * GameData.CHIP_MAX)
+		var cap := GameData.CHIP_MAX if absorbable(p) else GameData.CHIP_MAX_BIG
+		var raw_loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * cap)
 		var loss := raw_loss * Skills.stat("chip")
 		if not absorbable(p):
+			# Ты тоже можешь треснуть, но ты крепче: шанс в разы меньше, чем у гальки.
+			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K:
+				_self_split(at, n, impact)
+			if rng.randf() < split_chance(p, excess):
+				GameState.chip(loss, at)
+				_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
+				_split(p, index, wp, n, impact, m_other)
+				_bounce(n, impact, p, 0.4)
+				return
 			_break_chunks(p, wp, n, impact, minf(raw_loss * CHUNK_SHARE, m_other * CHUNK_MAX), m_other)
 		var player_mat := _main_material()
 		if chain > 0:
@@ -498,6 +516,69 @@ func _collide(p: Pebble, index: int) -> void:
 	var push := contact - dist + 0.5
 	player.position -= n * push * 0.5
 	p.pos += n * push * 0.5
+
+
+## Шанс расколоть крупную гальку целиком: нужен удар куда быстрее предела
+## слипания, и чем галька крупнее тебя, тем она крепче.
+func split_chance(p: Pebble, excess: float) -> float:
+	var hard := clampf((excess - SPLIT_FROM) / SPLIT_RANGE, 0.0, 1.0)
+	var size_k := clampf(1.6 - p.r / player.radius, 0.15, 1.0)
+	return hard * SPLIT_MAX * size_k
+
+
+## Галька раскалывается на несколько частей: мелкие можно доесть, крупные остаются
+## крупными. Часть вещества уходит пылью.
+func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_other: float) -> void:
+	pebbles.remove_at(index)
+	var parts := rng.randi_range(3, 5)
+	var shares: Array[float] = []
+	var total := 0.0
+	for k in parts:
+		var w := rng.randf_range(0.4, 1.6)
+		shares.append(w)
+		total += w
+	for k in parts:
+		if pebbles.size() >= MAX_PEBBLES:
+			break
+		var share := shares[k] / total * SPLIT_KEEP
+		var c := Pebble.new()
+		c.r = p.r * pow(share, 1.0 / 3.0)
+		var d := Vector2.from_angle(n.angle() + rng.randf_range(-1.4, 1.4))  # дальше от тебя, веером
+		c.pos = wp + d * p.r * 0.5 - dust_field.frame_offset
+		c.vel = d * impact * rng.randf_range(0.3, 0.7)
+		c.material = p.material
+		c.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		c.angle = rng.randf() * TAU
+		c.spin = rng.randf_range(-1.2, 1.2)
+		c.geode = p.geode and k == 0
+		c.hit_cd = 0.6
+		pebbles.append(c)
+	_debris(wp, n, impact, p.material, clampi(int(p.r * 2.0), 6, 18))
+	pebble_split.emit(wp)
+
+
+## Ты треснул: от тебя отваливаются крупные куски твоего же вещества.
+func _self_split(at: Vector2, n: Vector2, impact: float) -> void:
+	var lost := GameState.mass * SELF_SPLIT_LOSS * clampf(Skills.stat("chip"), 0.3, 1.0)
+	var mat := _main_material()
+	GameState.chip(lost, at)
+	var parts := rng.randi_range(3, 4)
+	for k in parts:
+		if pebbles.size() >= MAX_PEBBLES:
+			break
+		var c := Pebble.new()
+		var d := (-n).rotated(rng.randf_range(-1.6, 1.6))
+		c.r = player.radius * rng.randf_range(0.3, 0.42)
+		c.pos = player.position + d * (player.radius + c.r + 2.0) - dust_field.frame_offset
+		c.vel = d * maxf(impact, player.stick_speed()) * rng.randf_range(0.4, 0.8)
+		c.chunk_mass = lost / parts
+		c.material = mat
+		c.cell = GameData.MATERIAL_ORDER.find(mat) * 4 + rng.randi() % 4
+		c.angle = rng.randf() * TAU
+		c.spin = rng.randf_range(-1.5, 1.5)
+		c.hit_cd = 1.2
+		pebbles.append(c)
+	self_split.emit(at)
 
 
 ## Середина ещё не съеденных отбитых кусков (INF, если их нет).

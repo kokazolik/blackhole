@@ -94,6 +94,10 @@ func _ready() -> void:
 			_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
+	pebble_field.pebble_split.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.0), "Раскол!", Color(1.0, 0.75, 0.45), 24))
+	pebble_field.self_split.connect(func(_at: Vector2) -> void:
+		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Ты треснул!", Color(1.0, 0.45, 0.35), 24))
 	pebble_field.chunks_broken.connect(func(at: Vector2) -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
