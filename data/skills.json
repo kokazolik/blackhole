@@ -1010,7 +1010,7 @@
 			"cost_growth": 1.5,
 			"max_level": 5,
 			"pos": [
-				-1.5,
+				-3,
 				10
 			],
 			"requires": [
@@ -1030,7 +1030,7 @@
 			"cost_growth": 1.5,
 			"max_level": 5,
 			"pos": [
-				0,
+				1,
 				10
 			],
 			"requires": [
@@ -1050,11 +1050,11 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				1.5,
-				10
+				1,
+				11
 			],
 			"requires": [
-				"boulder_root"
+				"b_sweep"
 			],
 			"requires_stage": 2,
 			"effects": {
@@ -1070,11 +1070,11 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				0,
-				11
+				1,
+				12
 			],
 			"requires": [
-				"b_sweep"
+				"b_transfer"
 			],
 			"requires_stage": 2,
 			"effects": {
@@ -1091,18 +1091,17 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				1.5,
-				11
+				-1,
+				10
 			],
 			"requires": [
-				"b_transfer"
+				"boulder_root"
 			],
 			"requires_stage": 2,
 			"effects": {
 				"chip": -0.08
 			},
-			"icon": "armor",
-			"requires_level": 2
+			"icon": "armor"
 		},
 		{
 			"id": "b_shadow",
@@ -1112,7 +1111,7 @@
 			"cost_growth": 1.55,
 			"max_level": 5,
 			"pos": [
-				-1.5,
+				-3,
 				11
 			],
 			"requires": [
@@ -1124,6 +1123,157 @@
 			},
 			"icon": "drift_1",
 			"requires_level": 2
+		},
+		{
+			"id": "b_anchor",
+			"title": "Якорь",
+			"desc": "Валун упирается в поток всем весом: тяга +10% за уровень, держаться против ветра легче.",
+			"cost": 9000,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				-3,
+				12
+			],
+			"requires": [
+				"b_shadow"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"thrust": 0.1
+			},
+			"icon": "thrust"
+		},
+		{
+			"id": "b_breakthrough",
+			"title": "Прорыв барьера",
+			"desc": "Легендарный навык. Ты проскочил метровый барьер: встречный ветер сносит тебя вдвое слабее до конца этапа.",
+			"cost": 40000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-3,
+				13.3
+			],
+			"requires": [
+				"b_anchor",
+				"b_streamline"
+			],
+			"requires_level": 1,
+			"requires_all": true,
+			"requires_stage": 2,
+			"effects": {
+				"drift_mul": -0.5
+			},
+			"icon": "drift_1",
+			"legendary": true
+		},
+		{
+			"id": "b_heal",
+			"title": "Самозалечивание",
+			"desc": "Пыль и крошка снова спекаются на сколах: 10% отколотой массы за уровень постепенно прирастает обратно.",
+			"cost": 7500,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				-1,
+				11
+			],
+			"requires": [
+				"b_rubble"
+			],
+			"requires_level": 2,
+			"requires_stage": 2,
+			"effects": {
+				"heal": 0.1
+			},
+			"icon": "toughness"
+		},
+		{
+			"id": "b_rubble_pile",
+			"title": "Куча щебня",
+			"desc": "Легендарный навык. Ты больше не цельный камень, а куча щебня, которую держит вместе собственный вес, как астероид Рюгу. Отколотые от тебя куски сами летят обратно, и ещё половина отколотой массы прирастает снова.",
+			"cost": 60000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-1,
+				12.3
+			],
+			"requires": [
+				"b_heal"
+			],
+			"requires_level": 1,
+			"requires_stage": 2,
+			"effects": {
+				"heal": 0.5,
+				"rubble_pile": 1.0
+			},
+			"icon": "armor",
+			"legendary": true
+		},
+		{
+			"id": "b_gravity",
+			"title": "Первое притяжение",
+			"desc": "Ты уже так тяжёл, что чуть-чуть тянешь мелочь к себе: гальки и малые валуны рядом сами подплывают. Каждый уровень тянет сильнее.",
+			"cost": 8000,
+			"cost_growth": 1.55,
+			"max_level": 4,
+			"pos": [
+				3,
+				10
+			],
+			"requires": [
+				"boulder_root"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"self_grav": 0.2
+			},
+			"icon": "gravity_1"
+		},
+		{
+			"id": "b_focus",
+			"title": "Гравитационная фокусировка",
+			"desc": "Притяжение собирает тела в узкий поток прямо к тебе: притянутое летит на 20% быстрее за уровень.",
+			"cost": 11000,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				3,
+				11
+			],
+			"requires": [
+				"b_gravity"
+			],
+			"requires_level": 2,
+			"requires_stage": 2,
+			"effects": {
+				"grav_focus": 0.2
+			},
+			"icon": "reach_1"
+		},
+		{
+			"id": "b_selfgrav",
+			"title": "Самогравитация",
+			"desc": "Легендарный навык. Твой вес держит тебя сам, как настоящую планетезималь: притяжение включается в полную силу уже сейчас, не дожидаясь километра.",
+			"cost": 90000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				3,
+				12.3
+			],
+			"requires": [
+				"b_focus"
+			],
+			"requires_level": 1,
+			"requires_stage": 2,
+			"effects": {
+				"self_grav": 0.8
+			},
+			"icon": "gravity_1",
+			"legendary": true
 		}
 	]
 }

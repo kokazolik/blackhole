@@ -29,6 +29,12 @@ const BASE_STATS := {
 	"swarm": 0.0,     # уровень потоковой неустойчивости: 0 — роёв нет
 	"pebble_pull": 0.0,  # гальки сами плывут к тебе (легендарный «Вихрь в газе»)
 	"accretion": 1.0, # этап «Валун»: доля вещества, прирастающая при слипании (к PebbleField.ACCRETION)
+	"shadow": 1.0,    # длина и ширина ветровой тени за крупными телами
+	"drift_mul": 1.0, # множитель сноса поверх скидок (легендарный «Прорыв барьера»)
+	"heal": 0.0,      # доля отколотой массы, которая прирастает обратно
+	"rubble_pile": 0.0,  # отколотые от тебя куски летят обратно («Куча щебня»)
+	"self_grav": 0.0, # притяжение валуна сверх естественного (см. GameData.self_gravity)
+	"grav_focus": 1.0,   # скорость, до которой притяжение разгоняет тела
 	# Ветвь «Состав»: сколько галек этого материала вокруг и как легко с ними слипаться.
 	"affinity_silicate": 1.0, "affinity_metal": 1.0, "affinity_carbon": 1.0, "affinity_ice": 1.0,
 	"glue_silicate": 1.0, "glue_metal": 1.0, "glue_carbon": 1.0, "glue_ice": 1.0,
@@ -37,6 +43,8 @@ const BASE_STATS := {
 var nodes := {}
 var order: Array[String] = []
 var stats := {}
+var _body := ""  # тип тела, чей бонус валуну учтён в stats
+var _body_check := 0.0
 
 
 func _ready() -> void:
@@ -44,6 +52,21 @@ func _ready() -> void:
 	_load_definitions()
 	recompute()
 	GameState.skills_changed.connect(recompute)
+
+
+## Состав меняется с каждой съеденной галькой: тип тела, а с ним бонус валуну,
+## проверяем пару раз в секунду, а не на каждый вызов stat().
+func _process(delta: float) -> void:
+	_body_check -= delta
+	if _body_check > 0.0:
+		return
+	_body_check = 0.5
+	if _current_body() != _body:
+		recompute()
+
+
+func _current_body() -> String:
+	return GameState.body_type() if GameState.is_boulder() else ""
 
 
 func stat(key: String) -> float:
@@ -161,6 +184,11 @@ func recompute() -> void:
 				stats.dust_level = maxi(int(stats.dust_level), int(effects[key]))
 			else:
 				stats[key] = float(stats.get(key, 1.0)) + float(effects[key]) * lvl
+	# Вещество продолжает путь: выбранный на гальке состав даёт валуну свой бонус.
+	_body = _current_body()
+	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_body, {}).get("effects", {})
+	for key in bonus:
+		stats[key] = float(stats.get(key, 1.0)) + float(bonus[key])
 	# Скидки складываются, но совсем убрать сколы и ветер нельзя.
 	stats.chip = maxf(stats.chip, 0.1)
 	stats.drift = maxf(stats.drift, 0.2)

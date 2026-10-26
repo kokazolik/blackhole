@@ -394,6 +394,8 @@ func _refresh() -> void:
 	_body_label.text = body.name
 	_body_label.add_theme_color_override("font_color", GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT)
 	_body_desc.text = "· " + body.desc
+	if GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
+		_body_desc.text = "· валуну: " + GameData.BOULDER_MATERIAL[type].text
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()
 	_badge.visible = Skills.any_affordable()

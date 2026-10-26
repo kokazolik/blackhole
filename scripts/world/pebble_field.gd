@@ -96,6 +96,7 @@ class Pebble:
 	var hit_cd := 0.0      # пауза после удара, чтобы одно касание не било много раз
 	var shard := false     # угловатый обломок (шейдер рисует гранёный камень вместо окатанной гальки)
 	var shard_seed := 0.0  # форма обломка
+	var own := false       # кусок, отколотый от тебя самого («Куча щебня» тянет его обратно)
 
 var player: Player
 var dust_field: DustField
@@ -166,6 +167,13 @@ func _process(delta: float) -> void:
 	_update_eddy(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
+	var pull_cap := 0.5
+	if GameState.is_boulder():
+		# Своё притяжение валуна: само растёт к концу этапа, навыки «Тяготения»
+		# включают его раньше и разгоняют притянутое быстрее.
+		pull += GameData.self_gravity(GameState.mass) + Skills.stat("self_grav")
+		pull_cap *= Skills.stat("grav_focus")
+	var rubble := Skills.stat("rubble_pile") > 0.0
 	var pull_r := player.pull_radius()  # не дальше края экрана, см. Player.pull_radius
 	var evap := GameData.sublimation_distance()
 	_update_casters()
@@ -176,15 +184,19 @@ func _process(delta: float) -> void:
 		p.vel *= drag
 		if p.eddy and eddy_left > 0.0:
 			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
-		if pull > 0.0 and absorbable(p):
-			# «Вихрь в газе»: подходящие гальки сами плывут к тебе.
+		if rubble and p.own and p.hit_cd < 0.6:
+			# «Куча щебня»: свои куски разлетелись и возвращаются, их держит твой вес.
+			var back := player.position - wp
+			p.vel = p.vel.move_toward(back.normalized() * player.max_speed() * 0.8, player.max_speed() * 2.0 * delta)
+		elif pull > 0.0 and absorbable(p):
+			# «Вихрь в газе» и притяжение валуна: подходящие гальки сами плывут к тебе.
 			var to_p := player.position - wp
 			var dl := to_p.length()
 			if dl < pull_r and dl > 0.001:
 				# Гальки подплывают, а не летят снарядом: тянем слабее, чем пыль, и не
-				# разгоняем быстрее половины твоей скорости.
+				# разгоняем быстрее половины твоей скорости (с «Фокусировкой» — быстрее).
 				p.vel += to_p / dl * player.radius * 4.0 * pull * (1.0 - dl / pull_r) * delta
-				p.vel = p.vel.limit_length(player.max_speed() * 0.5)
+				p.vel = p.vel.limit_length(player.max_speed() * pull_cap)
 		p.pos += (p.vel + calm_drift(wp, GameData.gas_drift(wp, p.r), p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
@@ -766,6 +778,7 @@ func _self_split(at: Vector2, n: Vector2, impact: float) -> void:
 		c.pos = player.position + centre * player.radius + d * 3.0 - dust_field.frame_offset
 		c.vel = (d - n * 0.5).normalized() * maxf(impact, player.stick_speed()) * rng.randf_range(0.4, 0.8)
 		c.chunk_mass = lost / cells.size()
+		c.own = true
 		c.material = mat
 		c.cell = cell_id
 		c.angle = 0.0

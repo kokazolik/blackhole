@@ -11,6 +11,7 @@ signal chipped(position: Vector2, lost: float)  # удар: от тела отк
 const SAVE_PATH := "user://save.json"
 const SAVE_VERSION := 1
 const AUTOSAVE_SECONDS := 10.0
+const HEAL_RATE := 0.12  # какая доля накопленного залечивания прирастает за секунду
 
 var currency := 0.0
 var mass := 1.0
@@ -25,6 +26,7 @@ var tutorial_done := false
 var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
 var boulder_intro_done := false
 var fps_120 := false  # настройка, а не прогресс: «Начать заново» её не сбрасывает
+var heal_pool := 0.0  # отколотая масса, которая ещё прирастёт обратно (не сохраняется)
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 
 
@@ -87,6 +89,23 @@ func _check_stage() -> void:
 func chip(amount: float, at: Vector2) -> void:
 	ablate(amount)
 	chipped.emit(at, amount)
+	if is_boulder():
+		heal_pool += amount * Skills.stat("heal")
+
+
+## «Самозалечивание»: часть отколотой массы постепенно прирастает обратно,
+## в тех же долях состава.
+func regrow(delta: float) -> void:
+	if heal_pool <= 0.0 or mass <= 0.0:
+		return
+	var amount := minf(heal_pool, maxf(heal_pool * HEAL_RATE * delta, mass * 0.0005 * delta))
+	heal_pool -= amount
+	var k := (mass + amount) / mass
+	mass += amount
+	for key in materials:
+		materials[key] *= k
+	mass_changed.emit(mass)
+	_check_stage()
 
 
 ## Сублимация льда внутри снеговой линии: уходит только лёд.
@@ -215,6 +234,7 @@ func reset_run() -> void:
 
 func _reset_values() -> void:
 	burned_up = false
+	heal_pool = 0.0
 	stage = 0
 	currency = 0.0
 	mass = 1.0

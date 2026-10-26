@@ -357,6 +357,27 @@ const BOULDER_GAIN_FADE := 0.2
 const BOULDER_VALUE := 0.03
 
 
+# Что вещество тела даёт валуну. Ключ — тип тела (GameData.body_type), эффекты
+# складываются с навыками так же, как эффекты узлов древа.
+const BOULDER_MATERIAL := {
+	"metal": {"effects": {"drift": -0.12, "thrust": 0.1}, "text": "металл тяжёлый: снос −12%, тяга +10%"},
+	"silicate": {"effects": {"chip": -0.25}, "text": "камень прочный: сколов на 25% меньше"},
+	"ice": {"effects": {"stick": 0.2, "grip": 0.02}, "text": "лёд липкий: слипание +20%, хватка +2%"},
+	"carbon": {"effects": {"chip": -0.12, "stick": 0.12}, "text": "пористый углерод гасит удары: сколов −12%, слипание +12%"},
+	"chondrite": {"effects": {"drift": -0.04, "chip": -0.08, "stick": 0.06}, "text": "смесь: снос −4%, сколов −8%, слипание +6%"},
+}
+
+# Ближе к километру валун начинает сам притягивать мелочь: от SELF_GRAV_FROM
+# притяжение растёт и к планетезимали выходит на полную силу.
+const SELF_GRAV_FROM := 300000.0
+
+
+static func self_gravity(m: float) -> float:
+	if m <= SELF_GRAV_FROM:
+		return 0.0
+	return clampf(log(m / SELF_GRAV_FROM) / log(STAGES[3].mass / SELF_GRAV_FROM), 0.0, 1.0)
+
+
 static func boulder_gain(m: float) -> float:
 	if m <= BOULDER_MASS:
 		return 1.0

@@ -270,6 +270,11 @@ func _refresh() -> void:
 		_info_title.text = node.title
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
+		if _selected == "boulder_root":
+			var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(GameState.body_type(), {})
+			_info_desc.text += "\n\nВещество продолжает путь. " + (
+				"Твоё тело — %s: %s." % [GameData.BODY_TYPES[GameState.body_type()].name.to_lower(), bonus.text] if not bonus.is_empty()
+				else "Состав ещё не сложился, и бонуса от вещества нет: металл, камень, лёд и углерод дают валуну каждый своё.")
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		if node.get("legendary", false):
 			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")

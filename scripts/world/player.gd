@@ -160,12 +160,13 @@ func _process(delta: float) -> void:
 	frame_velocity = GameData.orbit_velocity(position)
 	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.
 	var barrier := lerpf(1.0, GameData.barrier_drift(GameState.mass), boulder_k)
-	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k * barrier
+	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * Skills.stat("drift_mul") * pebble_k * barrier
 	if pebble_field:
 		shadow = pebble_field.shadow_at(position)
 		drift_velocity *= 1.0 - PebbleField.SHADOW_CALM * shadow
 	position += (velocity + drift_velocity + frame_velocity) * delta
 	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
+	GameState.regrow(delta)
 
 	_update_heat(delta)
 	if dead:
