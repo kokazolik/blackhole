@@ -16,6 +16,7 @@ signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорв
 signal swarm_started(world_position: Vector2)
 signal geode_found(world_position: Vector2, value: float)
 signal eddy_started(world_position: Vector2)
+signal pebble_absorbed(world_position: Vector2)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
@@ -31,6 +32,9 @@ const DRAG := 0.5                     # доля собственной скор
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
 # насколько крупную гальку удалось присоединить.
 const VALUE_PER_PEBBLE := 10.0
+const VALUE_MASS_EXP := 0.45          # доход растёт с массой медленнее её самой: книга не скупается за минуту
+const MASS_THINNING := 0.3
+const THINNING_FROM := 100.0         # до этой массы галек вокруг столько же, сколько в начале
 const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
 const HINT_RANGE := 7.0               # в радиусах игрока: где видно кольцо-подсказку удара
@@ -158,7 +162,10 @@ func _maintain() -> void:
 		i -= 1
 	var density := GameData.radial_density(pp.length()) * (1.0 + RING_BOOST * GameData.trap_strength(pp.length()))
 	# Число галек в округе не растёт с приближением камеры: иначе рост ускорялся бы сам собой.
-	var target := mini(int(BASE_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k), MAX_PEBBLES)
+	# Чем крупнее ты, тем реже в округе тела, которые тебе по силам: к концу этапа
+	# рост не срывается в лавину.
+	var thin := pow(maxf(GameState.mass / THINNING_FROM, 1.0), -MASS_THINNING)
+	var target := mini(int(BASE_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k * thin + 0.5), MAX_PEBBLES)
 	var budget := 6
 	while pebbles.size() < target and budget > 0:
 		budget -= 1
@@ -182,6 +189,20 @@ func _spawn(at: Vector2) -> void:
 	p.angle = rng.randf() * TAU
 	p.spin = rng.randf_range(-0.25, 0.25)
 	pebbles.append(p)
+
+
+## Галька нужного размера в заданном месте: Звездочёт показывает её новичку.
+func spawn_for_guide(at: Vector2, r: float) -> Pebble:
+	var p := Pebble.new()
+	p.pos = at - dust_field.frame_offset
+	p.r = r
+	p.material = _pick_material(at.length())
+	p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+	p.angle = rng.randf() * TAU
+	p.spin = rng.randf_range(-0.25, 0.25)
+	pebbles.append(p)
+	_write()  # время может стоять, а показать её надо сразу
+	return p
 
 
 ## Материал новой гальки: что водится в этой зоне, с перевесом в сторону навыков
@@ -361,13 +382,14 @@ func _collide(p: Pebble, index: int) -> void:
 		chain += 1
 		_chain_timer = GameData.COMBO_WINDOW
 		var size_rel := p.r / player.radius
-		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, 0.9) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
+		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
 		if p.eddy:
 			value *= EDDY_VALUE
 		if p.geode:
 			value *= Skills.stat("geode_value")
 			geode_found.emit(wp, value)
 		GameState.absorb_mass(m, value, p.material, at)
+		pebble_absorbed.emit(wp)
 		if Skills.stat("combo") > 0.0 and chain >= 2:
 			combo_changed.emit(chain, combo_multiplier())
 		pebbles.remove_at(index)

@@ -19,6 +19,11 @@ var fx: AbsorbFx
 var sky_events: Node2D
 var _intro_time := 0.0
 var _caption: Control
+var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
+var _chip_time := -10.0
+var _geode_time := -10.0
+var _geode_pos := Vector2.ZERO
+var _swarm_pos := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -27,6 +32,8 @@ func _ready() -> void:
 	camera = Camera2D.new()
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 6.0
+	# Звездочёт ведёт камеру, пока время остановлено.
+	camera.process_mode = Node.PROCESS_MODE_ALWAYS
 
 	var bg_layer := CanvasLayer.new()
 	bg_layer.layer = -1
@@ -71,12 +78,18 @@ func _ready() -> void:
 	pebble_field.evaporated.connect(burn_fx.puff)
 	pebble_field.combo_changed.connect(_on_combo)
 	pebble_field.geode_found.connect(func(at: Vector2, value: float) -> void:
+		_geode_time = _intro_time
+		_geode_pos = at
 		fx.popup(at + Vector2(0, -player.radius * 2.0), "Жеода! +%s" % GameData.format_number(value), GameData.GEODE_GLOW, 26))
-	pebble_field.swarm_started.connect(func(_at: Vector2) -> void:
-		_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
+	pebble_field.swarm_started.connect(func(at: Vector2) -> void:
+		_swarm_pos = at
+		if "swarm" in GameState.tips_seen:
+			_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
 	pebble_field.eddy_started.connect(func(_at: Vector2) -> void:
-		_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
+		if "eddy" in GameState.tips_seen:
+			_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
 	GameState.stage_reached.connect(_on_stage_reached)
+	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -109,6 +122,7 @@ func _ready() -> void:
 		var tutorial := Tutorial.new()
 		tutorial.main = self
 		ui.add_child(tutorial)
+		guide = tutorial
 		ui.move_child(pause_menu, -1)
 	elif GameState.is_pebble() and not GameState.pebble_intro_done:
 		_start_pebble_intro(2.5)
@@ -143,6 +157,7 @@ func _start_pebble_intro(delay: float) -> void:
 	tutorial.pebble = true
 	tutorial.start_delay = delay
 	$UI.add_child(tutorial)
+	guide = tutorial
 	$UI.move_child(pause_menu, -1)
 
 
@@ -259,3 +274,30 @@ func _process(delta: float) -> void:
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k)
+	_check_tips()
+
+
+## Звездочёт показывает явление, когда оно впервые встретилось, по одному за раз.
+func _check_tips() -> void:
+	if is_instance_valid(guide) or not GameState.pebble_intro_done or player.pebble_k < 0.95 \
+			or player.dead or tree_screen.visible or pause_menu.visible:
+		return
+	var found := {
+		"chip": _intro_time - _chip_time < 0.8,
+		"geode": _intro_time - _geode_time < 1.5,
+		"eddy": pebble_field.eddy_left > 5.0,
+		"swarm": pebble_field.swarm_left > 5.0,
+		"ice": player.ice_vapor > 0.0 and hud._heat_label.visible,
+	}
+	for kind in found:
+		if found[kind] and not kind in GameState.tips_seen:
+			var tip := Tutorial.new()
+			tip.main = self
+			tip.steps = [Tutorial.TIPS[kind]]
+			tip.tip = kind
+			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos}.get(kind, Vector2.INF)
+			tip.start_delay = 0.1
+			$UI.add_child(tip)
+			$UI.move_child(pause_menu, -1)
+			guide = tip
+			return

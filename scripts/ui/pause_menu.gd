@@ -104,7 +104,9 @@ func _jump(mass: float, stage: int) -> void:
 	GameState.mass = mass
 	GameState.stage = stage
 	GameState.tutorial_done = true
-	GameState.pebble_intro_done = stage >= 1
+	# «Галька: начало» — с рассказом Звездочёта, как у нового игрока.
+	GameState.pebble_intro_done = stage >= 1 and mass > 35.0
+	GameState.tips_seen = []
 	GameState.save_game()
 	Fader.go(Fader.GAME)
 

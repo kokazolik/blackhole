@@ -8,6 +8,8 @@ extends Control
 ## ждёт действия в игре, либо кнопку «Дальше».
 
 const CHARS_PER_SECOND := 45.0
+const SPOT_SHADER := preload("res://shaders/spotlight.gdshader")
+const GOLD := Color(1.0, 0.82, 0.45)
 const CARD_WIDTH := 600.0
 const STEPS := [
 	{
@@ -57,39 +59,101 @@ const STEPS := [
 	},
 ]
 const NEEDS_START := ["collect", "book", "buy"]
-# Звездочёт рассказывает о жизни гальки, когда пылинка дорастает до неё.
+# Звездочёт рассказывает о жизни гальки, когда пылинка дорастает до неё. Он не
+# только говорит, но и показывает: останавливает время («pause»), ведёт камеру
+# к тому, о чём речь («focus»), высвечивает и обводит это прямо в мире.
 const PEBBLE_STEPS := [
 	{
 		"id": "p_intro",
-		"text": "Поздравляю, путник: ты теперь галька, камешек размером с горошину. Ты уже так тяжёл, что отстаёшь от газа диска, и он дует тебе навстречу.",
+		"text": "Поздравляю, путник: ты теперь галька, камешек размером с горошину. Я остановил время, чтобы показать тебе, как здесь всё устроено.",
 		"tap": true,
+		"pause": true,
+		"focus": "player",
 	},
 	{
 		"id": "p_drift",
-		"text": "Встречный ветер тормозит тебя, и ты по спирали дрейфуешь к звезде. Чем крупнее галька, тем сильнее сносит. Слева сверху видно, куда и как быстро. Держись подальше от жара.",
+		"text": "Ты уже так тяжёл, что отстаёшь от газа диска, и он дует тебе навстречу. Встречный ветер сносит тебя по спирали к звезде, туда, куда показывает стрелка. Чем крупнее галька, тем сильнее снос. Его скорость написана слева сверху.",
 		"tap": true,
+		"pause": true,
+		"focus": "drift",
 	},
 	{
-		"id": "p_collide",
-		"text": "Вокруг другие гальки. Подлетай к ним медленно: зелёная дуга значит, что вы слипнетесь. Красная — удар слишком сильный, от тебя отколются осколки. Пунктир — галька крупнее тебя, её не присоединить.",
+		"id": "p_small",
+		"text": "Вот галька меньше тебя, её можно присоединить. Сплошное кольцо цвета её вещества значит, что она тебе по силам.",
 		"tap": true,
+		"pause": true,
+		"focus": "small",
+	},
+	{
+		"id": "p_big",
+		"text": "А у этой кольцо пунктирное: она крупнее тебя. Её не удержать, от удара просто отскочишь. Подрастёшь, и придёт её черёд.",
+		"tap": true,
+		"pause": true,
+		"focus": "big",
+	},
+	{
+		"id": "p_join",
+		"text": "Теперь попробуй сам. Подлетай к гальке медленно и следи за дугой с твоей стороны: зелёная — вы слипнетесь, красная — удар слишком быстрый, от тебя отколются осколки.",
+		"focus": "join",
 	},
 	{
 		"id": "p_rings",
-		"text": "Видишь светлые кольца в диске? Это ловушки давления. Ветра там почти нет, и гальки копятся. Хорошее место, чтобы расти.",
+		"text": "Видишь светлое кольцо в диске? Это ловушка давления. Ветра там почти нет, поэтому гальки копятся. Хорошее место, чтобы расти.",
 		"tap": true,
+		"pause": true,
+		"focus": "ring",
 	},
 	{
 		"id": "p_book",
-		"text": "В книге знаний проросла новая ветвь, «Галька». Её знания помогут бороться с ветром и мягче сталкиваться. Твой путь к валуну начинается.",
+		"text": "В книге знаний проросла новая ветвь, «Галька». Её знания помогут бороться с ветром и мягче сталкиваться. Остальное я покажу, когда оно встретится. Твой путь к валуну начинается.",
 		"tap": true,
 		"button": "В путь",
 	},
 ]
+# Подсказки по ходу игры: Звездочёт показывает явление, когда оно впервые рядом.
+const TIPS := {
+	"eddy": {
+		"id": "t_eddy",
+		"text": "Смотри: газ закрутился в вихрь. Гальки в нём несутся по кругу, стрелки показывают течение. Добыча внутри в полтора раза ценнее, но плыви по течению: встречный удар раскалывает. Вихрь продержится полминуты, нырять или нет, решай сам.",
+		"tap": true,
+		"pause": true,
+		"focus": "eddy",
+	},
+	"swarm": {
+		"id": "t_swarm",
+		"text": "Потоковая неустойчивость! Газ согнал мелкие гальки в тесный рой. Все они тебе по силам, но через двадцать секунд рой рассеется. Поспеши.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
+	"chip": {
+		"id": "t_chip",
+		"text": "Ох! Удар был слишком быстрым, и от тебя откололись осколки. Видишь крошки вокруг? Это твоё вещество, его можно собрать обратно. Перед касанием сбрасывай скорость, пока дуга не станет зелёной.",
+		"tap": true,
+		"pause": true,
+		"focus": "chip",
+	},
+	"geode": {
+		"id": "t_geode",
+		"text": "Жеода! Внутри этой гальки были кристаллы, поэтому она принесла намного больше звёздной пыли. Такие попадаются редко, а знание «Жеоды» в книге поможет находить их чаще.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
+	"ice": {
+		"id": "t_ice",
+		"text": "Здесь, ближе к звезде, тепло, и лёд в тебе испаряется: видишь голубой пар? Сверху написано, сколько льда ты теряешь. За снеговой линией, дальше от звезды, лёд сохраняется.",
+		"tap": true,
+		"pause": true,
+		"focus": "ice",
+	},
+}
 
 var main: Node  # сцена игры: игрок, интерфейс, древо
 var steps: Array = STEPS
 var pebble := false  # рассказ о гальке, а не первое обучение
+var tip := ""  # подсказка по ходу игры: какое явление показываем
+var tip_pos := Vector2.INF  # где оно в мире (рой, жеода)
 var start_delay := 2.2
 var _step := -1
 var _card: PanelContainer
@@ -106,6 +170,17 @@ var _absorbed := 0
 var _moved := 0.0
 var _target := Vector2.INF  # куда показывает стрелка (экран), INF — никуда
 var _done := false
+var _spot: ColorRect  # затемнение вокруг того, что показываем
+var _spot_k := 0.0
+var _spot_center := Vector2.ZERO
+var _spot_r := 0.0
+var _focus := {}  # что показываем в мире: pos (или pebble) и радиус r
+var _marks: Array = []  # обводки и подписи в мире
+var _cam_active := false
+var _cam_zoom := 1.0
+var _paused := false
+var _busy := false  # камера возвращается к игроку
+var _join_wait := 0.0
 
 
 func _ready() -> void:
@@ -115,6 +190,7 @@ func _ready() -> void:
 	theme = UiTheme.get_theme()
 	_build()
 	GameState.absorbed.connect(func(_a, _b, _c): _absorbed += 1)
+	main.pebble_field.pebble_absorbed.connect(_on_pebble_absorbed)
 	modulate.a = 0.0
 	# Рассказчик появляется, когда камера уже приблизилась к пылинке.
 	var tw := create_tween()
@@ -124,9 +200,17 @@ func _ready() -> void:
 
 
 func _build() -> void:
+	_spot = ColorRect.new()
+	_spot.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_spot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_spot.material = ShaderMaterial.new()
+	_spot.material.shader = SPOT_SHADER
+	_spot.visible = false
+	add_child(_spot)
 	_pointer = Control.new()
 	_pointer.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pointer.draw.connect(_draw_marks)
 	_pointer.draw.connect(_draw_pointer)
 	add_child(_pointer)
 
@@ -182,7 +266,7 @@ func _build() -> void:
 	_progress.add_theme_color_override("font_color", Color(1.0, 0.82, 0.48))
 	bottom.add_child(_progress)
 	var skip := Button.new()
-	skip.text = "Пропустить обучение"
+	skip.text = "Без подсказок" if tip != "" else "Пропустить обучение"
 	skip.flat = true
 	skip.focus_mode = Control.FOCUS_NONE
 	skip.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
@@ -191,7 +275,7 @@ func _build() -> void:
 		skip.add_theme_color_override(key, Color(UiTheme.PARCHMENT, 0.5))
 	for state in ["normal", "hover", "pressed", "focus"]:
 		skip.add_theme_stylebox_override(state, StyleBoxEmpty.new())
-	skip.pressed.connect(_finish)
+	skip.pressed.connect(_skip)
 	bottom.add_child(skip)
 	_next = Button.new()
 	_next.text = "Дальше"
@@ -210,8 +294,16 @@ func _show_step(i: int) -> void:
 	if step.id in NEEDS_START and Skills.is_owned("start"):
 		_show_step(i + 1)
 		return
+	if not _prepare_focus(step):
+		_show_step(i + 1)  # показывать нечего: рядом нет такой гальки
+		return
 	_step = i
 	_step_time = 0.0
+	_join_wait = 0.0
+	if step.get("pause", false):
+		_set_paused(true)
+	elif _paused:
+		_set_paused(false)
 	_shown = 0.0
 	_absorbed = 0
 	_moved = 0.0
@@ -227,9 +319,20 @@ func _show_step(i: int) -> void:
 
 
 func _advance() -> void:
-	if _step < 0 or _done:
+	if _step < 0 or _done or _busy:
 		return
-	_show_step(_step + 1)
+	var next := _step + 1
+	var paused_next: bool = next < steps.size() and steps[next].get("pause", false)
+	if _cam_active and not paused_next:
+		# Сначала камера плавно возвращается к игроку, потом время идёт снова.
+		_busy = true
+		_focus = {}
+		_marks = []
+		_release_camera(func() -> void:
+			_busy = false
+			_show_step(next))
+	else:
+		_show_step(next)
 
 
 func _on_card_input(event: InputEvent) -> void:
@@ -241,15 +344,39 @@ func _on_card_input(event: InputEvent) -> void:
 		_text.visible_characters = -1
 
 
+func _skip() -> void:
+	if tip != "":
+		# «Без подсказок»: больше ничего не показываем по ходу игры.
+		for k in TIPS:
+			if not k in GameState.tips_seen:
+				GameState.tips_seen.append(k)
+	_finish()
+
+
 func _finish() -> void:
 	if _done:
 		return
 	_done = true
-	if pebble:
+	_focus = {}
+	_marks = []
+	_target = Vector2.INF
+	if tip != "":
+		if not tip in GameState.tips_seen:
+			GameState.tips_seen.append(tip)
+	elif pebble:
 		GameState.pebble_intro_done = true
 	else:
 		GameState.tutorial_done = true
 	GameState.save_game()
+	if _cam_active:
+		_release_camera(_fade_out)
+	else:
+		_fade_out()
+
+
+func _fade_out() -> void:
+	if _paused:
+		_set_paused(false)
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(queue_free)
@@ -262,6 +389,7 @@ func _process(delta: float) -> void:
 	# В меню паузы и после гибели рассказчик молчит.
 	visible = not main.player.dead and not main.pause_menu.visible
 	_layout(tree.visible)
+	_update_spot(delta)
 	_pointer.queue_redraw()
 	_emblem.queue_redraw()
 	if _step < 0 or _done or not visible:
@@ -272,6 +400,9 @@ func _process(delta: float) -> void:
 		_shown = minf(_shown + CHARS_PER_SECOND * delta, full)
 		_text.visible_characters = int(_shown)
 	var step: Dictionary = steps[_step]
+	# После паузы или книги знаний время снова останавливается, пока Звездочёт показывает.
+	if step.get("pause", false) and not get_tree().paused and not tree.visible and not _busy:
+		_set_paused(true)
 	var typed := _shown >= full
 	_next.visible = step.get("tap", false) and typed
 	_target = Vector2.INF
@@ -314,8 +445,31 @@ func _process(delta: float) -> void:
 				_advance()
 		"p_drift":
 			_target = _center_of(hud._wind_label)
+		"p_join":
+			_join_wait += delta
+			_progress.text = "0 / 1"
+			if _join_wait > 40.0:
+				_next.visible = true  # не выходит — можно идти дальше
+			var near := _nearest_pebble(true)
+			_marks = []
+			if near:
+				_marks = [{"pebble": near, "label": "сюда", "color": GOLD}]
+				var sp: Vector2 = get_viewport().get_canvas_transform() * main.pebble_field.world_pos(near)
+				var rr: float = near.r * 1.45 * get_viewport().get_canvas_transform().get_scale().x
+				if Rect2(Vector2.ZERO, size).grow(-40.0).has_point(sp):
+					_target = sp + (size * 0.5 - sp).normalized() * maxf(rr - 30.0, 0.0)
+				else:
+					_target = sp.clamp(Vector2(60, 60), size - Vector2(60, 60))
 		"p_book":
 			_target = _center_of(hud._tree_button)
+		"t_ice":
+			_target = _center_of(hud._heat_label) if hud._heat_label.visible else Vector2.INF
+
+
+func _on_pebble_absorbed(_at: Vector2) -> void:
+	if _step >= 0 and not _done and steps[_step].id == "p_join":
+		_progress.text = "1 / 1"
+		_advance()
 
 
 func _center_of(c: Control) -> Vector2:
@@ -375,3 +529,235 @@ func _draw_pointer() -> void:
 	_pointer.draw_colored_polygon(PackedVector2Array([tip - dir * 3.0, head[1] + dir * 2.0 + side * 3.0, head[2] + dir * 2.0 - side * 3.0]), outline)
 	_pointer.draw_line(tip + dir * 18.0, tail, gold, 6.0, true)
 	_pointer.draw_colored_polygon(head, gold)
+
+
+## Пока Звездочёт показывает, время стоит: мир замирает, а рассказчик и камера — нет.
+func _set_paused(on: bool) -> void:
+	_paused = on
+	if on:
+		main.joystick.reset()
+		main.player.move_input = Vector2.ZERO
+	get_tree().paused = on
+
+
+## Что показать на шаге: точка в мире, обводки, подписи. false — показывать нечего.
+func _prepare_focus(step: Dictionary) -> bool:
+	_focus = {}
+	_marks = []
+	var kind: String = step.get("focus", "")
+	if kind == "" or kind == "join":
+		return true
+	var pl: Player = main.player
+	var pf: PebbleField = main.pebble_field
+	var zoom: float = _cam_zoom if _cam_active else main.camera.zoom.x
+	match kind:
+		"player":
+			_focus = {"pos": pl.position, "r": pl.radius * 2.4}
+			_marks = [{"pos": pl.position, "r": pl.radius * 1.6, "label": "это ты", "color": GOLD}]
+		"drift":
+			var dir := pl.drift_velocity.normalized() if pl.drift_velocity.length() > 0.01 else -pl.position.normalized()
+			var reach := pl.radius * 6.0
+			_focus = {"pos": pl.position + dir * reach * 0.45, "r": reach * 0.85}
+			_marks = [{"pos": pl.position, "r": pl.radius * 1.5, "color": GOLD},
+				{"from": pl.position + dir * pl.radius * 1.9, "to": pl.position + dir * reach, "label": "снос к звезде", "color": Color(0.6, 0.85, 1.0)}]
+		"small", "big":
+			var p := _nearest_pebble(kind == "small")
+			if p == null:
+				# Рядом нет такой — подкладываем, чтобы было что показать. Ближе к звезде:
+				# туда сносит, туда и смотреть.
+				var side := Vector2.from_angle(pl.position.angle() + PI + randf_range(-0.8, 0.8))
+				var r := pl.radius * (0.5 if kind == "small" else 1.15)
+				p = pf.spawn_for_guide(pl.position + side * pl.radius * 7.0, r)
+			_focus = {"pebble": p, "r": maxf(p.r * 2.6, pl.radius * 1.3)}
+			if kind == "small":
+				_marks = [{"pebble": p, "label": "можно присоединить", "color": Color(0.55, 1.0, 0.6)}]
+			else:
+				_marks = [{"pebble": p, "label": "крупнее тебя", "color": Color(0.85, 0.9, 1.0), "dashed": true}]
+		"ring":
+			var d := pl.position.length()
+			var best := INF
+			for rc in GameData.PRESSURE_RINGS:
+				if absf(rc - d) < absf(best - d):
+					best = rc
+			var dir := pl.position.normalized()
+			var mid := (pl.position + dir * best) * 0.5
+			var half := absf(best - d) * 0.5 + pl.radius * 8.0
+			zoom = minf(zoom, size.y * 0.4 / half)
+			_focus = {"pos": mid, "r": half, "zoom": zoom}
+			_marks = [{"ring": best, "angle": dir.angle(), "label": "ловушка давления", "color": GOLD},
+				{"pos": pl.position, "r": pl.radius * 1.5, "label": "ты", "color": Color(GOLD, 0.8)}]
+		"eddy":
+			if pf.eddy_left <= 0.0:
+				return false
+			var c: Vector2 = pf.eddy_center + main.dust_field.frame_offset
+			zoom = minf(zoom, size.y * 0.42 / (pf.eddy_radius * 1.1))
+			_focus = {"pos": c, "r": pf.eddy_radius * 1.05, "zoom": zoom}
+			_marks = [{"pos": c, "r": pf.eddy_radius, "label": "вихрь", "color": Color(0.75, 0.9, 1.0), "flow": true}]
+		"spot":
+			if tip_pos == Vector2.INF:
+				return false
+			var r: float = main.dust_field.view_radius() * (0.25 if tip == "swarm" else 0.1)
+			_focus = {"pos": tip_pos, "r": r}
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода"}.get(tip, ""), "color": GOLD}]
+		"chip":
+			_focus = {"pos": pl.position, "r": pl.radius * 4.0}
+			_marks = [{"pos": pl.position, "r": pl.radius * 3.2, "label": "осколки", "color": Color(1.0, 0.55, 0.4)}]
+		"ice":
+			_focus = {"pos": pl.position, "r": pl.radius * 3.0}
+			_marks = [{"pos": pl.position, "r": pl.radius * 2.2, "label": "пар", "color": Color(0.6, 0.82, 1.0)}]
+	_focus_camera(_focus_world(), _focus.get("zoom", zoom))
+	return true
+
+
+## Ближайшая галька, которую можно (или нельзя) присоединить, в том числе за краем экрана.
+func _nearest_pebble(small: bool) -> PebbleField.Pebble:
+	var pf: PebbleField = main.pebble_field
+	var pp: Vector2 = main.player.position
+	var lim: float = main.dust_field.view_radius() * 1.4
+	var best: PebbleField.Pebble = null
+	var bd := INF
+	for p in pf.pebbles:
+		if pf.absorbable(p) != small or (small and p.r < main.player.radius * 0.3):
+			continue  # крошечную показывать не стоит: её легко спутать с пылью
+		var d := pf.world_pos(p).distance_to(pp)
+		if d < bd and d < lim:
+			bd = d
+			best = p
+	return best
+
+
+func _focus_world() -> Vector2:
+	if _focus.has("pebble"):
+		return main.pebble_field.world_pos(_focus.pebble)
+	return _focus.get("pos", Vector2.ZERO)
+
+
+## Камера плывёт к тому, что показываем. Пока время стоит, её ведёт рассказчик.
+func _focus_camera(pos: Vector2, zoom: float) -> void:
+	var cam: Camera2D = main.camera
+	if not _cam_active:
+		_cam_active = true
+		_cam_zoom = cam.zoom.x
+		cam.position_smoothing_speed = 2.4
+	# Показанное встаёт чуть левее и выше центра: справа внизу карточка Звездочёта.
+	cam.position = pos + Vector2(180.0, 70.0) / zoom
+	create_tween().tween_property(cam, "zoom", Vector2(zoom, zoom), 1.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func _release_camera(then: Callable) -> void:
+	var cam: Camera2D = main.camera
+	cam.position = main.player.position
+	var tw := create_tween()
+	tw.tween_property(cam, "zoom", Vector2(_cam_zoom, _cam_zoom), 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_interval(0.15)
+	tw.tween_callback(func() -> void:
+		cam.position_smoothing_speed = 6.0
+		_cam_active = false
+		then.call())
+
+
+## Всё вокруг показанного чуть темнеет, оно само остаётся в круге света.
+func _update_spot(delta: float) -> void:
+	var on: bool = not _focus.is_empty() and visible and not main.tree_screen.visible
+	_spot_k = move_toward(_spot_k, 1.0 if on else 0.0, delta * 2.5)
+	_spot.visible = _spot_k > 0.0
+	if not _spot.visible:
+		return
+	if on:
+		var ct := get_viewport().get_canvas_transform()
+		_spot_center = ct * _focus_world()
+		_spot_r = float(_focus.r) * ct.get_scale().x
+	var m: ShaderMaterial = _spot.material
+	m.set_shader_parameter("rect_size", _spot.size)
+	m.set_shader_parameter("center", _spot_center)
+	m.set_shader_parameter("radius", _spot_r)
+	m.set_shader_parameter("strength", _spot_k)
+
+
+## Обводки и подписи прямо на объектах мира. Обводка дорисовывается кистью по кругу.
+func _draw_marks() -> void:
+	if _marks.is_empty() or not visible or main.tree_screen.visible:
+		return
+	var ct := get_viewport().get_canvas_transform()
+	var sc := ct.get_scale().x
+	var grow := 1.0 - pow(1.0 - clampf(_step_time / 0.8, 0.0, 1.0), 3.0)
+	var pf: PebbleField = main.pebble_field
+	for m in _marks:
+		var col: Color = m.get("color", GOLD)
+		var label: String = m.get("label", "")
+		if m.has("ring"):
+			var rr: float = m.ring
+			var ang: float = m.angle
+			var span := clampf(size.x / (sc * rr) * 0.75, 0.01, 0.6) * grow
+			var pts := PackedVector2Array()
+			for k in 41:
+				pts.append(ct * (Vector2.from_angle(ang - span + 2.0 * span * k / 40.0) * rr))
+			_pointer.draw_polyline(pts, Color(col, 0.18), 16.0, true)
+			_pointer.draw_polyline(pts, Color(col, 0.9), 3.0, true)
+			_label(ct * (Vector2.from_angle(ang) * rr) + Vector2(0, -40), label, col, grow)
+			continue
+		if m.has("from"):
+			var a: Vector2 = ct * m.from
+			var b: Vector2 = a.lerp(ct * m.to, grow)
+			var dir := (b - a).normalized()
+			var dash := 16.0
+			var off := fmod(_time * 30.0, dash * 2.0)
+			var len := a.distance_to(b) - 18.0
+			var s := -off
+			while s < len:
+				var s0 := maxf(s, 0.0)
+				var s1 := minf(s + dash, len)
+				if s1 > s0:
+					_pointer.draw_line(a + dir * s0, a + dir * s1, col, 4.0, true)
+				s += dash * 2.0
+			var side := dir.orthogonal()
+			_pointer.draw_colored_polygon(PackedVector2Array([b, b - dir * 22.0 + side * 12.0, b - dir * 22.0 - side * 12.0]), col)
+			_label(b + Vector2(0, 34), label, col, grow)
+			continue
+		var w: Vector2
+		var r: float
+		if m.has("pebble"):
+			if not m.pebble in pf.pebbles:
+				continue
+			w = pf.world_pos(m.pebble)
+			r = m.pebble.r * 1.45
+		else:
+			w = m.pos
+			r = m.r
+		var c: Vector2 = ct * w
+		var rs := maxf(r * sc, 18.0)
+		var start := -PI * 0.5
+		if m.get("dashed", false):
+			for k in 16:
+				var a0 := start + k * TAU / 16.0
+				if a0 - start > TAU * grow:
+					break
+				_pointer.draw_arc(c, rs, a0, a0 + TAU / 32.0, 6, col, 3.0, true)
+		else:
+			_pointer.draw_arc(c, rs + 2.0, start, start + TAU * grow, 64, Color(col, 0.22), 9.0, true)
+			_pointer.draw_arc(c, rs, start, start + TAU * grow, 64, col, 2.5, true)
+		var pulse := fmod(_time * 0.7, 1.0)
+		_pointer.draw_arc(c, rs * (1.0 + 0.3 * pulse), 0.0, TAU, 48, Color(col, 0.45 * (1.0 - pulse) * grow), 2.0, true)
+		if m.get("flow", false):
+			# Стрелки течения по кругу вихря.
+			for k in 8:
+				var wp := w + Vector2.from_angle(k * TAU / 8.0 + _time * 0.4) * r * 0.72
+				var f := pf.eddy_flow(wp)
+				if f.length() < 0.001:
+					continue
+				var p0 := ct * wp
+				var fd := (ct * (wp + f.normalized() * r * 0.1) - p0).normalized()
+				var fs := fd.orthogonal()
+				_pointer.draw_polyline(PackedVector2Array([p0 - fd * 12.0 + fs * 10.0, p0, p0 - fd * 12.0 - fs * 10.0]), Color(col, 0.9 * grow), 3.5, true)
+		_label(c + Vector2(0, rs + 30.0), label, col, grow)
+
+
+func _label(at: Vector2, text: String, col: Color, k: float) -> void:
+	if text == "":
+		return
+	var font: Font = UiTheme.FONT_SERIF_BOLD
+	var fs := 22
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var pos := Vector2(clampf(at.x - w * 0.5, 12.0, size.x - w - 12.0), clampf(at.y, 30.0, size.y - 12.0))
+	_pointer.draw_string_outline(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 7, Color(0.06, 0.02, 0.1, 0.85 * k))
+	_pointer.draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, k))

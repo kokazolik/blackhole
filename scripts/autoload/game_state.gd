@@ -23,6 +23,7 @@ var stage := 0  # высшая достигнутая стадия: потеря
 var prologue_seen := false
 var tutorial_done := false
 var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
+var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 
 
 func _ready() -> void:
@@ -144,6 +145,7 @@ func save_game() -> void:
 		"tutorial_done": tutorial_done,
 		"stage": stage,
 		"pebble_intro_done": pebble_intro_done,
+		"tips_seen": tips_seen,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
@@ -164,6 +166,7 @@ func load_game() -> void:
 	currency = float(data.get("currency", 0.0))
 	stage = int(data.get("stage", 0))
 	pebble_intro_done = bool(data.get("pebble_intro_done", false))
+	tips_seen = Array(data.get("tips_seen", []))
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	stage = maxi(stage, GameData.stage_index(mass))
 	for key in data.get("materials", {}):
