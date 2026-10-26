@@ -23,9 +23,15 @@ const COLOR_AVAILABLE := Color(0.62, 0.72, 0.95)
 const COLOR_AFFORDABLE := Color(1.0, 0.82, 0.45)
 const COLOR_OWNED := Color(0.78, 0.62, 0.42)
 const COLOR_MAXED := Color(0.55, 0.88, 0.72)
+const COLOR_BLOCKED := Color(0.42, 0.4, 0.46)
+# Цвет ободка у веток веществ: путь виден сразу, ещё до выбора.
+const PATH_COLORS := {
+	"silicate": Color(0.87, 0.77, 0.58), "metal": Color(0.75, 0.8, 0.9),
+	"carbon": Color(0.72, 0.5, 0.42), "ice": Color(0.6, 0.85, 1.0),
+}
 const BRANCH_COLOR := Color(0.95, 0.78, 0.45)
 
-var _canvas: Control
+var _canvas: Node2D
 var _currency_label: Label
 var _info: PanelContainer
 var _info_title: Label
@@ -96,7 +102,10 @@ func _sync_branches(animate: bool) -> void:
 		_node_shown.clear()
 	var delay := 0.0
 	for id in Skills.order:
-		if not Skills.is_unlocked(id):
+		# Пути веществ видны сразу, как только открыта «Избирательность»: игрок
+		# заранее видит развилку. Закрытые пути остаются на виду — серыми, с замком.
+		var is_path: bool = Skills.nodes[id].get("path", "") != ""
+		if not Skills.is_unlocked(id) and not is_path:
 			continue
 		var reqs: Array = Skills.nodes[id].get("requires", [])
 		if reqs.is_empty() and not _node_shown.has(id):
@@ -133,8 +142,9 @@ func _build() -> void:
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_bg)
 
-	_canvas = Control.new()
-	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Node2D, а не Control: Control отсекает рисование по своему (нулевому) размеру,
+	# и древо пропадало целиком, когда его начало уезжало за верх экрана.
+	_canvas = Node2D.new()
 	_canvas.draw.connect(_draw_tree)
 	add_child(_canvas)
 
@@ -247,13 +257,23 @@ func _refresh() -> void:
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		if node.get("legendary", false):
 			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")
-		if Skills.is_maxed(_selected):
+		var blocker := Skills.blocked_by(_selected)
+		if blocker != "":
+			_info_level.text = "Путь закрыт: выбрано «%s»" % Skills.nodes[blocker].title
+			_buy_button.text = "Путь закрыт"
+			_buy_button.disabled = true
+		elif Skills.is_maxed(_selected):
 			_buy_button.text = "Изучено"
 			_buy_button.disabled = true
 		else:
 			var price := GameData.format_number(Skills.cost(_selected))
 			_buy_button.disabled = not Skills.can_buy(_selected)
 			_buy_button.text = ("Нужно " if _buy_button.disabled else "Изучить за ") + price
+			if not Skills.is_unlocked(_selected):
+				var req: Array = node.get("requires", [])
+				var lv := int(node.get("requires_level", 1))
+				if not req.is_empty():
+					_buy_button.text = "Нужно: %s ур. %d" % [Skills.nodes[req[0]].title, lv]
 	_canvas.queue_redraw()
 
 
@@ -287,6 +307,42 @@ func _draw_tree() -> void:
 			var k := clampf((_time - float(_node_shown[id])) / APPEAR_TIME, 0.0, 1.0)
 			_draw_node(id, _node_pos(id), k)
 	_canvas.draw_set_transform(Vector2.ZERO)
+	_draw_path_fork()
+
+
+## Над четырьмя ветками веществ — надпись о развилке: выбрать можно только одну.
+func _draw_path_fork() -> void:
+	var xs: Array[float] = []
+	var y := INF
+	for id in Skills.order:
+		if Skills.nodes[id].get("path", "") != "" and _is_visible_node(id):
+			var p := _node_pos(id)
+			if p.y <= y + 1.0:
+				if p.y < y - 1.0:
+					xs.clear()
+				y = minf(y, p.y)
+				xs.append(p.x)
+	if xs.size() < 2:
+		return
+	var a: float = xs.min()
+	var b: float = xs.max()
+	var chosen := Skills.chosen_path()
+	var text := "развилка: выбери одно вещество" if chosen == "" else "путь выбран"
+	var col := Color(1.0, 0.85, 0.55, 0.85) if chosen == "" else Color(0.7, 0.66, 0.6, 0.6)
+	var ly := y - NODE_RADIUS - 30.0
+	# Пунктирная скобка над ветками.
+	var x := a
+	while x < b:
+		_canvas.draw_line(Vector2(x, ly + 12.0), Vector2(minf(x + 10.0, b), ly + 12.0), col, 2.0, true)
+		x += 18.0
+	_canvas.draw_line(Vector2(a, ly + 12.0), Vector2(a, ly + 22.0), col, 2.0, true)
+	_canvas.draw_line(Vector2(b, ly + 12.0), Vector2(b, ly + 22.0), col, 2.0, true)
+	var font: Font = UiTheme.FONT_SERIF_ITALIC
+	var fs := 20
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var mid := (a + b) * 0.5
+	_canvas.draw_rect(Rect2(mid - w * 0.5 - 8.0, ly - 10.0, w + 16.0, 28.0), Color(0.05, 0.03, 0.1, 0.85))
+	_canvas.draw_string(font, Vector2(mid - w * 0.5, ly + 10.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 ## Ветка — изогнутый золотой стебель с почками. Пока растёт, на кончике искра;
@@ -345,8 +401,12 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 	# Порядок важен: изученный до конца — спокойный нефритовый, доступный к покупке —
 	# пульсирующее золото (даже если часть уровней уже куплена), начатый — тусклая бронза.
 	var maxed := Skills.is_maxed(id)
-	var col := COLOR_AVAILABLE
-	if maxed:
+	var blocked := Skills.blocked_by(id) != ""
+	var path: String = Skills.nodes[id].get("path", "")
+	var col: Color = PATH_COLORS.get(path, COLOR_AVAILABLE)
+	if blocked:
+		col = COLOR_BLOCKED
+	elif maxed:
 		col = COLOR_MAXED
 	elif affordable:
 		col = COLOR_AFFORDABLE
@@ -414,6 +474,14 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 				_canvas.draw_circle(dp, 3.2, col.lightened(0.3))
 			else:
 				_canvas.draw_arc(dp, 2.8, 0.0, TAU, 12, Color(col, 0.5), 1.0, true)
+	if blocked:
+		# Путь закрыт: тёмная вуаль, перечёркнутый круг и замочек.
+		_canvas.draw_circle(Vector2.ZERO, r, Color(0.03, 0.02, 0.06, 0.55))
+		var dg := Vector2(r, -r) * 0.62
+		_canvas.draw_line(-dg, dg, Color(0.75, 0.35, 0.35, 0.8), 3.0, true)
+		var lp := Vector2(r * 0.62, r * 0.62)
+		_canvas.draw_rect(Rect2(lp - Vector2(8, 4), Vector2(16, 12)), Color(0.8, 0.75, 0.7))
+		_canvas.draw_arc(lp - Vector2(0, 4), 5.0, PI, TAU, 12, Color(0.8, 0.75, 0.7), 2.5, true)
 
 	var font: Font = UiTheme.FONT_SERIF_BOLD
 	var title: String = Skills.nodes[id].title

@@ -21,7 +21,7 @@ const BASE_STATS := {
 	"thrust": 1.0,    # тяга: как быстро галька набирает и гасит скорость
 	"chip": 1.0,      # сколько массы откалывается при сильном ударе
 	"pebbles": 1.0,   # сколько галек вокруг
-	"grip": 0.22,      # предел размера присоединяемой гальки, в долях своего радиуса
+	"grip": 0.24,      # предел размера присоединяемой гальки, в долях своего радиуса
 	"combo": 0.0,     # прибавка к звёздной пыли за каждый шаг серии слипаний
 	"combo_cap": 3.0, # сколько шагов серии учитывается
 	"geode": 0.0,     # шанс, что галька окажется жеодой
@@ -78,6 +78,9 @@ func is_maxed(id: String) -> bool:
 ## либо все родители при "requires_all": true. "requires_level" — какого уровня
 ## должны быть родители (по умолчанию хватает первого). Корневые узлы доступны всегда.
 func is_unlocked(id: String) -> bool:
+	# Путь вещества выбирают один раз: остальные ветки «Избирательности» закрыты.
+	if blocked_by(id) != "":
+		return false
 	# Ветви следующих стадий открываются, когда тело до них доросло.
 	if GameState.stage < int(nodes[id].get("requires_stage", 0)):
 		return false
@@ -103,6 +106,26 @@ func is_discovered(id: String) -> bool:
 		if is_unlocked(req):
 			return true
 	return false
+
+
+## Узел другого пути вещества, из-за которого этот закрыт; "" — не закрыт.
+func blocked_by(id: String) -> String:
+	var path: String = nodes[id].get("path", "")
+	if path == "":
+		return ""
+	for other in order:
+		var p: String = nodes[other].get("path", "")
+		if p != "" and p != path and is_owned(other):
+			return other
+	return ""
+
+
+## Выбранный путь вещества ("ice", "metal"...) или "".
+func chosen_path() -> String:
+	for id in order:
+		if nodes[id].get("path", "") != "" and is_owned(id):
+			return nodes[id].path
+	return ""
 
 
 func can_buy(id: String) -> bool:
