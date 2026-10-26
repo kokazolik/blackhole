@@ -225,7 +225,7 @@ func _spawn_swarm(lvl: float) -> void:
 		var p := Pebble.new()
 		p.pos = center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread)) - dust_field.frame_offset
 		# Рой из галек, которые ты способен присоединить: гоняться за ним есть смысл.
-		p.r = player.radius * rng.randf_range(0.12, grip * 0.95)
+		p.r = player.radius * rng.randf_range(R_RANGE.x, maxf(grip * 0.95, R_RANGE.x))
 		p.material = _pick_material(center.length())
 		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		p.angle = rng.randf() * TAU

@@ -4,7 +4,7 @@ extends Node2D
 const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экране в начале, px
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
-const PEBBLE_ZOOM := 1.3              # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
+const PEBBLE_ZOOM := 1.65              # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
 
 var player: Player
 var dust_field: DustField

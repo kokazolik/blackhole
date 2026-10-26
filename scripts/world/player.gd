@@ -14,6 +14,7 @@ const GRAIN_TEX := preload("res://assets/player/player_grain.png")
 # Галька рисуется шейдером: обломки окрашены по составу, и вид перетекает за ним.
 const MIX_SMOOTH_TIME := 1.5
 const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~70% её ширины; видимый размер как у пыли (~2.7 радиуса)
+const PEBBLE_SCALE := 2.78  # тело гальки — 0.36 ширины спрайта: видимый радиус ровно radius
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
 const TRAIL_POINTS := 20
 const TRAIL_STEP := 0.035  # секунд между точками следа
@@ -241,7 +242,10 @@ func _update_grain(r: float) -> void:
 	var heat_col := GameData.thermal_color(temperature)
 	for sprite in [_grain, _pebble]:
 		sprite.rotation = _spin
-		sprite.scale = Vector2.ONE * r * GRAIN_SCALE / GRAIN_TEX.get_width()
+		# Галька рисуется ровно в свой радиус, как и чужие гальки, — иначе на глаз
+		# сравнивать размеры нельзя. Пылинка — крупнее, как вся пыль.
+		var vis := GRAIN_SCALE if sprite == _grain else lerpf(GRAIN_SCALE, PEBBLE_SCALE, pebble_k)
+		sprite.scale = Vector2.ONE * r * vis / GRAIN_TEX.get_width()
 		var mat := sprite.material as ShaderMaterial
 		mat.set_shader_parameter("light_dir", to_star)
 		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
