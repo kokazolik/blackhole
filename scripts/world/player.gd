@@ -19,6 +19,9 @@ const SPIN_SPEED := 0.15   # медленное вращение комка, р�
 const TRAIL_POINTS := 20
 const TRAIL_STEP := 0.035  # секунд между точками следа
 const BURN_RATE := 0.9     # скорость испарения при максимальном нагреве (с площади поверхности)
+# Внутри снеговой линии лёд гальки медленно сублимирует: в долях льда за секунду
+# на полной глубине (за 2000 ед. от линии). Ледяному пути лучше держаться снаружи.
+const ICE_SUBLIMATION := 0.004
 
 var velocity := Vector2.ZERO        # собственное движение относительно окружающей пыли
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
@@ -37,6 +40,7 @@ var _pebble := Sprite2D.new()  # процедурная галька, прост
 var _mix := Vector4(0.25, 0.25, 0.25, 0.25)  # сглаженные доли состава для шейдера
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
+var ice_vapor := 0.0 # сколько льда в секунду уходит в пар (только у гальки)
 var dead := false
 
 
@@ -154,6 +158,15 @@ func _update_heat(delta: float) -> void:
 	burn = clampf((temperature - GameData.SUBLIMATION_TEMP) / (GameData.SURFACE_TEMP - GameData.SUBLIMATION_TEMP), 0.0, 1.0)
 	if burn > 0.0:
 		GameState.ablate(BURN_RATE * pow(GameState.mass, 2.0 / 3.0) * burn * burn * delta)
+	ice_vapor = 0.0
+	var inside := GameData.SNOW_LINE - GameData.SNOW_LINE_WIDTH * 0.5 - dist
+	if pebble_k > 0.5 and inside > 0.0:
+		var ice: float = GameState.materials.get("ice", 0.0)
+		ice_vapor = ice * ICE_SUBLIMATION * clampf(inside / 2000.0, 0.15, 1.0)
+		if ice_vapor > 0.0001:
+			GameState.sublimate_ice(ice_vapor * delta)
+		else:
+			ice_vapor = 0.0
 	if dist < GameData.STAR_RADIUS + radius * 0.5 or GameState.mass < GameData.DEATH_MASS:
 		die()
 

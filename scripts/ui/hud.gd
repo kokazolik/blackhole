@@ -288,6 +288,15 @@ func set_temperature(temp: float) -> void:
 	_heat_label.add_theme_color_override("font_color", base)
 
 
+## Пока не жарко, строка нагрева предупреждает о сублимации льда.
+func set_ice_vapor(rate: float) -> void:
+	if rate <= 0.0 or _heat_label.visible:
+		return
+	_heat_label.visible = true
+	_heat_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % (rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0)
+	_heat_label.add_theme_color_override("font_color", Color(0.6, 0.82, 1.0))
+
+
 func _label(font_size: int, color: Color, font: Font = null) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", font_size)

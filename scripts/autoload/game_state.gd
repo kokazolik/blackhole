@@ -78,6 +78,17 @@ func chip(amount: float, at: Vector2) -> void:
 	chipped.emit(at, amount)
 
 
+## Сублимация льда внутри снеговой линии: уходит только лёд.
+func sublimate_ice(amount: float) -> void:
+	var ice: float = materials.get("ice", 0.0)
+	amount = minf(amount, ice)
+	if amount <= 0.0:
+		return
+	materials["ice"] = ice - amount
+	mass -= amount
+	mass_changed.emit(mass)
+
+
 ## Испарение у звезды: масса уходит в газ, состав сохраняет пропорции.
 func ablate(amount: float) -> void:
 	if amount <= 0.0 or mass <= 0.0:

@@ -15,11 +15,12 @@ signal evaporated(world_position: Vector2, grain_radius: float)
 signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорвалась или угасла
 signal swarm_started(world_position: Vector2)
 signal geode_found(world_position: Vector2, value: float)
+signal eddy_started(world_position: Vector2)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
 const MAX_PEBBLES := 140
-const BASE_COUNT := 6               # галек в округе при плотности 1 (вне колец)
+const BASE_COUNT := 5               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
 # Радиусы чужих галек в долях радиуса игрока. Мелких обломков больше, чем крупных
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
@@ -29,10 +30,19 @@ const QUAD := 2.8                     # сторона квадрата в ра�
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
 # насколько крупную гальку удалось присоединить.
-const VALUE_PER_PEBBLE := 12.0
+const VALUE_PER_PEBBLE := 10.0
 const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
 const HINT_RANGE := 7.0               # в радиусах игрока: где видно кольцо-подсказку удара
+# Вихрь турбулентности: газ закручивает гальки в круговорот. Появляется в стороне
+# и стоит на месте — нырять туда или нет, решает игрок. Внутри больше добычи и жеод,
+# слипание ценнее, но гальки несутся по кругу: удар против течения раскалывает,
+# а кто плывёт по течению, сближается с ними мягко.
+const EDDY_INTERVAL := 120.0
+const EDDY_DURATION := 30.0
+const EDDY_COUNT := 10
+const EDDY_VALUE := 1.5               # множитель звёздной пыли за гальку из вихря
+const EDDY_SPIN := 1.7                # скорость круговорота в долях скорости слипания
 
 class Pebble:
 	var pos: Vector2  # в системе отсчёта пыли (мир = pos + dust_field.frame_offset)
@@ -44,6 +54,7 @@ class Pebble:
 	var spin: float
 	var geode := false
 	var swarm := false  # из роя: рассеивается, когда рой кончился
+	var eddy := false   # кружится в вихре
 
 var player: Player
 var dust_field: DustField
@@ -58,6 +69,11 @@ var chain := 0           # шагов в текущей серии слипан�
 var _chain_timer := 0.0
 var _swarm_timer := -1.0  # до следующего роя; <0 — навыка нет
 var swarm_left := 0.0     # сколько ещё длится текущий рой
+var eddy_center := Vector2.ZERO  # в системе отсчёта пыли
+var eddy_radius := 0.0
+var eddy_left := 0.0
+var _eddy_timer := EDDY_INTERVAL * 0.6
+var _eddy_fx := Node2D.new()  # спирали газа под гальками
 
 
 func _ready() -> void:
@@ -80,6 +96,8 @@ func _ready() -> void:
 	mat.set_shader_parameter("snow_width", GameData.SNOW_LINE_WIDTH)
 	_mm_node.multimesh = _mm
 	_mm_node.material = mat
+	_eddy_fx.draw.connect(_draw_eddy)
+	add_child(_eddy_fx)
 	add_child(_mm_node)
 	_hint.draw.connect(_draw_hints)
 	add_child(_hint)
@@ -98,6 +116,7 @@ func _process(delta: float) -> void:
 	_maintain()
 	_update_combo(delta)
 	_update_swarm(delta)
+	_update_eddy(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
 	var pull_r := player.pull_radius() * 1.5
@@ -107,6 +126,8 @@ func _process(delta: float) -> void:
 		var p := pebbles[i]
 		var wp := world_pos(p)
 		p.vel *= drag
+		if p.eddy and eddy_left > 0.0:
+			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
 		if pull > 0.0 and absorbable(p):
 			# «Вихрь в газе»: подходящие гальки сами плывут к тебе.
 			var to_p := player.position - wp
@@ -237,6 +258,91 @@ func _spawn_swarm(lvl: float) -> void:
 	swarm_started.emit(center)
 
 
+## Вихрь появляется сам, без навыка: впереди-сбоку, на краю видимого.
+func _update_eddy(delta: float) -> void:
+	if eddy_left > 0.0:
+		eddy_left -= delta
+		var wc := eddy_center + dust_field.frame_offset
+		var to_c := player.position - wc
+		var d := to_c.length()
+		if d < eddy_radius and d > 0.001:
+			# Течение подхватывает и тебя.
+			player.velocity += (eddy_flow(player.position) - player.velocity) * (1.0 - exp(-0.8 * delta)) * (1.0 - d / eddy_radius)
+		if eddy_left <= 0.0:
+			for p in pebbles:
+				if p.eddy:
+					p.eddy = false
+		_eddy_fx.queue_redraw()
+		return
+	_eddy_timer -= delta
+	if _eddy_timer <= 0.0 and not player.dead:
+		_eddy_timer = EDDY_INTERVAL * rng.randf_range(0.8, 1.2)
+		_spawn_eddy()
+
+
+## Скорость газа в вихре: по кругу, быстрее всего на середине радиуса.
+func eddy_flow(world: Vector2) -> Vector2:
+	var to := world - (eddy_center + dust_field.frame_offset)
+	var d := to.length()
+	if d < 0.001 or d > eddy_radius * 1.2:
+		return Vector2.ZERO
+	var x := d / eddy_radius
+	var speed := player.stick_speed() * EDDY_SPIN * x * exp(1.0 - x * x * 2.0) * 0.8
+	return to.orthogonal() / d * speed
+
+
+func _spawn_eddy() -> void:
+	var view_r := dust_field.view_radius()
+	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
+	var center := player.position + dir.rotated(rng.randf_range(0.5, 1.0) * (1.0 if rng.randf() < 0.5 else -1.0)) * view_r * 0.85
+	if center.length() < GameData.sublimation_distance() * 1.4:
+		return
+	eddy_radius = view_r * 0.38
+	eddy_center = center - dust_field.frame_offset
+	eddy_left = EDDY_DURATION
+	var grip := minf(Skills.stat("grip"), 0.95)
+	var count := mini(EDDY_COUNT, MAX_PEBBLES - pebbles.size())
+	for k in count:
+		var p := Pebble.new()
+		var a := rng.randf() * TAU
+		var d := eddy_radius * sqrt(rng.randf_range(0.04, 1.0))
+		p.pos = eddy_center + Vector2.from_angle(a) * d
+		# Половина по зубам, остальные крупнее: сталкиваться с ними на ходу больно.
+		if rng.randf() < 0.5:
+			p.r = player.radius * rng.randf_range(R_RANGE.x, maxf(grip * 0.95, R_RANGE.x))
+		else:
+			p.r = player.radius * rng.randf_range(grip * 1.1, 0.9)
+		p.material = _pick_material(center.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.8, 0.8)
+		p.geode = rng.randf() < Skills.stat("geode") * 3.0 + 0.02
+		p.eddy = true
+		p.vel = eddy_flow(p.pos + dust_field.frame_offset)
+		pebbles.append(p)
+	eddy_started.emit(center)
+
+
+## Вихрь — несколько закрученных спиралей газа, медленно вращаются и гаснут к концу.
+func _draw_eddy() -> void:
+	if eddy_left <= 0.0:
+		return
+	var c := eddy_center + dust_field.frame_offset
+	var fade := clampf(eddy_left / 3.0, 0.0, 1.0) * clampf((EDDY_DURATION - eddy_left) / 2.0, 0.0, 1.0)
+	var t := Time.get_ticks_msec() / 1000.0
+	var px := 1.0 / camera.zoom.x
+	for arm in 5:
+		var pts := PackedVector2Array()
+		var base := arm * TAU / 5.0 - t * 0.9  # вращается туда же, куда течёт газ
+		for i in 28:
+			var u := float(i) / 27.0
+			var rr := eddy_radius * (0.12 + 0.95 * u)
+			pts.append(c + Vector2.from_angle(base + u * 3.2) * rr)
+		_eddy_fx.draw_polyline(pts, Color(0.75, 0.85, 1.0, 0.1 * fade), 6.0 * px, true)
+		_eddy_fx.draw_polyline(pts, Color(0.85, 0.92, 1.0, 0.22 * fade), 1.4 * px, true)
+	_eddy_fx.draw_arc(c, eddy_radius, 0.0, TAU, 64, Color(0.8, 0.88, 1.0, 0.12 * fade), 2.0 * px, true)
+
+
 func _collide(p: Pebble, index: int) -> void:
 	var wp := world_pos(p)
 	var to := wp - player.position
@@ -256,6 +362,8 @@ func _collide(p: Pebble, index: int) -> void:
 		_chain_timer = GameData.COMBO_WINDOW
 		var size_rel := p.r / player.radius
 		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, 0.9) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
+		if p.eddy:
+			value *= EDDY_VALUE
 		if p.geode:
 			value *= Skills.stat("geode_value")
 			geode_found.emit(wp, value)

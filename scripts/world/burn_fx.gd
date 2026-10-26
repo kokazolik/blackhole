@@ -15,6 +15,7 @@ var player: Player
 var _vapor: Array = []
 var _shards: Array = []
 var _spawn_acc := 0.0
+var _ice_acc := 0.0
 var _death_t := -1.0
 var _death_pos := Vector2.ZERO
 var _death_r := 1.0
@@ -52,6 +53,14 @@ func puff(at: Vector2, r: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if not player.dead and player.ice_vapor > 0.0:
+		# Лёд внутри снеговой линии сублимирует: голубоватые струйки пара.
+		_ice_acc += delta * (3.0 + 400.0 * player.ice_vapor / maxf(GameState.mass, 1.0))
+		while _ice_acc >= 1.0 and _vapor.size() < LIMIT:
+			_ice_acc -= 1.0
+			_emit_vapor(player.position, player.radius, 0.0, 0.7)
+			_vapor[-1]["ice"] = true
+		_ice_acc = fmod(_ice_acc, 1.0)
 	if not player.dead and player.burn > 0.0:
 		_spawn_acc += delta * (6.0 + 90.0 * player.burn)
 		while _spawn_acc >= 1.0 and _vapor.size() < LIMIT:
@@ -125,6 +134,8 @@ func _draw() -> void:
 		# свечению ионизированного газа, и гаснет.
 		var hot := GameData.thermal_color(v.temp)
 		var col := Color(hot.r, hot.g, hot.b).lerp(Color(0.45, 0.55, 0.9), clampf(k * 1.6, 0.0, 1.0))
+		if v.get("ice", false):
+			col = Color(0.55, 0.75, 1.0)
 		var a := (1.0 - k) * (0.35 + 0.5 * hot.a)
 		var s: float = v.size * (1.0 + 2.5 * k)  # газ расширяется
 		draw_texture_rect(_glow, Rect2(v.pos - Vector2(s, s), Vector2(s, s) * 2.0), false, Color(col, a))

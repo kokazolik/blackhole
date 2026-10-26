@@ -74,6 +74,8 @@ func _ready() -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.0), "Жеода! +%s" % GameData.format_number(value), GameData.GEODE_GLOW, 26))
 	pebble_field.swarm_started.connect(func(_at: Vector2) -> void:
 		_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
+	pebble_field.eddy_started.connect(func(_at: Vector2) -> void:
+		_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
 	GameState.stage_reached.connect(_on_stage_reached)
 
 	camera.position = player.position
@@ -254,5 +256,6 @@ func _process(delta: float) -> void:
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
 	hud.set_temperature(player.temperature)
+	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k)
