@@ -83,6 +83,11 @@ func _show_dev() -> void:
 	_button("Скрыть FPS" if Hud.show_fps else "Показывать FPS", false, func():
 		Hud.show_fps = not Hud.show_fps
 		close())
+	# На экранах 90–120 Гц кадр то успевает, то нет, и движение дёргается.
+	# Ровные 60 кадров глазу плавнее, чем скачущие 85.
+	_button("Кадры: 60 (вкл. без ограничения)" if Engine.max_fps == 60 else "Кадры: без ограничения (вкл. 60)", false, func():
+		Engine.max_fps = 0 if Engine.max_fps == 60 else 60
+		close())
 	_button("+10 000 звёздной пыли", false, func():
 		GameState.add_currency(10000.0)
 		close())
