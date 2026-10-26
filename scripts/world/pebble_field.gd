@@ -32,6 +32,9 @@ const DRAG := 0.5                     # доля собственной скор
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
 # насколько крупную гальку удалось присоединить.
 const VALUE_PER_PEBBLE := 10.0
+# При слипании прирастает не всё: часть вещества разлетается пылью и осколками
+# (в опытах с пылевыми агрегатами прилипает лишь доля). Это и держит темп этапа.
+const ACCRETION := 0.6
 const VALUE_MASS_EXP := 0.45          # доход растёт с массой медленнее её самой: книга не скупается за минуту
 const MASS_THINNING := 0.3
 const THINNING_FROM := 100.0         # до этой массы галек вокруг столько же, сколько в начале
@@ -378,7 +381,7 @@ func _collide(p: Pebble, index: int) -> void:
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
 	if absorbable(p) and impact <= stick:
-		var m := GameData.pebble_mass(p.r)
+		var m := GameData.pebble_mass(p.r) * ACCRETION
 		chain += 1
 		_chain_timer = GameData.COMBO_WINDOW
 		var size_rel := p.r / player.radius
@@ -484,7 +487,11 @@ func _draw_hints() -> void:
 		if dist > range_r:
 			continue
 		var fade := clampf((range_r - dist) / (range_r * 0.4), 0.0, 1.0)
-		var rr := p.r * 1.25
+		# Толщина обводки по размеру гальки на экране: у крошечной кольцо не толще её самой.
+		var pr := p.r * camera.zoom.x
+		var w_face := clampf(pr * 0.2, 0.8, 2.5)
+		var w_mat := clampf(pr * 0.13, 0.6, 1.6)
+		var rr := p.r * 1.12 + (w_face * 0.5 + 1.0) * px
 		if not absorbable(p):
 			# Мелкий пунктир вплотную к гальке: заметно, но не спорит с самой галькой.
 			for s in 24:
@@ -496,7 +503,7 @@ func _draw_hints() -> void:
 		var ok := approach <= stick * Skills.stat("glue_" + p.material)
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
 		var face := (-to).angle()
-		_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), 2.5 * px, true)
+		_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), w_face * px, true)
 		# Остаток кольца — цвет материала: нужное вещество видно издалека.
 		var mat_col: Color = GameData.MATERIALS[p.material].color
-		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), 1.6 * px, true)
+		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
