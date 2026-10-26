@@ -27,6 +27,7 @@ const RING_BOOST := 2.5               # в кольце-ловушке гале�
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
 const R_RANGE := Vector2(0.17, 1.25)
 const R_SKEW := 2.2
+const SIZE_GAP := 1.35                 # несъедобные — минимум на столько крупнее предела хватки
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
@@ -186,6 +187,11 @@ func _spawn(at: Vector2) -> void:
 	var p := Pebble.new()
 	p.pos = at - dust_field.frame_offset
 	p.r = player.radius * lerpf(R_RANGE.x, R_RANGE.y, pow(rng.randf(), R_SKEW))
+	# Чуть-чуть крупнее предела не бывает: несъедобная галька должна выглядеть
+	# заметно крупнее самой большой съедобной, а не «такой же».
+	var limit := player.radius * minf(Skills.stat("grip"), 0.95)
+	if p.r >= limit and p.r < limit * SIZE_GAP:
+		p.r = limit * SIZE_GAP
 	p.geode = rng.randf() < Skills.stat("geode")
 	p.material = _pick_material(dist)
 	p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
@@ -335,7 +341,7 @@ func _spawn_eddy() -> void:
 		if rng.randf() < 0.5:
 			p.r = player.radius * rng.randf_range(R_RANGE.x, maxf(grip * 0.95, R_RANGE.x))
 		else:
-			p.r = player.radius * rng.randf_range(grip * 1.1, 0.9)
+			p.r = player.radius * rng.randf_range(grip * SIZE_GAP, maxf(0.9, grip * SIZE_GAP))
 		p.material = _pick_material(center.length())
 		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		p.angle = rng.randf() * TAU
