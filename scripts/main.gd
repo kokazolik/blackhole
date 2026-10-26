@@ -18,6 +18,7 @@ var pebble_field: PebbleField
 var fx: AbsorbFx
 var sky_events: Node2D
 var _intro_time := 0.0
+var _zoom_ease := 0.0  # с какого момента камера снова плавно приближается
 var _caption: Control
 var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
 var _chip_time := -10.0
@@ -142,6 +143,10 @@ func _on_stage_reached(index: int) -> void:
 	tw.tween_property(flash, "color:a", 0.55, 0.25)
 	tw.tween_property(flash, "color:a", 0.0, 1.6)
 	tw.tween_callback(flash.queue_free)
+	# Скачок масштаба: камера отъезжает и плавно возвращается, пыль вокруг мельчает —
+	# видно, насколько ты вырос.
+	camera.zoom *= 0.55
+	_zoom_ease = 0.0
 	_show_caption("Галька", "камешек размером с горошину")
 	if not GameState.pebble_intro_done:
 		_start_pebble_intro(4.5)
@@ -266,7 +271,8 @@ func _process(delta: float) -> void:
 	camera.position = player.position
 	# Приближение идёт в логарифмах: вход издалека выглядит равномерным полётом.
 	_intro_time += delta
-	var rate := lerpf(0.9, 2.0, clampf(_intro_time / 3.0, 0.0, 1.0))
+	_zoom_ease += delta
+	var rate := lerpf(0.9, 2.0, clampf(_zoom_ease / 3.0, 0.0, 1.0))
 	var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
 	camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO

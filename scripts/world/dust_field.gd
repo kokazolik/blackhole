@@ -40,7 +40,7 @@ const SCAN_INTERVAL := 0.2  # как часто полный обход: уда�
 const REBASE_DISTANCE := 20000.0
 const FLOATS := 16  # на экземпляр: 8 трансформ, 4 цвет, 4 данные
 # Рядом с галькой пылинки — микронная крапинка: на этапе «Галька» рисуем их мельче.
-const PEBBLE_DUST_SCALE := 0.4
+const PEBBLE_DUST_SCALE := 0.25
 const CLOUD_GRAINS := Vector2i(3, 6)   # сколько пылинок несёт одно облачко
 const CLOUD_RADIUS := 2.6              # радиус облачка в радиусах пылинки его уровня
 const PEBBLE_MAX_DUST := 800           # потолок числа объектов пыли на этапе «Галька»
