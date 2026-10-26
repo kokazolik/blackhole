@@ -10,6 +10,7 @@ uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
 uniform vec4 emission = vec4(0.0);   // тепловое свечение (rgb, сила в a)
 uniform vec4 mix_w = vec4(0.25);     // доли: силикаты, металл, углерод, лёд
 uniform float growth = 0.0;          // 0 — свежая галька, 1 — почти валун
+uniform float boulder = 0.0;         // 0 — галька, 1 — крупный валун: угловатее, мельче зерно, трещины
 uniform float seed = 0.37;
 
 const float BODY = 0.36;  // радиус тела в долях квадрата
@@ -53,9 +54,9 @@ void fragment() {
 	vec2 p = (UV - 0.5) / BODY;
 	// Неровный силуэт: несколько гармоник по углу. С ростом тело комковатее.
 	float th = atan(p.y, p.x);
-	float amp = 0.07 + 0.05 * growth;
+	float amp = 0.07 + 0.05 * growth + 0.05 * boulder;
 	float edge = 1.0 + amp * (0.55 * sin(2.0 * th + seed * 6.0) + 0.3 * sin(3.0 * th + seed * 11.0)
-			+ 0.15 * sin(5.0 * th + seed * 17.0)) + 0.05 * (noise(vec2(th * 2.5, seed * 10.0)) - 0.5);
+			+ 0.15 * sin(5.0 * th + seed * 17.0)) + 0.05 * (noise(vec2(cos(th), sin(th)) * 2.5 + seed * 10.0) - 0.5);
 	float r = length(p);
 	float aa = fwidth(r) * 1.2;
 	// Ледяная галька — рыхлый комок, как снежок: край пушистый и полупрозрачный.
@@ -83,7 +84,7 @@ void fragment() {
 
 	// Хондры: круглые застывшие капли силиката, светлее матрицы. Их больше,
 	// чем больше в составе камня. С ростом тела видно больше и они мельче.
-	float cells = 3.6 + 3.0 * growth;
+	float cells = 3.6 + 3.0 * growth + 8.0 * boulder;
 	vec2 cp = p * cells + vec2(seed * 13.0);
 	vec2 ci = floor(cp);
 	vec2 cf = fract(cp);
@@ -104,7 +105,35 @@ void fragment() {
 		}
 	}
 	vec3 chondrule = mix(CHONDRULE, base * 1.3, 0.25) * (0.9 + 0.2 * noise(p * 30.0));
-	vec3 albedo = mix(base, chondrule, chond);
+	vec3 albedo = mix(base, chondrule, chond * (1.0 - 0.6 * boulder));
+
+	// Валун: глыба из слипшихся кусков, между ними тёмные трещины-швы.
+	if (boulder > 0.0) {
+		// Координаты чуть искривлены шумом: швы неровные, как у настоящих трещин.
+		vec2 bp = p * 2.0 + vec2(seed * 7.0) + (vec2(noise(p * 3.1), noise(p * 3.1 + 5.2)) - 0.5) * 0.9;
+		vec2 bi = floor(bp);
+		vec2 bf = fract(bp);
+		float f1 = 8.0;
+		float f2 = 8.0;
+		float shade = 0.0;
+		for (int y = -1; y <= 1; y++) {
+			for (int x = -1; x <= 1; x++) {
+				vec2 g = vec2(float(x), float(y));
+				vec2 o = vec2(hash(bi + g + 3.3), hash(bi + g + 9.1));
+				float d = length(g + o - bf);
+				if (d < f1) {
+					f2 = f1;
+					f1 = d;
+					shade = hash(bi + g + 21.7);
+				} else if (d < f2) {
+					f2 = d;
+				}
+			}
+		}
+		float seam = (1.0 - smoothstep(0.01, 0.06, f2 - f1)) * smoothstep(0.35, 0.65, noise(p * 4.0 + 11.0));
+		albedo *= 1.0 - boulder * (0.4 * seam - 0.14 * (shade - 0.5));
+		n = normalize(n + vec3((bf - 0.5) * 0.12 * boulder, 0.0));
+	}
 	n = normalize(n + vec3(dome * 0.35 * chond, 0.0));
 
 	// Лёд: светлая пушистая изморозь поверх всего, гуще в ямках рельефа.

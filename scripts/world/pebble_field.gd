@@ -38,7 +38,12 @@ const VALUE_PER_PEBBLE := 10.0
 const ACCRETION := 0.6
 const VALUE_MASS_EXP := 0.45          # доход растёт с массой медленнее её самой: книга не скупается за минуту
 const MASS_THINNING := 0.3
-const THINNING_FROM := 100.0         # до этой массы галек вокруг столько же, сколько в начале
+const THINNING_FROM := 3.33          # в массах начала этапа: до неё тел вокруг столько же, сколько в начале
+# Валун: гальки вокруг стали мелочью-едой. Масса с них небольшая, зато звёздной
+# пыли много и они прилипают на любой скорости. Растёт валун на малых валунах.
+const FOOD_COUNT := 16
+const FOOD_R := Vector2(0.09, 0.18)   # в долях радиуса игрока
+const FOOD_VALUE := 3.0
 const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
 const HINT_RANGE := 7.0               # в радиусах игрока: где видно кольцо-подсказку удара
@@ -63,6 +68,7 @@ class Pebble:
 	var geode := false
 	var swarm := false  # из роя: рассеивается, когда рой кончился
 	var eddy := false   # кружится в вихре
+	var food := false   # мелочь на этапе «Валун»: прилипает на любой скорости
 
 var player: Player
 var dust_field: DustField
@@ -168,13 +174,27 @@ func _maintain() -> void:
 	# Число галек в округе не растёт с приближением камеры: иначе рост ускорялся бы сам собой.
 	# Чем крупнее ты, тем реже в округе тела, которые тебе по силам: к концу этапа
 	# рост не срывается в лавину.
-	var thin := pow(maxf(GameState.mass / THINNING_FROM, 1.0), -MASS_THINNING)
+	var stage_mass := GameData.BOULDER_MASS if GameState.is_boulder() else 30.0
+	var thin := pow(maxf(GameState.mass / (stage_mass * THINNING_FROM), 1.0), -MASS_THINNING)
 	var target := mini(int(BASE_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k * thin + 0.5), MAX_PEBBLES)
-	var budget := 6
-	while pebbles.size() < target and budget > 0:
+	var food_target := int(FOOD_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.boulder_k + 0.5)
+	var bodies := 0
+	var food := 0
+	for p in pebbles:
+		if p.food:
+			food += 1
+		else:
+			bodies += 1
+	var budget := 8
+	while (bodies < target or food < food_target) and budget > 0 and pebbles.size() < MAX_PEBBLES:
 		budget -= 1
 		var at := pp + Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf_range(pow(view_r * 1.05, 2), active_r * active_r))
-		_spawn(at)
+		if food < food_target and (bodies >= target or rng.randf() < 0.6):
+			_spawn_food(at)
+			food += 1
+		else:
+			_spawn(at)
+			bodies += 1
 
 
 func _spawn(at: Vector2) -> void:
@@ -198,6 +218,23 @@ func _spawn(at: Vector2) -> void:
 	p.angle = rng.randf() * TAU
 	p.spin = rng.randf_range(-0.25, 0.25)
 	pebbles.append(p)
+
+
+## Мелкая галька-еда валуна: россыпью, иногда кучкой.
+func _spawn_food(at: Vector2) -> void:
+	if at.length() < GameData.sublimation_distance() * 1.1:
+		return
+	var n := 1 if rng.randf() < 0.6 else rng.randi_range(2, 4)
+	for k in n:
+		var p := Pebble.new()
+		p.pos = at + Vector2(rng.randfn(0.0, 1.0), rng.randfn(0.0, 1.0)) * player.radius * 0.8 - dust_field.frame_offset
+		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y)
+		p.food = true
+		p.material = _pick_material(at.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.4, 0.4)
+		pebbles.append(p)
 
 
 ## Галька нужного размера в заданном месте: Звездочёт показывает её новичку.
@@ -225,7 +262,7 @@ func _pick_material(dist: float) -> String:
 
 ## Можно ли присоединить гальку: предел размера растёт с навыками ветви «Захват».
 func absorbable(p: Pebble) -> bool:
-	return p.r < player.radius * minf(Skills.stat("grip"), 0.95)
+	return p.food or p.r < player.radius * minf(Skills.stat("grip"), 0.95)
 
 
 ## Серия гаснет, если долго не слипаться.
@@ -386,26 +423,29 @@ func _collide(p: Pebble, index: int) -> void:
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
-	if absorbable(p) and impact <= stick:
-		var m := GameData.pebble_mass(p.r) * ACCRETION
-		chain += 1
-		_chain_timer = GameData.COMBO_WINDOW
+	if p.food or (absorbable(p) and impact <= stick):
+		var m := GameData.pebble_mass(p.r, GameState.mass) * ACCRETION * Skills.stat("accretion")
+		if not p.food:  # серию держат только настоящие слипания, мелочь её не продлевает
+			chain += 1
+			_chain_timer = GameData.COMBO_WINDOW
 		var size_rel := p.r / player.radius
 		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
 		if p.eddy:
 			value *= EDDY_VALUE
+		if p.food:
+			value *= FOOD_VALUE
 		if p.geode:
 			value *= Skills.stat("geode_value")
 			geode_found.emit(wp, value)
 		GameState.absorb_mass(m, value, p.material, at)
 		pebble_absorbed.emit(wp)
-		if Skills.stat("combo") > 0.0 and chain >= 2:
+		if Skills.stat("combo") > 0.0 and chain >= 2 and not p.food:
 			combo_changed.emit(chain, combo_multiplier())
 		pebbles.remove_at(index)
 		return
 	if impact > stick:
 		var excess := impact / stick
-		var m_other := GameData.pebble_mass(p.r)
+		var m_other := GameData.pebble_mass(p.r, GameState.mass)
 		var loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * GameData.CHIP_MAX) * Skills.stat("chip")
 		var player_mat := _main_material()
 		if chain > 0:
@@ -429,7 +469,7 @@ func _collide(p: Pebble, index: int) -> void:
 ## Отскок: у кого меньше масса, того отбрасывает сильнее.
 func _bounce(n: Vector2, impact: float, p: Pebble, k: float) -> void:
 	var m_player := GameState.mass
-	var m_other := GameData.pebble_mass(p.r)
+	var m_other := GameData.pebble_mass(p.r, GameState.mass)
 	var share := m_other / (m_player + m_other)
 	player.velocity -= n * impact * (1.0 + RESTITUTION) * share * k
 	p.vel += n * impact * (1.0 + RESTITUTION) * (1.0 - share) * k
@@ -486,6 +526,8 @@ func _draw_hints() -> void:
 	var px := 1.0 / camera.zoom.x
 	var stick := player.stick_speed()
 	for p in pebbles:
+		if p.food:
+			continue  # мелочь прилипает всегда: подсказка не нужна
 		var wp := world_pos(p)
 		var to := wp - player.position
 		var dist := to.length()

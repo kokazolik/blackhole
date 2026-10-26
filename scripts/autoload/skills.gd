@@ -28,6 +28,7 @@ const BASE_STATS := {
 	"geode_value": 10.0,  # во сколько раз жеода ценнее
 	"swarm": 0.0,     # уровень потоковой неустойчивости: 0 — роёв нет
 	"pebble_pull": 0.0,  # гальки сами плывут к тебе (легендарный «Вихрь в газе»)
+	"accretion": 1.0, # этап «Валун»: доля вещества, прирастающая при слипании (к PebbleField.ACCRETION)
 	# Ветвь «Состав»: сколько галек этого материала вокруг и как легко с ними слипаться.
 	"affinity_silicate": 1.0, "affinity_metal": 1.0, "affinity_carbon": 1.0, "affinity_ice": 1.0,
 	"glue_silicate": 1.0, "glue_metal": 1.0, "glue_carbon": 1.0, "glue_ice": 1.0,

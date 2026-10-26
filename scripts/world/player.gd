@@ -27,6 +27,7 @@ var velocity := Vector2.ZERO        # собственное движение о
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
 var drift_velocity := Vector2.ZERO  # снос встречным ветром газа (только у гальки)
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
+var boulder_k := 0.0                # 0 — галька, 1 — валун
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
 var radius := GameData.BASE_RADIUS
 var body_color := Color.WHITE
@@ -67,12 +68,15 @@ func _ready() -> void:
 	add_child(_pebble)
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
+	boulder_k = 1.0 if GameState.is_boulder() else 0.0
 	GameState.stage_reached.connect(_on_stage_reached)
 
 
 func _on_stage_reached(index: int) -> void:
 	if index == GameData.PEBBLE_STAGE:
 		create_tween().tween_property(self, "pebble_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
+	elif index == GameData.BOULDER_STAGE:
+		create_tween().tween_property(self, "boulder_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
 
 
 ## Мягкое свечение одной текстурой вместо стопки полупрозрачных кругов.
@@ -92,7 +96,7 @@ static func _make_glow() -> GradientTexture2D:
 
 
 func target_radius() -> float:
-	return GameData.BASE_RADIUS * pow(GameState.mass, 1.0 / 3.0)
+	return GameData.body_radius(GameState.mass)
 
 
 func pull_radius() -> float:
@@ -134,7 +138,9 @@ func _process(delta: float) -> void:
 	velocity = velocity.move_toward(dir * top, top * accel * delta)
 	# Игрок вместе со всей пылью вокруг летит по орбите, стик добавляет своё движение.
 	frame_velocity = GameData.orbit_velocity(position)
-	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k
+	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.
+	var barrier := lerpf(1.0, GameData.barrier_drift(GameState.mass), boulder_k)
+	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k * barrier
 	position += (velocity + drift_velocity + frame_velocity) * delta
 
 	_update_heat(delta)
@@ -272,6 +278,7 @@ func _update_grain(r: float) -> void:
 		var body := _pebble.material as ShaderMaterial
 		body.set_shader_parameter("mix_w", _mix)
 		body.set_shader_parameter("growth", clampf(log(maxf(GameState.mass, 30.0) / 30.0) / log(100.0), 0.0, 1.0))
+		body.set_shader_parameter("boulder", boulder_k * clampf(0.4 + 0.6 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
 		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.3 * _pulse), pebble_k)
 
 

@@ -979,6 +979,130 @@
 			"icon": "mat_carbon",
 			"requires_level": 3,
 			"path": "carbon"
+		},
+		{
+			"id": "boulder_root",
+			"title": "Монолит",
+			"desc": "Куски спеклись в цельную глыбу. Встречный ветер сносит на 15% слабее, тяга +30%, а каждая находка приносит на 20% больше звёздной пыли. Первый шаг через метровый барьер.",
+			"cost": 1000,
+			"cost_growth": 1.5,
+			"max_level": 1,
+			"pos": [
+				0,
+				9
+			],
+			"requires": [
+				"pebble_root"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"drift": -0.15,
+				"thrust": 0.3,
+				"value": 0.2
+			},
+			"icon": "pebble_root"
+		},
+		{
+			"id": "b_streamline",
+			"title": "Обтекаемая форма",
+			"desc": "Ветер огибает сглаженные бока: снос к звезде −6% за уровень.",
+			"cost": 1500,
+			"cost_growth": 1.5,
+			"max_level": 5,
+			"pos": [
+				-1.5,
+				10
+			],
+			"requires": [
+				"boulder_root"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"drift": -0.06
+			},
+			"icon": "drift_1"
+		},
+		{
+			"id": "b_sweep",
+			"title": "Широкий захват",
+			"desc": "Валун цепляет больше мелочи вокруг: галек и малых валунов +10% за уровень.",
+			"cost": 1500,
+			"cost_growth": 1.5,
+			"max_level": 5,
+			"pos": [
+				0,
+				10
+			],
+			"requires": [
+				"boulder_root"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"pebbles": 0.1
+			},
+			"icon": "pebble_swarm"
+		},
+		{
+			"id": "b_transfer",
+			"title": "Перенос массы",
+			"desc": "При слипании к тебе прирастает больше вещества, меньше разлетается: +6% массы с каждого слипания за уровень.",
+			"cost": 2000,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				1.5,
+				10
+			],
+			"requires": [
+				"boulder_root"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"accretion": 0.06
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "b_grip",
+			"title": "Хватка валуна",
+			"desc": "Присоединяешь валуны покрупнее: предел +2% своего радиуса за уровень.",
+			"cost": 3000,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				0,
+				11
+			],
+			"requires": [
+				"b_sweep"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"grip": 0.02
+			},
+			"icon": "grip",
+			"requires_level": 2
+		},
+		{
+			"id": "b_rubble",
+			"title": "Щебёночная шуба",
+			"desc": "Рыхлый слой щебня гасит удары: откалывается на 8% меньше за уровень.",
+			"cost": 2500,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				1.5,
+				11
+			],
+			"requires": [
+				"b_transfer"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"chip": -0.08
+			},
+			"icon": "armor",
+			"requires_level": 2
 		}
 	]
 }

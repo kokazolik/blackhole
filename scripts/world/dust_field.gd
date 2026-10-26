@@ -148,7 +148,7 @@ func _process(delta: float) -> void:
 	# Вспышка на звезде: пыль освещена ярче.
 	_mm_node.material.set_shader_parameter("star_light", STAR_LIGHT * (1.0 + 0.9 * Star.flare))
 
-	var want := lerpf(1.0, PEBBLE_DUST_SCALE, player.pebble_k)
+	var want := lerpf(1.0, PEBBLE_DUST_SCALE, player.pebble_k) * lerpf(1.0, 0.5, player.boulder_k)
 	if absf(want - _size_scale) > 0.001:
 		_size_scale = want
 		for d in dust:

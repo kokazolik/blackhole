@@ -296,5 +296,33 @@ static func gas_drift(pos: Vector2, r: float) -> Vector2:
 	return (out * radial + along * DRIFT_TANGENTIAL * (1.0 - calm)) * base
 
 
-static func pebble_mass(r: float) -> float:
-	return pow(r / BASE_RADIUS, 3.0) * PEBBLE_DENSITY
+## Масса чужого тела радиуса r. Плотность у всех одна, поэтому масса — как куб
+## отношения радиусов к телу игрока (с его массой и радиусом по body_radius).
+static func pebble_mass(r: float, player_mass: float) -> float:
+	return player_mass * pow(r / body_radius(player_mass), 3.0) * PEBBLE_DENSITY
+
+
+# --- Этап «Валун» ---
+# Метровый барьер: тела около метра сильнее всего тормозятся газом и быстрее всех
+# падают на звезду. Сразу после превращения снос почти вдвое сильнее, чем у
+# крупной гальки, а с ростом слабеет: километровое тело газ почти не замечает.
+const BOULDER_STAGE := 2
+const BOULDER_MASS := 3000.0
+const BARRIER_PEAK := 1.8            # снос в начале этапа, в долях «гальки того же размера»
+const BARRIER_FADE := 0.5            # как быстро снос слабеет с массой
+# Радиус тела растёт медленнее куба массы: иначе к километру диск не влез бы в
+# экран. Настоящий размер всё равно пишется в HUD.
+const BOULDER_RADIUS_EXP := 1.0 / 9.0
+
+
+static func body_radius(m: float) -> float:
+	if m <= BOULDER_MASS:
+		return BASE_RADIUS * pow(maxf(m, 0.0), 1.0 / 3.0)
+	return BASE_RADIUS * pow(BOULDER_MASS, 1.0 / 3.0) * pow(m / BOULDER_MASS, BOULDER_RADIUS_EXP)
+
+
+## Во сколько раз снос сильнее, чем у гальки того же радиуса (1 до валуна).
+static func barrier_drift(m: float) -> float:
+	if m <= BOULDER_MASS:
+		return 1.0
+	return BARRIER_PEAK * pow(m / BOULDER_MASS, -BARRIER_FADE)

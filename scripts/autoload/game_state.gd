@@ -23,6 +23,7 @@ var stage := 0  # высшая достигнутая стадия: потеря
 var prologue_seen := false
 var tutorial_done := false
 var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
+var boulder_intro_done := false
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 
 
@@ -62,6 +63,10 @@ func absorb_mass(base_mass: float, base_value: float, material: String, at: Vect
 
 func is_pebble() -> bool:
 	return stage >= GameData.PEBBLE_STAGE
+
+
+func is_boulder() -> bool:
+	return stage >= GameData.BOULDER_STAGE
 
 
 func _check_stage() -> void:
@@ -145,6 +150,7 @@ func save_game() -> void:
 		"tutorial_done": tutorial_done,
 		"stage": stage,
 		"pebble_intro_done": pebble_intro_done,
+		"boulder_intro_done": boulder_intro_done,
 		"tips_seen": tips_seen,
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -166,6 +172,7 @@ func load_game() -> void:
 	currency = float(data.get("currency", 0.0))
 	stage = int(data.get("stage", 0))
 	pebble_intro_done = bool(data.get("pebble_intro_done", false))
+	boulder_intro_done = bool(data.get("boulder_intro_done", false))
 	tips_seen = Array(data.get("tips_seen", []))
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	stage = maxi(stage, GameData.stage_index(mass))

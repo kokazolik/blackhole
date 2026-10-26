@@ -110,6 +110,57 @@ const PEBBLE_STEPS := [
 		"button": "В путь",
 	},
 ]
+# Рассказ при превращении в валун.
+const BOULDER_STEPS := [
+	{
+		"id": "b_intro",
+		"text": "Ты стал валуном, камнем ростом с человека. Я снова остановил время: здесь всё устроено иначе.",
+		"tap": true,
+		"pause": true,
+		"focus": "player",
+	},
+	{
+		"id": "b_food",
+		"text": "Гальки, с которыми ты недавно осторожно слипался, теперь мелочь. Они прилипают на любой скорости и приносят много звёздной пыли. Сметай их.",
+		"tap": true,
+		"pause": true,
+		"focus": "food",
+	},
+	{
+		"id": "b_drift",
+		"text": "Но берегись: ты попал в метровый барьер. Тела твоего размера газ тормозит сильнее всего, и сносит тебя к звезде почти вдвое быстрее, чем гальку. Чем крупнее станешь, тем слабее снос.",
+		"tap": true,
+		"pause": true,
+		"focus": "drift",
+	},
+	{
+		"id": "b_small",
+		"text": "По-настоящему расти помогают малые валуны. С ними всё как раньше: подлетай медленно, пока дуга зелёная.",
+		"tap": true,
+		"pause": true,
+		"focus": "small",
+	},
+	{
+		"id": "b_big",
+		"text": "А этот валун тебе пока не по силам: пунктир значит, что не удержишь. Удар о такой отколет от тебя куски, обходи его.",
+		"tap": true,
+		"pause": true,
+		"focus": "big",
+	},
+	{
+		"id": "b_rings",
+		"text": "В кольцах-ловушках ветра почти нет. Если снос станет слишком сильным, укройся там.",
+		"tap": true,
+		"pause": true,
+		"focus": "ring",
+	},
+	{
+		"id": "b_book",
+		"text": "В книге знаний проросла ветвь «Валун». Первое знание поможет держаться против ветра. Твой путь к планетезимали начинается.",
+		"tap": true,
+		"button": "В путь",
+	},
+]
 # Подсказки по ходу игры: Звездочёт показывает явление, когда оно впервые рядом.
 const TIPS := {
 	"eddy": {
@@ -152,6 +203,7 @@ const TIPS := {
 var main: Node  # сцена игры: игрок, интерфейс, древо
 var steps: Array = STEPS
 var pebble := false  # рассказ о гальке, а не первое обучение
+var boulder := false  # рассказ о валуне
 var tip := ""  # подсказка по ходу игры: какое явление показываем
 var tip_pos := Vector2.INF  # где оно в мире (рой, жеода)
 var start_delay := 2.2
@@ -363,6 +415,8 @@ func _finish() -> void:
 	if tip != "":
 		if not tip in GameState.tips_seen:
 			GameState.tips_seen.append(tip)
+	elif boulder:
+		GameState.boulder_intro_done = true
 	elif pebble:
 		GameState.pebble_intro_done = true
 	else:
@@ -460,8 +514,10 @@ func _process(delta: float) -> void:
 					_target = sp + (size * 0.5 - sp).normalized() * maxf(rr - 30.0, 0.0)
 				else:
 					_target = sp.clamp(Vector2(60, 60), size - Vector2(60, 60))
-		"p_book":
+		"p_book", "b_book":
 			_target = _center_of(hud._tree_button)
+		"b_drift":
+			_target = _center_of(hud._wind_label)
 		"t_ice":
 			_target = _center_of(hud._heat_label) if hud._heat_label.visible else Vector2.INF
 
@@ -560,6 +616,12 @@ func _prepare_focus(step: Dictionary) -> bool:
 			_focus = {"pos": pl.position + dir * reach * 0.45, "r": reach * 0.85}
 			_marks = [{"pos": pl.position, "r": pl.radius * 1.5, "color": GOLD},
 				{"from": pl.position + dir * pl.radius * 1.9, "to": pl.position + dir * reach, "label": "снос к звезде", "color": Color(0.6, 0.85, 1.0)}]
+		"food":
+			var f := _nearest_pebble(true, true)
+			if f == null:
+				return false
+			_focus = {"pebble": f, "r": pl.radius * 2.0}
+			_marks = [{"pebble": f, "label": "еда", "color": Color(0.55, 1.0, 0.6)}]
 		"small", "big":
 			var p := _nearest_pebble(kind == "small")
 			if p == null:
@@ -572,7 +634,7 @@ func _prepare_focus(step: Dictionary) -> bool:
 			if kind == "small":
 				_marks = [{"pebble": p, "label": "можно присоединить", "color": Color(0.55, 1.0, 0.6)}]
 			else:
-				_marks = [{"pebble": p, "label": "крупнее тебя", "color": Color(0.85, 0.9, 1.0), "dashed": true}]
+				_marks = [{"pebble": p, "label": "не удержать", "color": Color(0.85, 0.9, 1.0), "dashed": true}]
 		"ring":
 			var d := pl.position.length()
 			var best := INF
@@ -610,14 +672,16 @@ func _prepare_focus(step: Dictionary) -> bool:
 
 
 ## Ближайшая галька, которую можно (или нельзя) присоединить, в том числе за краем экрана.
-func _nearest_pebble(small: bool) -> PebbleField.Pebble:
+func _nearest_pebble(small: bool, food := false) -> PebbleField.Pebble:
 	var pf: PebbleField = main.pebble_field
 	var pp: Vector2 = main.player.position
 	var lim: float = main.dust_field.view_radius() * 1.4
 	var best: PebbleField.Pebble = null
 	var bd := INF
 	for p in pf.pebbles:
-		if pf.absorbable(p) != small or (small and p.r < main.player.radius * minf(Skills.stat("grip"), 0.95) * 0.6):
+		if p.food != food:
+			continue
+		if not food and (pf.absorbable(p) != small or (small and p.r < main.player.radius * minf(Skills.stat("grip"), 0.95) * 0.6)):
 			continue  # крошечную показывать не стоит: её легко спутать с пылью
 		var d := pf.world_pos(p).distance_to(pp)
 		if d < bd and d < lim:

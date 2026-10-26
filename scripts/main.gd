@@ -4,6 +4,7 @@ extends Node2D
 const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экране в начале, px
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
+const BOULDER_ZOOM := 0.7             # валун: камера дальше — гальки вокруг стали мелочью
 const PEBBLE_ZOOM := 1.65             # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
 
 var player: Player
@@ -125,13 +126,15 @@ func _ready() -> void:
 		ui.add_child(tutorial)
 		guide = tutorial
 		ui.move_child(pause_menu, -1)
+	elif GameState.is_boulder() and not GameState.boulder_intro_done:
+		_start_pebble_intro(2.5, true)
 	elif GameState.is_pebble() and not GameState.pebble_intro_done:
 		_start_pebble_intro(2.5)
 
 
 ## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
 func _on_stage_reached(index: int) -> void:
-	if index != GameData.PEBBLE_STAGE:
+	if index != GameData.PEBBLE_STAGE and index != GameData.BOULDER_STAGE:
 		return
 	var flash := ColorRect.new()
 	flash.color = Color(1.0, 0.92, 0.75, 0.0)
@@ -147,19 +150,25 @@ func _on_stage_reached(index: int) -> void:
 	# видно, насколько ты вырос.
 	camera.zoom *= 0.55
 	_zoom_ease = 0.0
+	if index == GameData.BOULDER_STAGE:
+		_show_caption("Валун", "камень ростом с человека")
+		if not GameState.boulder_intro_done:
+			_start_pebble_intro(4.5, true)
+		return
 	_show_caption("Галька", "камешек размером с горошину")
 	if not GameState.pebble_intro_done:
 		_start_pebble_intro(4.5)
 
 
-func _start_pebble_intro(delay: float) -> void:
+func _start_pebble_intro(delay: float, boulder := false) -> void:
 	for c in $UI.get_children():
 		if c is Tutorial:
 			return
 	var tutorial := Tutorial.new()
 	tutorial.main = self
-	tutorial.steps = Tutorial.PEBBLE_STEPS
-	tutorial.pebble = true
+	tutorial.steps = Tutorial.BOULDER_STEPS if boulder else Tutorial.PEBBLE_STEPS
+	tutorial.pebble = not boulder
+	tutorial.boulder = boulder
 	tutorial.start_delay = delay
 	$UI.add_child(tutorial)
 	guide = tutorial
@@ -263,7 +272,7 @@ func _set_world_visible(on: bool) -> void:
 func _target_zoom() -> float:
 	var start_zoom := SCREEN_RADIUS_AT_START / GameData.BASE_RADIUS
 	var z := start_zoom * pow(GameData.BASE_RADIUS / player.radius, ZOOM_GROWTH_EXP)
-	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k)
+	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k) * lerpf(1.0, BOULDER_ZOOM, player.boulder_k)
 
 
 func _process(delta: float) -> void:
@@ -285,6 +294,8 @@ func _process(delta: float) -> void:
 
 ## Звездочёт показывает явление, когда оно впервые встретилось, по одному за раз.
 func _check_tips() -> void:
+	if GameState.is_boulder() and not GameState.boulder_intro_done:
+		return
 	if is_instance_valid(guide) or not GameState.pebble_intro_done or player.pebble_k < 0.95 \
 			or player.dead or tree_screen.visible or pause_menu.visible:
 		return

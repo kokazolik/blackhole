@@ -78,6 +78,8 @@ func _show_dev() -> void:
 	_button("Галька: начало", false, func(): _jump(31.0, 1))
 	_button("Галька: середина (~100)", false, func(): _jump(100.0, 1))
 	_button("Галька перед валуном", false, func(): _jump(2900.0, 1))
+	_button("Валун: начало", false, func(): _jump(3001.0, 2))
+	_button("Валун: середина (~100 000)", false, func(): _jump(100000.0, 2))
 	_button("+10 000 звёздной пыли", false, func():
 		GameState.add_currency(10000.0)
 		close())
@@ -106,6 +108,7 @@ func _jump(mass: float, stage: int) -> void:
 	GameState.tutorial_done = true
 	# «Галька: начало» — с рассказом Звездочёта, как у нового игрока.
 	GameState.pebble_intro_done = stage >= 1 and mass > 35.0
+	GameState.boulder_intro_done = stage >= 2 and mass > 3100.0
 	GameState.tips_seen = []
 	GameState.save_game()
 	Fader.go(Fader.GAME)
