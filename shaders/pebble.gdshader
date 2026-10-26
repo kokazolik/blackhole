@@ -42,6 +42,35 @@ float vnoise(vec2 p) {
 	return mix(mix(a, b, u.x), mix(d, g, u.x), u.y);
 }
 
+float h2(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// Ячейки Вороного: x — разница расстояний до двух ближайших точек (у границы 0),
+// yz — номер ячейки.
+vec3 shard_vor(vec2 x) {
+	vec2 xi = floor(x);
+	vec2 xf = fract(x);
+	float f1 = 8.0;
+	float f2 = 8.0;
+	vec2 id = xi;
+	for (int y = -1; y <= 1; y++) {
+		for (int xx = -1; xx <= 1; xx++) {
+			vec2 g = vec2(float(xx), float(y));
+			vec2 o = vec2(h2(xi + g + 3.3), h2(xi + g + 9.1));
+			float d = length(g + o - xf);
+			if (d < f1) {
+				f2 = f1;
+				f1 = d;
+				id = xi + g;
+			} else if (d < f2) {
+				f2 = d;
+			}
+		}
+	}
+	return vec3(f2 - f1, id);
+}
+
 // Контур обломка: выпуклый многоугольник из плоскостей излома, вытянутый
 // (оси примерно 1 : 0,7), с рваным краем. У части обломков одна сторона —
 // дуга прежней округлой поверхности (crust = 1 на ней).
@@ -81,7 +110,7 @@ float shard_h(vec2 q, float s, out float crust) {
 	float d = -sd;
 	// Крыша: несколько плоскостей излома под разными наклонами, сходятся рёбрами.
 	float top = 10.0;
-	for (int j = 0; j < 3; j++) {
+	for (int j = 0; j < 4; j++) {
 		float fj = float(j);
 		float a = 6.2832 * rnd(s * 29.0 + fj * 3.3);
 		float g = 0.25 + 0.4 * rnd(s * 41.0 + fj * 5.1);
@@ -145,6 +174,18 @@ void fragment() {
 		// Свежий излом чуть светлее и серее, старая корка темнее (выветривание).
 		vec3 fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.3) * 1.12;
 		alb = mix(fresh, alb * 0.72, on_crust);
+		// Та же порода, что у валуна: угловатые вкрапления другого тона,
+		// трещины и поры. На мелком обломке детали гаснут, чтобы не рябить.
+		float fine = clamp(1.4 - fwidth(q.x) * 12.0, 0.0, 1.0);
+		vec3 cv = shard_vor(q * 3.2 + sd0 * 37.0);
+		float is_clast = step(h2(cv.yz + 2.2), 0.3);
+		float tone = h2(cv.yz + 5.5);
+		alb *= mix(1.0, mix(0.7, 1.25, tone), is_clast * smoothstep(0.02, 0.07, cv.x) * fine);
+		alb *= 1.0 - 0.3 * is_clast * (1.0 - smoothstep(0.0, 0.04, cv.x)) * fine;
+		vec2 kq = q * 1.7 + sd0 * 23.0 + (vec2(vnoise(q * 2.5), vnoise(q * 2.5 + 5.2)) - 0.5) * 0.7;
+		float crack = (1.0 - smoothstep(0.0, 0.05, shard_vor(kq).x)) * smoothstep(0.35, 0.6, vnoise(q * 3.0 + sd0 * 9.0));
+		alb *= 1.0 - 0.65 * crack * fine;
+		alb *= 1.0 - 0.4 * smoothstep(0.8, 0.88, vnoise(q * 14.0 + sd0 * 61.0)) * fine;
 		vec3 scol = alb * star_light * (0.22 + 1.6 * diff);
 		// Мелкие кристаллики на свежем сломе искрят под прямым светом.
 		float gl = step(0.93, vnoise(q * 26.0 + sd0 * 50.0)) * (1.0 - on_crust);
