@@ -61,12 +61,14 @@ func _ready() -> void:
 	add_child(dust_field)
 	pebble_field = PebbleField.new()
 	pebble_field.player = player
+	player.pebble_field = pebble_field
 	pebble_field.dust_field = dust_field
 	pebble_field.camera = camera
 	add_child(pebble_field)
 	var wind := WindFx.new()
 	wind.player = player
 	wind.dust_field = dust_field
+	wind.pebble_field = pebble_field
 	wind.camera = camera
 	add_child(wind)
 	add_child(player)
@@ -297,7 +299,7 @@ func _process(delta: float) -> void:
 	hud.set_temperature(player.temperature)
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
-	hud.set_wind(player.drift_velocity, player.position, player.pebble_k)
+	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
 	_check_tips()
 
 
@@ -316,6 +318,7 @@ func _check_tips() -> void:
 		"chunks": _intro_time - _chunk_time > 0.7 and _intro_time - _chunk_time < 5.0 \
 				and pebble_field.chunk_center() != Vector2.INF,  # дать кускам разлететься
 		"ice": player.ice_vapor > 0.0 and hud._ice_label.visible,
+		"shadow": GameState.is_boulder() and pebble_field.shadow_spot() != Vector2.INF,
 	}
 	for kind in found:
 		if found[kind] and not kind in GameState.tips_seen:
@@ -323,7 +326,8 @@ func _check_tips() -> void:
 			tip.main = self
 			tip.steps = [Tutorial.TIPS[kind]]
 			tip.tip = kind
-			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center()}.get(kind, Vector2.INF)
+			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
+					"shadow": pebble_field.shadow_spot()}.get(kind, Vector2.INF)
 			tip.start_delay = 0.1
 			$UI.add_child(tip)
 			$UI.move_child(pause_menu, -1)

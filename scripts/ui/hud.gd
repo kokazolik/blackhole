@@ -273,7 +273,7 @@ func set_zone(zone: Dictionary) -> void:
 
 
 ## Встречный ветер у гальки: сила сноса к звезде или затишье в ловушке давления.
-func set_wind(drift: Vector2, pos: Vector2, pebble_k: float) -> void:
+func set_wind(drift: Vector2, pos: Vector2, pebble_k: float, shadow := 0.0) -> void:
 	_map_dist = pos.length()
 	_map_rings = pebble_k
 	# Перерисовываем карту, только когда метка сдвинулась хотя бы на полпикселя.
@@ -287,6 +287,8 @@ func set_wind(drift: Vector2, pos: Vector2, pebble_k: float) -> void:
 	var radial := -drift.dot(pos.normalized())  # > 0 — сносит к звезде
 	if GameData.trap_strength(pos.length()) > 0.6:
 		_set_wind_text("Ловушка давления: затишье", Color(0.7, 1.0, 0.75))
+	elif shadow > 0.4:
+		_set_wind_text("Ветровая тень: снос слабее на %d%%" % roundi(PebbleField.SHADOW_CALM * shadow * 100.0), Color(0.7, 1.0, 0.75))
 	elif radial > 0.0:
 		_set_wind_text("Встречный ветер: снос к звезде %d м/с" % roundi(radial), Color(0.75, 0.88, 1.0))
 	else:

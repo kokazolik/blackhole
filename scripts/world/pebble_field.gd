@@ -26,6 +26,10 @@ const SHADER := preload("res://shaders/pebble.gdshader")
 const EDDY_SHADER := preload("res://shaders/eddy.gdshader")
 const EDDY_EXTENT := 1.3  # половина стороны квадрата вихря в его радиусах (как EXTENT в шейдере)
 const MAX_PEBBLES := 140
+# Ветровая тень на валуне: за крупным телом (по ветру) газ почти стоит.
+const SHADOW_LEN := 7.0     # длина тени в радиусах тела
+const SHADOW_WIDTH := 1.25  # полуширина у самого тела, в радиусах
+const SHADOW_CALM := 0.85   # насколько тень гасит снос в середине
 const BASE_COUNT := 5               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
 # Радиусы чужих галек в долях радиуса игрока. Мелких обломков больше, чем крупных
@@ -164,6 +168,7 @@ func _process(delta: float) -> void:
 	var pull := Skills.stat("pebble_pull")
 	var pull_r := player.pull_radius()  # не дальше края экрана, см. Player.pull_radius
 	var evap := GameData.sublimation_distance()
+	_update_casters()
 	var i := pebbles.size() - 1
 	while i >= 0:
 		var p := pebbles[i]
@@ -180,7 +185,7 @@ func _process(delta: float) -> void:
 				# разгоняем быстрее половины твоей скорости.
 				p.vel += to_p / dl * player.radius * 4.0 * pull * (1.0 - dl / pull_r) * delta
 				p.vel = p.vel.limit_length(player.max_speed() * 0.5)
-		p.pos += (p.vel + GameData.gas_drift(wp, p.r)) * delta
+		p.pos += (p.vel + calm_drift(wp, GameData.gas_drift(wp, p.r), p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
 		if wp.length() < evap:
@@ -193,9 +198,71 @@ func _process(delta: float) -> void:
 	_hint.queue_redraw()
 
 
+## Крупные тела рядом, за которыми есть ветровая тень. Только на валуне: у гальки
+## тела слишком мелкие, чтобы заслонить газ.
+func _update_casters() -> void:
+	_casters.clear()
+	if not GameState.is_boulder() or player.boulder_k < 1.0:
+		return
+	var reach := dust_field.view_radius() * 1.5
+	for p in pebbles:
+		if p.food or p.chunk_mass > 0.0 or absorbable(p) or p.r < player.radius * 0.7:
+			continue
+		var wp := world_pos(p)
+		if wp.distance_to(player.position) > reach:
+			continue
+		var d := GameData.gas_drift(wp, p.r)
+		if d.length_squared() < 0.0001:
+			continue  # в кольце-ловушке ветра нет — и тени нет
+		_casters.append([wp, d.normalized(), p.r, p])
+
+
+## Середина ветровой тени ближайшего крупного тела на экране (для подсказки).
+func shadow_spot() -> Vector2:
+	var best := Vector2.INF
+	var bd := dust_field.view_radius() * 0.6
+	for c in _casters:
+		var mid: Vector2 = c[0] + c[1] * c[2] * SHADOW_LEN * Skills.stat("shadow") * 0.35
+		var d := mid.distance_to(player.position)
+		if d < bd:
+			bd = d
+			best = mid
+	return best
+
+
+## Насколько точка в ветровой тени: 0 — на ветру, 1 — полное затишье.
+func shadow_at(pos: Vector2, skip: Pebble = null) -> float:
+	var best := 0.0
+	var wide := Skills.stat("shadow")
+	for c in _casters:
+		if c[3] == skip:
+			continue
+		var v: Vector2 = pos - c[0]
+		var r: float = c[2]
+		var along := v.dot(c[1])
+		var length := r * SHADOW_LEN * wide
+		if along < r * 0.5 or along > length:
+			continue
+		var across := absf(v.cross(c[1]))
+		var t := along / length
+		# Тень сужается к концу и гаснет: у самого тела шире и тише.
+		var half := r * SHADOW_WIDTH * wide * (1.0 - 0.45 * t)
+		var k := (1.0 - smoothstep(half * 0.55, half, across)) * (1.0 - t * t)
+		best = maxf(best, k)
+	return best
+
+
+## Снос, ослабленный ветровой тенью.
+func calm_drift(pos: Vector2, drift: Vector2, skip: Pebble = null) -> Vector2:
+	if _casters.is_empty():
+		return drift
+	return drift * (1.0 - SHADOW_CALM * shadow_at(pos, skip))
+
+
 ## При превращении в валун мир вокруг мельчает (GameData.world_k): гальки
 ## уменьшаются и стягиваются к игроку вместе с камерой, сцена не дёргается.
 var _world_k := -1.0
+var _casters: Array = []  # [мир. позиция, направление ветра, радиус] — кто отбрасывает тень
 
 
 func _follow_world_scale() -> void:
@@ -806,6 +873,36 @@ func _write() -> void:
 	_mm.visible_instance_count = pebbles.size()
 
 
+## Ветровая тень — едва заметная прохладная полоса за крупным телом.
+func _draw_shadows() -> void:
+	var wide := Skills.stat("shadow")
+	for c in _casters:
+		var wp: Vector2 = c[0]
+		var dir: Vector2 = c[1]
+		var r: float = c[2]
+		var side := dir.orthogonal()
+		var length := r * SHADOW_LEN * wide
+		# Две половины: к середине светлее, к краям сходит на нет — мягкая полоса.
+		for sgn in [1.0, -1.0]:
+			var edge := PackedVector2Array()
+			var core := PackedVector2Array()
+			var ce := PackedColorArray()
+			var cc := PackedColorArray()
+			for k in 8:
+				var t := lerpf(0.07, 1.0, k / 7.0)
+				var half := r * SHADOW_WIDTH * wide * (1.0 - 0.45 * t) * 0.85
+				var mid := wp + dir * length * t
+				edge.append(mid + side * half * sgn)
+				core.append(mid)
+				ce.append(Color(0.6, 0.85, 1.0, 0.0))
+				cc.append(Color(0.6, 0.85, 1.0, 0.09 * (1.0 - t * t)))
+			core.reverse()
+			cc.reverse()
+			edge.append_array(core)
+			ce.append_array(cc)
+			_hint.draw_polygon(edge, ce)
+
+
 ## Дуга со стороны игрока подсказывает, чем кончится удар на текущей скорости:
 ## зелёная — слипнетесь, красная — полетят осколки. Слишком крупные гальки
 ## обведены пунктиром: их не присоединить, только оттолкнуть.
@@ -813,6 +910,7 @@ func _draw_hints() -> void:
 	if player.dead:
 		return
 	var px := 1.0 / camera.zoom.x
+	_draw_shadows()
 	var stick := player.stick_speed()
 	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон
 	# не тянул, когда вокруг рой крупных галек.

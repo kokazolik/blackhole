@@ -30,6 +30,8 @@ var frame_velocity := Vector2.ZERO  # орбитальное движение в
 var drift_velocity := Vector2.ZERO  # снос встречным ветром газа (только у гальки)
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var boulder_k := 0.0                # 0 — галька, 1 — валун
+var shadow := 0.0                   # 0..1: насколько ты в ветровой тени крупного тела
+var pebble_field: PebbleField       # для ветровой тени; ставит main
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
 var radius := GameData.BASE_RADIUS
 var body_color := Color.WHITE
@@ -159,6 +161,9 @@ func _process(delta: float) -> void:
 	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.
 	var barrier := lerpf(1.0, GameData.barrier_drift(GameState.mass), boulder_k)
 	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * pebble_k * barrier
+	if pebble_field:
+		shadow = pebble_field.shadow_at(position)
+		drift_velocity *= 1.0 - PebbleField.SHADOW_CALM * shadow
 	position += (velocity + drift_velocity + frame_velocity) * delta
 	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
 

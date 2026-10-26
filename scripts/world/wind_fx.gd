@@ -8,6 +8,7 @@ const COUNT := 34
 
 var player: Player
 var dust_field: DustField
+var pebble_field: PebbleField
 var camera: Camera2D
 var _streaks: Array = []
 var _rng := RandomNumberGenerator.new()
@@ -49,12 +50,15 @@ func _draw() -> void:
 	if speed < 0.5:
 		return
 	var dir := -drift / speed
-	var strength := clampf(speed / GameData.DRIFT_SPEED, 0.0, 2.0) * player.pebble_k
+	var strength := clampf(speed / (GameData.DRIFT_SPEED * GameData.speed_k()), 0.0, 2.0) * player.pebble_k
 	var px := 1.0 / camera.zoom.x
 	for s in _streaks:
 		var k: float = s.t / s.life
 		var a := sin(k * PI) * 0.16 * strength
 		var p: Vector2 = s.pos + dust_field.frame_offset
+		# В ветровой тени крупного тела струй нет: видна спокойная полоса.
+		if pebble_field:
+			a *= 1.0 - pebble_field.shadow_at(p)
 		var l: float = speed * 2.2 * s.len
 		var tail := p - dir * l
 		draw_line(tail, p, Color(0.85, 0.9, 1.0, a * 0.4), 1.2 * px, true)

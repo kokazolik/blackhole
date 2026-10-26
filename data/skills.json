@@ -1103,6 +1103,27 @@
 			},
 			"icon": "armor",
 			"requires_level": 2
+		},
+		{
+			"id": "b_shadow",
+			"title": "Ветровая тень",
+			"desc": "Ты лучше чувствуешь, где газ стоит: ветровая тень за крупными валунами для тебя на 15% длиннее и шире за уровень.",
+			"cost": 7500,
+			"cost_growth": 1.55,
+			"max_level": 5,
+			"pos": [
+				-1.5,
+				11
+			],
+			"requires": [
+				"b_streamline"
+			],
+			"requires_stage": 2,
+			"effects": {
+				"shadow": 0.15
+			},
+			"icon": "drift_1",
+			"requires_level": 2
 		}
 	]
 }
