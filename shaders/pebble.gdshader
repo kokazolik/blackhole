@@ -27,6 +27,74 @@ void vertex() {
 	v_frost = exp(-ds * ds);
 }
 
+float rnd(float x) {
+	return fract(sin(x * 78.233) * 43758.5453);
+}
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453);
+	float b = fract(sin(dot(i + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+	float d = fract(sin(dot(i + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+	float g = fract(sin(dot(i + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+	return mix(mix(a, b, u.x), mix(d, g, u.x), u.y);
+}
+
+// Контур обломка: выпуклый многоугольник из плоскостей излома, вытянутый
+// (оси примерно 1 : 0,7), с рваным краем. У части обломков одна сторона —
+// дуга прежней округлой поверхности (crust = 1 на ней).
+float shard_sd(vec2 q, float s, out float crust) {
+	q *= vec2(0.8 + 0.15 * rnd(s * 7.31), 1.1 + 0.35 * rnd(s * 3.17));
+	float nv = 4.0 + floor(rnd(s * 5.71) * 4.0);
+	bool has_crust = rnd(s * 11.3) < 0.6;
+	float sd = -10.0;
+	crust = 0.0;
+	for (int i = 0; i < 7; i++) {
+		float k = float(i);
+		if (k >= nv) {
+			break;
+		}
+		float hh = rnd(k + s * 17.0);
+		float ang = k * 6.2832 / nv + (hh - 0.5) * 0.8;
+		vec2 n = vec2(cos(ang), sin(ang));
+		float dist = 0.6 + 0.3 * rnd(hh * 9.7 + 1.0);
+		float v = dot(q, n) - dist;
+		if (i == 0 && has_crust) {
+			float rc = 1.3;
+			v = length(q + n * (rc - dist)) - rc;
+		}
+		if (v > sd) {
+			sd = v;
+			crust = (i == 0 && has_crust) ? 1.0 : 0.0;
+		}
+	}
+	// Выщерблины по краю: крупные и мелкие.
+	sd += (vnoise(q * 6.0 + s * 31.0) - 0.5) * 0.09 + (vnoise(q * 15.0 + s * 13.0) - 0.5) * 0.035;
+	return sd;
+}
+
+// Высота поверхности обломка.
+float shard_h(vec2 q, float s, out float crust) {
+	float sd = shard_sd(q, s, crust);
+	float d = -sd;
+	// Крыша: несколько плоскостей излома под разными наклонами, сходятся рёбрами.
+	float top = 10.0;
+	for (int j = 0; j < 3; j++) {
+		float fj = float(j);
+		float a = 6.2832 * rnd(s * 29.0 + fj * 3.3);
+		float g = 0.25 + 0.4 * rnd(s * 41.0 + fj * 5.1);
+		top = min(top, 0.5 + 0.12 * rnd(s * 53.0 + fj) - dot(q, vec2(cos(a), sin(a)) * g));
+	}
+	// Боковые сколы крутые, старая поверхность скатывается полого и округло.
+	float side = crust > 0.5 ? sqrt(max(d, 0.0) * 0.5) : d * 1.8;
+	float h = min(top, side);
+	// Зернистость породы.
+	h += (vnoise(q * 9.0 + s * 7.0) - 0.5) * 0.035 + (vnoise(q * 24.0 + s * 3.0) - 0.5) * 0.014;
+	return h;
+}
+
 void fragment() {
 	vec2 p = UV - 0.5;
 	float a = v_data.y + v_data.z * TIME;
@@ -49,65 +117,40 @@ void fragment() {
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 	vec4 outc = vec4(col, tex.a);
 	if (v_data.w > 1.5) {
-		// Обломок после удара. Как в лабораторных опытах по разрушению и как валуны
-		// на Итокаве и Рюгу: угловатый, вытянутый (оси примерно 1 : 0,7 : 0,5),
-		// с плоскими гранями излома и острыми рёбрами. Рисуем выпуклый многогранник
-		// сверху: верх из двух граней по гребню, по краям скошенные боковые грани,
-		// у части обломков одна сторона — кусок прежней округлой поверхности.
+		// Обломок после удара. Как в опытах по разрушению и как валуны на Итокаве
+		// и Рюгу: угловатый, вытянутый, с плоскими гранями излома, рваным краем
+		// и той же зернистой породой, что у тела, от которого он откололся.
+		// Рисуем рельеф высотой: крыша из нескольких плоскостей излома, крутые
+		// боковые сколы, мелкая зернистость; нормаль берём из рельефа.
 		float sd0 = fract(v_data.w);
-		// Квадрат обломка в SHARD_QUAD раз больше, поэтому q доходит до ~1,6.
 		vec2 q = (sp - 0.5) / 0.36;
-		q *= vec2(0.78 + 0.12 * fract(sd0 * 7.31), 1.15 + 0.2 * fract(sd0 * 3.17));
-		float nv = 5.0 + floor(fract(sd0 * 5.71) * 3.0);
-		bool crust = fract(sd0 * 11.3) < 0.65;
-		float sd = -10.0;
-		vec2 nf = vec2(1.0, 0.0);
-		float fi = 0.0;
-		for (int i = 0; i < 7; i++) {
-			float k = float(i);
-			if (k >= nv) {
-				break;
-			}
-			float hh = fract(sin((k + sd0 * 17.0) * 78.233) * 43758.5453);
-			float ang = k * 6.2832 / nv + (hh - 0.5) * 0.9;
-			vec2 n = vec2(cos(ang), sin(ang));
-			float dist = 0.62 + 0.3 * fract(hh * 9.7);
-			float v = dot(q, n) - dist;
-			if (i == 0 && crust) {
-				// Прежняя поверхность: дуга большого круга вместо плоского излома.
-				float rc = 1.3;
-				v = length(q + n * (rc - dist)) - rc;
-			}
-			if (v > sd) {
-				sd = v;
-				nf = n;
-				fi = k;
-			}
-		}
-		float aa = fwidth(q.y) * 1.3;
+		float e = 0.025;
+		float on_crust = 0.0;
+		float hc = shard_h(q, sd0, on_crust);
+		float tmp;
+		float hx = shard_h(q + vec2(e, 0.0), sd0, tmp) - hc;
+		float hy = shard_h(q + vec2(0.0, e), sd0, tmp) - hc;
+		float sd = shard_sd(q, sd0, tmp);
+		float aa = fwidth(q.y) * 1.2;
 		float mask = 1.0 - smoothstep(-aa, aa, sd);
-		bool on_crust = crust && fi < 0.5;
-		// Скос: полоса у края — боковая грань, круто наклонённая наружу.
-		float bw = 0.2 + 0.1 * fract(sd0 * 23.1);
-		float side_k = smoothstep(-bw - aa, -bw + aa, sd);
-		// Верх ломается по гребню на две грани с разным наклоном.
-		vec2 ridge = vec2(cos(sd0 * 40.0), sin(sd0 * 40.0));
-		float rs = dot(q, vec2(-ridge.y, ridge.x)) - 0.15 * (fract(sd0 * 13.7) - 0.5);
-		float half_k = smoothstep(-aa, aa, rs);
-		vec2 tilt = vec2(-ridge.y, ridge.x) * 0.38;
-		vec3 n_top = normalize(vec3(mix(-tilt, tilt, half_k) + ridge * 0.12, 1.0));
-		vec3 n_side = on_crust ? normalize(vec3(nf * 1.1, 0.75)) : normalize(vec3(nf * 1.6, 0.55));
-		vec3 nrm = normalize(mix(n_top, n_side, side_k));
-		vec3 ld = normalize(vec3(light_dir, 0.35));
+		vec3 nl = normalize(vec3(-hx / e, -hy / e, 1.0));
+		// Нормаль считалась в повёрнутых координатах обломка: возвращаем на экран.
+		vec3 nrm = vec3(c * nl.x + s * nl.y, -s * nl.x + c * nl.y, nl.z);
+		vec3 ld = normalize(vec3(light_dir, 0.25));
 		float diff = max(dot(nrm, ld), 0.0);
-		// Вещество: узор гальки из атласа. Свежий излом светлее и зернистее,
-		// старая поверхность темнее (космическое выветривание).
-		vec3 alb = texture(atlas, (cell + vec2(0.5) + clamp(q * 0.22, vec2(-0.3), vec2(0.3))) * 0.25).rgb;
-		alb = on_crust && side_k > 0.5 ? alb * 0.7 : mix(alb, vec3(dot(alb, vec3(0.33))), 0.2) * 1.15;
-		vec3 scol = alb * star_light * (0.12 + 1.55 * diff);
-		// Острые рёбра ловят свет тонкой линией.
-		float edge_line = 1.0 - smoothstep(0.0, aa * 2.0, abs(sd + bw));
-		scol += star_light * 0.18 * edge_line * diff;
+		// Порода: тот же атлас и тот же масштаб зерна, что у гальки.
+		vec2 tq = q * 0.3;
+		tq *= min(1.0, 0.33 / max(length(tq), 0.001));
+		vec3 alb = texture(atlas, (cell + 0.5 + tq) * 0.25).rgb;
+		// Свежий излом чуть светлее и серее, старая корка темнее (выветривание).
+		vec3 fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.3) * 1.12;
+		alb = mix(fresh, alb * 0.72, on_crust);
+		vec3 scol = alb * star_light * (0.22 + 1.6 * diff);
+		// Мелкие кристаллики на свежем сломе искрят под прямым светом.
+		float gl = step(0.93, vnoise(q * 26.0 + sd0 * 50.0)) * (1.0 - on_crust);
+		scol += star_light * gl * pow(diff, 2.0) * 0.35;
+		// Лёгкое затенение у самого края: обломок не кажется вырезанным из бумаги.
+		scol *= 0.8 + 0.2 * clamp(-sd * 6.0, 0.0, 1.0);
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
 		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 		outc = vec4(scol, mask);

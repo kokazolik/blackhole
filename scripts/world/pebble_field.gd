@@ -807,6 +807,8 @@ func _draw_hints() -> void:
 		var w_mat := clampf(pr * 0.13, 0.6, 1.6)
 		var rr := p.r * 1.12 + (w_face * 0.5 + 1.0) * px
 		if not absorbable(p):
+			if p.shard:
+				continue  # круг вокруг угловатого обломка смотрится чужим: его видно и так
 			# Мелкий пунктир вплотную к гальке: заметно, но не спорит с самой галькой.
 			var dash_col := Color(0.8, 0.85, 1.0, 0.3 * fade)
 			for k in 24:
