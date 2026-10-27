@@ -15,6 +15,9 @@ func _ready() -> void:
 	_rect.color = Color(0.0, 0.0, 0.01, 0.0)
 	_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Прозрачный прямоугольник на весь экран всё равно заливается каждый кадр:
+	# между переходами прячем его.
+	_rect.visible = false
 	add_child(_rect)
 
 
@@ -24,6 +27,7 @@ func go(path: String, out_time := 0.6, in_time := 0.9) -> void:
 		return
 	_busy = true
 	_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	_rect.visible = true
 	var tw := create_tween()
 	tw.tween_property(_rect, "color:a", 1.0, out_time)
 	await tw.finished
@@ -35,4 +39,5 @@ func go(path: String, out_time := 0.6, in_time := 0.9) -> void:
 	tw.tween_property(_rect, "color:a", 0.0, in_time)
 	await tw.finished
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rect.visible = false
 	_busy = false

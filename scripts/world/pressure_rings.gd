@@ -18,7 +18,17 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	visible = player.pebble_k > 0.0
+	# Слой на весь экран: когда ни одно кольцо не попадает в кадр, не рисуем вовсе.
+	var near := false
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		var d := cam.get_screen_center_position().length()
+		var reach := get_viewport_rect().size.length() * 0.5 / cam.zoom.x + GameData.RING_WIDTH * 4.0
+		for rc in GameData.PRESSURE_RINGS:
+			if absf(d - rc) < reach:
+				near = true
+				break
+	visible = player.pebble_k > 0.0 and near
 	_mat.set_shader_parameter("strength", player.pebble_k)
 
 

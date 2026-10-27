@@ -109,6 +109,7 @@ const CHAIN_R := 4.0       # «Цепная аккреция»: соседи в 
 const PULSE_EVERY := 15.0  # «Волна плотности» на первом уровне; дальше чаще
 const PULSE_GROW := 0.6    # за столько волна доходит до края
 const PULSE_REACH := 0.85  # доля радиуса притяжения, докуда бьёт волна
+const DRIFT_EVERY := 0.2   # снос гальки пересчитываем несколько раз в секунду, а не каждый кадр
 const PULLED_SPEED := 1.4  # притянутое летит к тебе с такой долей твоей скорости
 # Хондры, вторая валюта: застывшие капли расплава внутри галек.
 const CHONDRULE_CHANCE := 0.06  # с настоящего слипания (мелочь не в счёт)
@@ -137,6 +138,8 @@ class Pebble:
 	var crash := false     # валун, летящий на столкновение (газ его не тормозит)
 	var clump := false     # из сгустка: стягивается к его центру
 	var pulled := false    # сорвано цепной аккрецией или импульсом: летит к тебе и прилипает
+	var drift := Vector2.ZERO  # снос встречным газом: меняется медленно, пересчитывается раз в DRIFT_EVERY
+	var drift_t := 0.0
 
 var player: Player
 var dust_field: DustField
@@ -261,6 +264,7 @@ func _process(delta: float) -> void:
 	var pull_r := player.pull_radius()  # не дальше края экрана, см. Player.pull_radius
 	var evap := GameData.sublimation_distance()
 	_update_casters()
+	_cache_moons()
 	var i := pebbles.size() - 1
 	while i >= 0:
 		var p := pebbles[i]
@@ -295,14 +299,19 @@ func _process(delta: float) -> void:
 				# разгоняем быстрее половины твоей скорости (с «Фокусировкой» — быстрее).
 				p.vel += to_p / dl * player.radius * 4.0 * pull * (1.0 - dl / pull_r) * delta
 				p.vel = p.vel.limit_length(player.max_speed() * pull_cap)
-		p.pos += (p.vel + calm_drift(wp, GameData.gas_drift(wp, p.r), p)) * delta
+		p.drift_t -= delta
+		if p.drift_t <= 0.0:
+			p.drift = GameData.gas_drift(wp, p.r)
+			p.drift_t = DRIFT_EVERY * rng.randf_range(0.8, 1.2)  # вразброс, чтобы не все в один кадр
+		p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
 		giant.shove(p, wp)
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
 			pebbles.remove_at(i)
-		elif not player.dead:
+		elif not player.dead and wp.distance_squared_to(player.position) < pow(_touch_r + p.r, 2):
+			# Дальние гальки не трогают ни тебя, ни гало: им и проверки не нужны.
 			if _moon_catch(p, wp):
 				_eat(p, i, player.position + (wp - player.position).limit_length(player.radius), true)
 			else:
@@ -377,6 +386,7 @@ func _collide_pebbles(flow_r: float) -> void:
 ## тела слишком мелкие, чтобы заслонить газ.
 func _update_casters() -> void:
 	_casters.clear()
+	_shadow_wide = Skills.stat("shadow")
 	if not GameState.is_boulder() or player.boulder_k < 1.0:
 		return
 	var reach := dust_field.view_radius() * 1.5
@@ -386,10 +396,10 @@ func _update_casters() -> void:
 		var wp := world_pos(p)
 		if wp.distance_to(player.position) > reach:
 			continue
-		var d := GameData.gas_drift(wp, p.r)
+		var d := p.drift if p.drift_t > 0.0 else GameData.gas_drift(wp, p.r)
 		if d.length_squared() < 0.0001:
 			continue  # в кольце-ловушке ветра нет — и тени нет
-		_casters.append([wp, d.normalized(), p.r, p])
+		_casters.append([wp, d.normalized(), p.r, p, p.r * SHADOW_LEN * _shadow_wide])
 
 
 ## Середина ветровой тени ближайшего крупного тела на экране (для подсказки).
@@ -408,14 +418,17 @@ func shadow_spot() -> Vector2:
 ## Насколько точка в ветровой тени: 0 — на ветру, 1 — полное затишье.
 func shadow_at(pos: Vector2, skip: Pebble = null) -> float:
 	var best := 0.0
-	var wide := Skills.stat("shadow")
+	var wide := _shadow_wide
 	for c in _casters:
 		if c[3] == skip:
 			continue
 		var v: Vector2 = pos - c[0]
+		var length: float = c[4]
+		# Дальше длины тени — сразу мимо, без остальной арифметики.
+		if v.length_squared() > length * length:
+			continue
 		var r: float = c[2]
 		var along := v.dot(c[1])
-		var length := r * SHADOW_LEN * wide
 		if along < r * 0.5 or along > length:
 			continue
 		var across := absf(v.cross(c[1]))
@@ -437,6 +450,7 @@ func calm_drift(pos: Vector2, drift: Vector2, skip: Pebble = null) -> Vector2:
 ## При превращении в валун мир вокруг мельчает (GameData.world_k): гальки
 ## уменьшаются и стягиваются к игроку вместе с камерой, сцена не дёргается.
 var _world_k := -1.0
+var _shadow_wide := 1.0
 var _casters: Array = []  # [мир. позиция, направление ветра, радиус] — кто отбрасывает тень
 
 
@@ -726,8 +740,7 @@ func _collide(p: Pebble, index: int) -> void:
 	if dist >= contact or dist < 0.001:
 		return
 	var n := to / dist
-	var drift_p := GameData.gas_drift(wp, p.r)
-	var rel := player.motion() - (p.vel + drift_p)
+	var rel := player.motion() - (p.vel + p.drift)
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
@@ -791,13 +804,34 @@ func moon_radius() -> float:
 	return player.radius * MOON_R * Skills.stat("moon_size")
 
 
+## Облачка гало на этот кадр: их проверяет каждая галька, считать один раз.
+var _moon_pts := PackedVector2Array()
+var _moon_r := 0.0
+var _easy_r := 0.0
+var _touch_r := 0.0  # дальше этого от тебя (плюс радиус гальки) ни удара, ни гало
+
+
+func _cache_moons() -> void:
+	_moon_pts.clear()
+	_easy_r = player.radius * easy_r()
+	_touch_r = player.radius
+	for k in moon_count():
+		_moon_pts.append(moon_pos(k))
+	_moon_r = moon_radius()
+	if not _moon_pts.is_empty():
+		_touch_r = maxf(_touch_r, _moon_pts[0].distance_to(player.position) + _moon_r)
+	# Запас на кадр движения: тела сближаются, пока мы считаем.
+	_touch_r += player.max_speed() * 0.1 + 2.0
+
+
 func _moon_catch(p: Pebble, wp: Vector2) -> bool:
-	var n := moon_count()
-	if n <= 0 or p.pulled or not is_easy(p) or (p.chunk_mass > 0.0 and p.hit_cd > 0.0):
+	if _moon_pts.is_empty() or p.pulled or (p.chunk_mass > 0.0 and p.hit_cd > 0.0):
 		return false
-	var mr := moon_radius()
-	for k in n:
-		if wp.distance_to(moon_pos(k)) < mr + p.r:
+	if not (p.food or p.chunk_mass > 0.0 or p.r < _easy_r):
+		return false
+	for m in _moon_pts:
+		var reach := _moon_r + p.r
+		if wp.distance_squared_to(m) < reach * reach:
 			return true
 	return false
 
@@ -1276,7 +1310,7 @@ func _draw_hints() -> void:
 				dash_cols.append(dash_col)
 			continue
 		var n := to / maxf(dist, 0.001)
-		var approach := (player.motion() - GameData.gas_drift(wp, p.r)).dot(n)
+		var approach := (player.motion() - p.drift).dot(n)
 		var ok := approach <= stick * Skills.stat("glue_" + p.material)
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
 		var face := (-to).angle()

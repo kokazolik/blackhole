@@ -71,10 +71,18 @@ func _ready() -> void:
 	GameState.currency_changed.connect(_on_currency_changed)
 	GameState.chondrules_changed.connect(_on_chondrules_changed)
 	_on_chondrules_changed(GameState.chondrules)
-	GameState.mass_changed.connect(_refresh.unbind(1))
+	# Масса меняется почти каждый кадр (рост, тающий лёд): подписи обновляем
+	# не чаще REFRESH_EVERY, а не на каждый сигнал.
+	GameState.mass_changed.connect(func(_m): _refresh_pending = true)
 	GameState.skills_changed.connect(_refresh)
 	_refresh()
 	_shown_progress = _stage_progress
+
+
+const REFRESH_EVERY := 0.1
+var _refresh_pending := false
+var _refresh_t := 0.0
+var _body_col := Color(0, 0, 0, 0)
 
 
 func _build() -> void:
@@ -396,6 +404,8 @@ func play_purchase_spark() -> void:
 
 
 func _refresh() -> void:
+	_refresh_pending = false
+	_refresh_t = REFRESH_EVERY
 	_mass_label.text = "масса %s · %s" % [GameData.format_mass(GameState.mass), GameData.format_size(GameState.mass)]
 	var idx := maxi(GameData.stage_index(GameState.mass), GameState.stage)
 	var stage: Dictionary = GameData.STAGES[idx]
@@ -417,7 +427,11 @@ func _refresh() -> void:
 	var type := GameState.body_type()
 	var body: Dictionary = GameData.BODY_TYPES[type]
 	_body_label.text = body.name
-	_body_label.add_theme_color_override("font_color", GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT)
+	var body_col: Color = GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT
+	if body_col != _body_col:
+		# Смена цвета темы пересчитывает стиль подписи: только когда он и правда другой.
+		_body_col = body_col
+		_body_label.add_theme_color_override("font_color", body_col)
 	_body_desc.text = "· " + body.desc
 	if GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
 		_body_desc.text = "· валуну: " + GameData.BOULDER_MATERIAL[type].text
@@ -581,6 +595,9 @@ func _draw_badge() -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_refresh_t -= delta
+	if _refresh_pending and _refresh_t <= 0.0:
+		_refresh()
 	_fps_label.visible = show_fps
 	if show_fps:
 		_fps_worst = maxf(_fps_worst, delta)
