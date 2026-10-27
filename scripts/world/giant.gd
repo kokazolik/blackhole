@@ -12,6 +12,7 @@ const CROSS_TIME := 34.0          # за сколько пересекает э�
 const MIN_MASS := 45.0            # пока галька совсем мала, ей хватает своих забот
 const SHED_RATE := 7.0            # пылинок в секунду с подветренного края
 const BOUNCE := 0.35
+const BAKE_SIZE := 1024
 
 var pebble_field: PebbleField
 var dust_field: DustField
@@ -26,6 +27,8 @@ var _spin := 0.0
 var _timer := FIRST_DELAY
 var _shed := 0.0
 var _sprite := Sprite2D.new()
+var _bake := SubViewport.new()
+var _bake_mat := ShaderMaterial.new()
 var _rng := RandomNumberGenerator.new()
 
 signal appeared(world_position: Vector2)
@@ -33,15 +36,26 @@ signal appeared(world_position: Vector2)
 
 func _ready() -> void:
 	_rng.randomize()
+	# Рельеф дорогой: печём его в текстуру (giant_bake), а каждый кадр считаем
+	# только свет (giant_rock). Печём заранее — при загрузке и сразу после ухода
+	# прошлого Странника, когда его нет на экране, а не в миг появления.
+	_bake.size = Vector2i(BAKE_SIZE, BAKE_SIZE)
+	_bake.transparent_bg = true
+	_bake.use_hdr_2d = true  # высота в 8 битах дала бы ступеньки на свету
+	_bake.disable_3d = true
+	_bake.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	var rect := ColorRect.new()
+	rect.size = Vector2(BAKE_SIZE, BAKE_SIZE)
+	_bake_mat.shader = preload("res://shaders/giant_bake.gdshader")
+	rect.material = _bake_mat
+	_bake.add_child(rect)
+	add_child(_bake)
+	_prebake()
 	var mat := ShaderMaterial.new()
-	mat.shader = preload("res://shaders/pebble_body.gdshader")
+	mat.shader = preload("res://shaders/giant_rock.gdshader")
 	_sprite.material = mat
-	var blank := Image.create(256, 256, false, Image.FORMAT_L8)
-	blank.fill(Color.WHITE)
-	_sprite.texture = ImageTexture.create_from_image(blank)
+	_sprite.texture = _bake.get_texture()
 	_sprite.visible = false
-	# Поверхность старого тела потемнела от космического выветривания.
-	_sprite.modulate = Color(0.72, 0.7, 0.68)
 	add_child(_sprite)
 
 
@@ -91,11 +105,6 @@ func _spawn() -> void:
 	_spin = _rng.randf() * TAU
 	active = true
 	var mat := _sprite.material as ShaderMaterial
-	mat.set_shader_parameter("seed", _rng.randf())
-	mat.set_shader_parameter("growth", 1.0)
-	mat.set_shader_parameter("boulder", 0.85)
-	# Огромное тело: узор поверхности того же масштаба, что у гальки, а не раздутый.
-	mat.set_shader_parameter("detail", radius / player.radius * 0.35)
 	var w := Vector4(_rng.randf_range(0.3, 0.6), _rng.randf_range(0.05, 0.25), _rng.randf_range(0.1, 0.35), _rng.randf_range(0.0, 0.2))
 	mat.set_shader_parameter("mix_w", w / (w.x + w.y + w.z + w.w))
 	_sprite.visible = true
@@ -105,12 +114,19 @@ func _spawn() -> void:
 func _despawn() -> void:
 	active = false
 	_sprite.visible = false
+	_prebake()
+
+
+## Следующий Странник — новая глыба: печём её рельеф, пока его нет на экране.
+func _prebake() -> void:
+	_bake_mat.set_shader_parameter("seed", _rng.randf())
+	_bake.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 func _draw_sprite(c: Vector2) -> void:
 	_sprite.position = c
 	_sprite.rotation = _spin
-	_sprite.scale = Vector2.ONE * radius * Player.PEBBLE_SCALE / 256.0
+	_sprite.scale = Vector2.ONE * radius * Player.PEBBLE_SCALE / BAKE_SIZE
 	var mat := _sprite.material as ShaderMaterial
 	mat.set_shader_parameter("light_dir", (-c).normalized().rotated(-_spin))
 	mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
