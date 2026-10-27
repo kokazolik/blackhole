@@ -114,6 +114,9 @@ func _ready() -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26)
 		if "crash" in GameState.tips_seen:
 			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
+	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
+		if "giant" in GameState.tips_seen:
+			_show_caption("Странник", "валун в десятки раз крупнее тебя: удар отбросит, а пыль за ним — твоя"))
 	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
 		if "clump" in GameState.tips_seen:
 			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
@@ -358,6 +361,7 @@ func _check_tips() -> void:
 		"ice": player.ice_vapor > 0.0 and hud._ice_label.visible,
 		"shadow": GameState.is_boulder() and pebble_field.shadow_spot() != Vector2.INF,
 		"crash": pebble_field.crash_spot() != Vector2.INF,
+		"giant": pebble_field.giant.active and pebble_field.giant.world_center().distance_to(player.position) < dust_field.view_radius() * 0.75,
 		"gravity": GameState.is_boulder() and GameState.stage < GameData.PLANETESIMAL_STAGE \
 				and GameData.self_gravity(GameState.mass) + Skills.stat("self_grav") > 0.05,
 		"material": GameState.is_boulder() and _intro_time - _boulder_time > 40.0 \
@@ -371,7 +375,7 @@ func _check_tips() -> void:
 			tip.steps = [Tutorial.TIPS[kind]]
 			tip.tip = kind
 			tip.tip_pos = {"geode": _geode_pos, "chondrule": _chondrule_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
-					"shadow": pebble_field.shadow_spot(), "crash": pebble_field.crash_spot(),
+					"shadow": pebble_field.shadow_spot(), "crash": pebble_field.crash_spot(), "giant": pebble_field.giant.world_center() if pebble_field.giant.active else Vector2.INF,
 					"clump": pebble_field.clump_center + dust_field.frame_offset}.get(kind, Vector2.INF)
 			tip.start_delay = 0.1
 			$UI.add_child(tip)

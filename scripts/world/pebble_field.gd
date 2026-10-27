@@ -105,7 +105,7 @@ const MOON_ORBIT := 2.4    # «Пылевое гало»: орбита обла�
 const MOON_R := 0.24       # радиус облачка (там, где оно подхватывает) в твоих радиусах
 const MOON_SPIN := 1.3     # радиан в секунду
 const CHAIN_R := 4.0       # «Цепная аккреция»: соседи в стольких радиусах съеденной гальки
-const PULSE_EVERY := 15.0  # «Ловушка давления» на первом уровне; дальше чаще
+const PULSE_EVERY := 15.0  # «Волна плотности» на первом уровне; дальше чаще
 const PULSE_GROW := 0.6    # за столько волна доходит до края
 const PULSE_REACH := 0.85  # доля радиуса притяжения, докуда бьёт волна
 const PULLED_SPEED := 1.4  # притянутое летит к тебе с такой долей твоей скорости
@@ -146,6 +146,7 @@ var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
+var giant := Giant.new()  # Странник: огромный валун проплывает мимо гальки
 var _halo_glow := _make_glow()  # мягкое свечение облачков гало
 var _ripple := ColorRect.new()  # рябь волны импульса (шейдер по картинке экрана)
 var chain := 0           # шагов в текущей серии слипаний
@@ -199,6 +200,8 @@ func _ready() -> void:
 	_eddy_fx.visible = false
 	add_child(_eddy_fx)
 	add_child(_mm_node)
+	giant.pebble_field = self
+	add_child(giant)
 	var ripple_mat := ShaderMaterial.new()
 	ripple_mat.shader = RIPPLE_SHADER
 	_ripple.material = ripple_mat
@@ -241,6 +244,10 @@ func _process(delta: float) -> void:
 	_update_crash(delta)
 	_update_clump(delta)
 	_update_abilities(delta)
+	if giant.player == null:
+		giant.player = player
+		giant.dust_field = dust_field
+	giant.update(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
 	var pull_cap := 0.5
@@ -292,6 +299,10 @@ func _process(delta: float) -> void:
 		p.hit_cd -= delta
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
+			pebbles.remove_at(i)
+		elif giant.sweeps(wp, p.r):
+			# Странник смёл гальку: она прилипла к нему, в стороны брызнула пыль.
+			_debris(wp, (wp - giant.world_center()).normalized(), 15.0, p.material, 3)
 			pebbles.remove_at(i)
 		elif not player.dead:
 			if _moon_catch(p, wp):
@@ -776,7 +787,7 @@ func _chain_from(p: Pebble, wp: Vector2) -> void:
 
 func _draw_abilities() -> void:
 	_draw_halo()
-	# Ловушка давления — волна уплотнения газа по картинке мира (см. pulse_ripple.gdshader).
+	# Волна плотности — уплотнение газа по картинке мира (см. pulse_ripple.gdshader).
 	_ripple.visible = pulse_t >= 0.0
 	if pulse_t >= 0.0:
 		var k := clampf(pulse_t / PULSE_GROW, 0.0, 1.0)
@@ -1090,6 +1101,11 @@ func _main_material() -> String:
 			amount = GameState.materials[key]
 			best = key
 	return best
+
+
+## Пыль брызгами от удара (о Странника и т. п.).
+func spray(at: Vector2, dir: Vector2, impact: float) -> void:
+	_debris(at, dir, impact, _main_material(), 6)
 
 
 ## Осколки разлетаются веером от точки удара и становятся обычной пылью.

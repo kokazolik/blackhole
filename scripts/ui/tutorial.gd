@@ -243,6 +243,13 @@ const TIPS := {
 		"pause": true,
 		"focus": "material",
 	},
+	"giant": {
+		"id": "t_giant",
+		"text": "Осторожно, рядом Странник! Это валун в десятки раз крупнее тебя: в диске уже летают тела всех размеров, и когда-нибудь ты станешь таким же. Съесть его нельзя, а удар отбросит тебя. Зато встречный газ срывает с него пыль: держись позади и подбирай.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
 	"crash": {
 		"id": "t_crash",
 		"text": "Видел? Два валуна врезались друг в друга и разлетелись облаком обломков. Обломки прилипают на любой скорости и стоят вдвое дороже, но они быстрые, а через полминуты рассыплются в пыль. Лови!",
@@ -731,9 +738,9 @@ func _prepare_focus(step: Dictionary) -> bool:
 		"spot":
 			if tip_pos == Vector2.INF:
 				return false
-			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3}.get(tip, 0.1)
+			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3, "giant": 0.45}.get(tip, 0.1)
 			_focus = {"pos": tip_pos, "r": r}
-			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток", "chondrule": "хондра"}.get(tip, ""), "color": GOLD}]
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток", "chondrule": "хондра", "giant": "Странник"}.get(tip, ""), "color": GOLD}]
 		"pull":
 			var pr: float = pl.pull_radius()
 			_focus = {"pos": pl.position, "r": pr * 1.05}
