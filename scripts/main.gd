@@ -116,7 +116,7 @@ func _ready() -> void:
 			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
 	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
 		if "giant" in GameState.tips_seen:
-			_show_caption("Странник", "валун в десятки раз крупнее тебя: удар отбросит, а пыль за ним — твоя"))
+			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а пыль за ним — твоя"))
 	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
 		if "clump" in GameState.tips_seen:
 			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))

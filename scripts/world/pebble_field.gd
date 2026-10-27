@@ -58,6 +58,10 @@ const SPLIT_RANGE := 1.0     # ещё на столько быстрее — ш�
 const SPLIT_MAX := 0.6       # максимальный шанс расколоть гальку одного размера с тобой
 const SPLIT_KEEP := 0.85     # доля вещества, что остаётся в частях (остальное — пыль)
 const SELF_SPLIT_K := 0.2    # во сколько раз реже трескаешься ты сам
+const GIANT_CHIP_FROM := 0.35   # удар о Странника быстрее этой доли предела слипания — сыплется крошка
+const GIANT_SPLIT_FROM := 1.3   # а быстрее этого — раскалываешься
+const GIANT_CHIP_LOSS := 0.012  # крошка: доля массы на каждый «предел слипания» скорости удара
+const GIANT_SPLIT_LOSS := Vector2(0.15, 0.3)  # раскол: от сильного до лобового удара
 const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 0.15                 # вокруг твоего размера тел нет: либо заметно меньше, либо заметно больше
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
@@ -1103,8 +1107,8 @@ func _cap_pieces(u: Vector2, parts: int) -> Array:
 
 
 ## Ты треснул: от тебя откалывается край, и он разваливается на куски твоего вещества.
-func _self_split(at: Vector2, n: Vector2, impact: float) -> void:
-	var lost := GameState.mass * SELF_SPLIT_LOSS * clampf(Skills.stat("chip"), 0.3, 1.0)
+func _self_split(at: Vector2, n: Vector2, impact: float, share := SELF_SPLIT_LOSS) -> void:
+	var lost := GameState.mass * share * clampf(Skills.stat("chip"), 0.3, 1.0)
 	var mat := _main_material()
 	GameState.chip(lost, at)
 	var parts := rng.randi_range(3, 4)
@@ -1197,8 +1201,23 @@ func _main_material() -> String:
 
 
 ## Пыль брызгами от удара (о Странника и т. п.).
-func spray(at: Vector2, dir: Vector2, impact: float) -> void:
-	_debris(at, dir, impact, _main_material(), 6)
+## Удар о Странника: он в десятки раз тяжелее и твёрже тебя. Слабый толчок
+## сбивает горсть крошки, сильный раскалывает тебя на куски (их можно собрать).
+func giant_hit(at: Vector2, n: Vector2, impact: float) -> void:
+	var stick := player.stick_speed()
+	if impact < stick * GIANT_CHIP_FROM:
+		return
+	if chain > 0:
+		chain = 0
+		combo_changed.emit(0, 1.0)
+	if impact >= stick * GIANT_SPLIT_FROM:
+		var share := lerpf(GIANT_SPLIT_LOSS.x, GIANT_SPLIT_LOSS.y, clampf((impact / stick - GIANT_SPLIT_FROM) / 1.5, 0.0, 1.0))
+		_debris(at, n, impact, _main_material(), 12)
+		_self_split(at, n, impact, share)
+		return
+	var loss := GameState.mass * GIANT_CHIP_LOSS * impact / stick * Skills.stat("chip")
+	GameState.chip(loss, at)
+	_debris(at, n, impact, _main_material(), clampi(int(impact / stick * 4.0), 3, 7))
 
 
 func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> void:

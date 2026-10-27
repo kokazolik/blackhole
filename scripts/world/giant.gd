@@ -26,6 +26,7 @@ var _length := 0.0
 var _spin := 0.0
 var _timer := FIRST_DELAY
 var _shed := 0.0
+var _hit_cd := 0.0
 var _sprite := Sprite2D.new()
 var _bake := SubViewport.new()
 var _bake_mat := ShaderMaterial.new()
@@ -78,6 +79,7 @@ func update(delta: float) -> void:
 	_pos += _vel * delta
 	_travel += _vel.length() * delta
 	_spin += delta * 0.02
+	_hit_cd -= delta
 	if _travel > _length:
 		_despawn()
 		return
@@ -133,6 +135,7 @@ func _draw_sprite(c: Vector2) -> void:
 
 
 ## Ты — мелочь рядом с ним: удар отбрасывает тебя, а его не сдвинуть.
+## Слабый толчок сбивает с тебя крошку, сильный раскалывает (PebbleField.giant_hit).
 func _collide_player(c: Vector2) -> void:
 	var to := player.position - c
 	var d := to.length()
@@ -145,8 +148,9 @@ func _collide_player(c: Vector2) -> void:
 	var into := rel.dot(n)
 	if into < 0.0:
 		player.velocity -= n * into * (1.0 + BOUNCE)
-		if -into > player.stick_speed() * 0.6:
-			pebble_field.spray(player.position - n * player.radius, n, -into)
+		if _hit_cd <= 0.0:
+			_hit_cd = 0.4  # одно касание — один удар
+			pebble_field.giant_hit(player.position - n * player.radius, n, -into)
 
 
 ## Встречный газ срывает пыль с его подветренного края: за ним тянется шлейф еды.
