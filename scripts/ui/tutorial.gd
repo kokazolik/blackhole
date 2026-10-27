@@ -243,6 +243,20 @@ const TIPS := {
 		"pause": true,
 		"focus": "material",
 	},
+	"fluff": {
+		"id": "t_fluff",
+		"text": "Смотри, Пушистый великан! Это рыхлый комок из сотен таких же пылинок, как ты: они слиплись цепочками, и вышло ажурное облако, в котором пустоты больше, чем пыли. Так в диске растут первые тела. Пылинки на краях держатся слабо: подлети, и они оторвутся к тебе. Но вглубь не лезь, в паутине из пыли завязнешь.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
+	"herald": {
+		"id": "t_herald",
+		"text": "Берегись, галька! Камешек размером с горошину, в тысячи раз тяжелее тебя. Газ её почти не держит, и она несётся сквозь пыль, а за ней закручивается вихревой след: пыль и тебя тащит следом. Скоро и ты станешь такой.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
 	"giant": {
 		"id": "t_giant",
 		"text": "Осторожно, рядом Странник! Это валун в десятки раз крупнее тебя: в диске уже летают тела всех размеров, и когда-нибудь ты станешь таким же. Съесть его нельзя, и он твёрже тебя: лёгкий толчок собьёт с тебя крошку, а с разгону расколешься на куски. Зато встречный газ срывает с него пыль: держись позади и подбирай.",
@@ -738,9 +752,9 @@ func _prepare_focus(step: Dictionary) -> bool:
 		"spot":
 			if tip_pos == Vector2.INF:
 				return false
-			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3, "giant": 0.45}.get(tip, 0.1)
+			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3, "giant": 0.45, "fluff": 0.4, "herald": 0.2}.get(tip, 0.1)
 			_focus = {"pos": tip_pos, "r": r}
-			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток", "chondrule": "хондра", "giant": "Странник"}.get(tip, ""), "color": GOLD}]
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток", "chondrule": "хондра", "giant": "Странник", "fluff": "Пушистый великан", "herald": "галька"}.get(tip, ""), "color": GOLD}]
 		"pull":
 			var pr: float = pl.pull_radius()
 			_focus = {"pos": pl.position, "r": pr * 1.05}

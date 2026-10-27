@@ -16,6 +16,7 @@ var tree_screen: SkillTreeScreen
 var _hidden_world: Array[Node] = []
 var pause_menu: PauseMenu
 var pebble_field: PebbleField
+var drifters: DustDrifters
 var fx: AbsorbFx
 var sky_events: Node2D
 var _intro_time := 0.0
@@ -62,6 +63,10 @@ func _ready() -> void:
 	dust_field.player = player
 	dust_field.camera = camera
 	add_child(dust_field)
+	drifters = DustDrifters.new()
+	drifters.player = player
+	drifters.dust_field = dust_field
+	add_child(drifters)
 	pebble_field = PebbleField.new()
 	pebble_field.player = player
 	player.pebble_field = pebble_field
@@ -117,6 +122,12 @@ func _ready() -> void:
 	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
 		if "giant" in GameState.tips_seen:
 			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а пыль за ним — твоя"))
+	drifters.appeared.connect(func(kind: String, _at: Vector2) -> void:
+		if kind in GameState.tips_seen:
+			if kind == "fluff":
+				_show_caption("Пушистый великан", "рыхлый комок из сотен пылинок: срывай их с краёв, а внутри завязнешь")
+			else:
+				_show_caption("Галька", "та, кем ты скоро станешь: её вихревой след раскидывает пыль"))
 	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
 		if "clump" in GameState.tips_seen:
 			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
@@ -347,8 +358,21 @@ func _process(delta: float) -> void:
 func _check_tips() -> void:
 	if GameState.is_boulder() and not GameState.boulder_intro_done:
 		return
-	if is_instance_valid(guide) or not GameState.pebble_intro_done or player.pebble_k < 0.95 \
-			or player.dead or tree_screen.visible or pause_menu.visible:
+	if is_instance_valid(guide) or player.dead or tree_screen.visible or pause_menu.visible:
+		return
+	# На этапе пылинки свои явления: пролетающие мимо великан и галька.
+	if player.pebble_k <= 0.0 and GameState.tutorial_done and GameState.stage == 0:
+		var view_r := dust_field.view_radius()
+		var dust_found := {
+			"fluff": drifters.fluff_active and drifters.fluff_center().distance_to(player.position) < view_r * 0.7,
+			"herald": drifters.herald_active and drifters.herald_center().distance_to(player.position) < view_r * 0.55,
+		}
+		for kind in dust_found:
+			if dust_found[kind] and not kind in GameState.tips_seen:
+				_start_tip(kind, drifters.fluff_center() if kind == "fluff" else drifters.herald_center())
+				return
+		return
+	if not GameState.pebble_intro_done or player.pebble_k < 0.95:
 		return
 	var found := {
 		"chip": _intro_time - _chip_time < 0.8,
@@ -370,15 +394,19 @@ func _check_tips() -> void:
 	}
 	for kind in found:
 		if found[kind] and not kind in GameState.tips_seen:
-			var tip := Tutorial.new()
-			tip.main = self
-			tip.steps = [Tutorial.TIPS[kind]]
-			tip.tip = kind
-			tip.tip_pos = {"geode": _geode_pos, "chondrule": _chondrule_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
+			_start_tip(kind, {"geode": _geode_pos, "chondrule": _chondrule_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
 					"shadow": pebble_field.shadow_spot(), "crash": pebble_field.crash_spot(), "giant": pebble_field.giant.world_center() if pebble_field.giant.active else Vector2.INF,
-					"clump": pebble_field.clump_center + dust_field.frame_offset}.get(kind, Vector2.INF)
-			tip.start_delay = 0.1
-			$UI.add_child(tip)
-			$UI.move_child(pause_menu, -1)
-			guide = tip
+					"clump": pebble_field.clump_center + dust_field.frame_offset}.get(kind, Vector2.INF))
 			return
+
+
+func _start_tip(kind: String, at: Vector2) -> void:
+	var tip := Tutorial.new()
+	tip.main = self
+	tip.steps = [Tutorial.TIPS[kind]]
+	tip.tip = kind
+	tip.tip_pos = at
+	tip.start_delay = 0.1
+	$UI.add_child(tip)
+	$UI.move_child(pause_menu, -1)
+	guide = tip
