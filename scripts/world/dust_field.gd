@@ -425,12 +425,14 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 
 ## Осколки после удара: обычная пыль, которая разлетается и тормозится газом.
 ## pos и vel в мировых координатах.
-## Дать пылинке скорость снаружи (вихревой след и т. п.). Неподвижная пыль вдали
-## от игрока не обходится каждый кадр, поэтому ставим её в ближний список.
-func nudge(d: Dust, vel: Vector2) -> void:
-	var was_still := d.vel.length_squared() <= 0.0001
+## Сдвинуть пылинку снаружи (её сметает огромная галька). pos и vel в системе
+## отсчёта пыли. Неподвижная пыль вдали от игрока не обходится каждый кадр,
+## поэтому ставим её в ближний список.
+func shove(d: Dust, pos: Vector2, vel: Vector2) -> void:
+	d.pos = pos
 	d.vel = vel
-	if was_still and not _near.has(d):
+	_write_origin(d)
+	if not _near.has(d):
 		_near.append(d)
 
 

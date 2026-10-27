@@ -124,10 +124,7 @@ func _ready() -> void:
 			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а пыль за ним — твоя"))
 	drifters.appeared.connect(func(kind: String, _at: Vector2) -> void:
 		if kind in GameState.tips_seen:
-			if kind == "fluff":
-				_show_caption("Пушистый великан", "рыхлый комок из сотен пылинок: срывай их с краёв, а внутри завязнешь")
-			else:
-				_show_caption("Галька", "та, кем ты скоро станешь: её вихревой след раскидывает пыль"))
+			_show_caption("Галька", "в тысячу раз крупнее тебя: её край — стена, а пыль на пути она сметает"))
 	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
 		if "clump" in GameState.tips_seen:
 			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
@@ -360,17 +357,12 @@ func _check_tips() -> void:
 		return
 	if is_instance_valid(guide) or player.dead or tree_screen.visible or pause_menu.visible:
 		return
-	# На этапе пылинки свои явления: пролетающие мимо великан и галька.
+	# На этапе пылинки своё явление: пролетающая мимо огромная галька.
 	if player.pebble_k <= 0.0 and GameState.tutorial_done and GameState.stage == 0:
 		var view_r := dust_field.view_radius()
-		var dust_found := {
-			"fluff": drifters.fluff_active and drifters.fluff_center().distance_to(player.position) < view_r * 0.7,
-			"herald": drifters.herald_active and drifters.herald_center().distance_to(player.position) < view_r * 0.55,
-		}
-		for kind in dust_found:
-			if dust_found[kind] and not kind in GameState.tips_seen:
-				_start_tip(kind, drifters.fluff_center() if kind == "fluff" else drifters.herald_center())
-				return
+		if drifters.herald_active and not "herald" in GameState.tips_seen \
+				and drifters.herald_spot().distance_to(player.position) < view_r * 0.4:
+			_start_tip("herald", drifters.herald_spot())
 		return
 	if not GameState.pebble_intro_done or player.pebble_k < 0.95:
 		return
