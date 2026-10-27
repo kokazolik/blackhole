@@ -157,6 +157,19 @@ static func stage_index(mass: float) -> int:
 	return idx
 
 
+## Русское склонение по числу: 1 хондру, 2 хондры, 5 хондр.
+static func plural(n: int, one: String, few: String, many: String) -> String:
+	var n100 := n % 100
+	var n10 := n % 10
+	if n100 >= 11 and n100 <= 14:
+		return many
+	if n10 == 1:
+		return one
+	if n10 >= 2 and n10 <= 4:
+		return few
+	return many
+
+
 static func format_number(v: float) -> String:
 	if v < 1000.0:
 		return str(int(floor(v)))

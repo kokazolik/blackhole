@@ -2,6 +2,8 @@ extends Node
 ## Состояние забега: валюта, масса, материалы, уровни навыков. Сохраняется в user://.
 
 signal currency_changed(value: float)
+signal chondrules_changed(value: int)
+signal chondrule_found(position: Vector2, amount: int)
 signal mass_changed(value: float)
 signal skills_changed
 signal absorbed(position: Vector2, material: String, gained: float)
@@ -14,6 +16,7 @@ const AUTOSAVE_SECONDS := 10.0
 const HEAL_RATE := 0.12  # какая доля накопленного залечивания прирастает за секунду
 
 var currency := 0.0
+var chondrules := 0  # вторая валюта: застывшие капли расплава, за них берут способности
 var mass := 1.0
 var materials := {}
 var skill_levels := {}
@@ -143,6 +146,20 @@ func add_currency(amount: float) -> void:
 	currency_changed.emit(currency)
 
 
+func add_chondrules(amount: int, at: Vector2) -> void:
+	chondrules += amount
+	chondrules_changed.emit(chondrules)
+	chondrule_found.emit(at, amount)
+
+
+func spend_chondrules(amount: int) -> bool:
+	if chondrules < amount:
+		return false
+	chondrules -= amount
+	chondrules_changed.emit(chondrules)
+	return true
+
+
 func spend(amount: float) -> bool:
 	if currency < amount:
 		return false
@@ -166,6 +183,7 @@ func save_game() -> void:
 	var data := {
 		"version": SAVE_VERSION,
 		"currency": currency,
+		"chondrules": chondrules,
 		"mass": mass,
 		"materials": materials,
 		"skills": skill_levels,
@@ -195,6 +213,7 @@ func load_game() -> void:
 	prologue_seen = bool(data.get("prologue_seen", false))
 	tutorial_done = bool(data.get("tutorial_done", false))
 	currency = float(data.get("currency", 0.0))
+	chondrules = int(data.get("chondrules", 0))
 	stage = int(data.get("stage", 0))
 	pebble_intro_done = bool(data.get("pebble_intro_done", false))
 	boulder_intro_done = bool(data.get("boulder_intro_done", false))
@@ -227,6 +246,7 @@ func apply_fps() -> void:
 func reset_run() -> void:
 	_reset_values()
 	currency_changed.emit(currency)
+	chondrules_changed.emit(chondrules)
 	mass_changed.emit(mass)
 	skills_changed.emit()
 	save_game()
@@ -237,6 +257,7 @@ func _reset_values() -> void:
 	heal_pool = 0.0
 	stage = 0
 	currency = 0.0
+	chondrules = 0
 	mass = 1.0
 	skill_levels = {}
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)

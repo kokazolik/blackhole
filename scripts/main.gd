@@ -28,6 +28,8 @@ var _boulder_time := 0.0  # когда стал валуном (для подс�
 var _chunk_pos := Vector2.ZERO
 var _geode_time := -10.0
 var _geode_pos := Vector2.ZERO
+var _chondrule_time := -10.0
+var _chondrule_pos := Vector2.ZERO
 var _swarm_pos := Vector2.ZERO
 
 
@@ -84,6 +86,10 @@ func _ready() -> void:
 	dust_field.evaporated.connect(burn_fx.puff)
 	pebble_field.evaporated.connect(burn_fx.puff)
 	pebble_field.combo_changed.connect(_on_combo)
+	GameState.chondrule_found.connect(func(at: Vector2, amount: int) -> void:
+		_chondrule_time = _intro_time
+		_chondrule_pos = at
+		fx.popup(at + Vector2(0, -player.radius * 1.6), "Хондра +%d" % amount, UiTheme.CHONDRULE, 22))
 	pebble_field.geode_found.connect(func(at: Vector2, value: float) -> void:
 		_geode_time = _intro_time
 		_geode_pos = at
@@ -344,6 +350,7 @@ func _check_tips() -> void:
 	var found := {
 		"chip": _intro_time - _chip_time < 0.8,
 		"geode": _intro_time - _geode_time < 1.5,
+		"chondrule": _intro_time - _chondrule_time < 1.5,
 		"eddy": pebble_field.eddy_left > 5.0,
 		"swarm": pebble_field.swarm_left > 5.0,
 		"chunks": _intro_time - _chunk_time > 0.7 and _intro_time - _chunk_time < 5.0 \
@@ -363,7 +370,7 @@ func _check_tips() -> void:
 			tip.main = self
 			tip.steps = [Tutorial.TIPS[kind]]
 			tip.tip = kind
-			tip.tip_pos = {"geode": _geode_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
+			tip.tip_pos = {"geode": _geode_pos, "chondrule": _chondrule_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),
 					"shadow": pebble_field.shadow_spot(), "crash": pebble_field.crash_spot(),
 					"clump": pebble_field.clump_center + dust_field.frame_offset}.get(kind, Vector2.INF)
 			tip.start_delay = 0.1

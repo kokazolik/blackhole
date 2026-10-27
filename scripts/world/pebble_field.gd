@@ -99,6 +99,20 @@ const CLUMP_INTERVAL := 170.0         # сгусток: только в коль
 const CLUMP_TIME := 25.0              # за столько он сжимается в валун
 const CLUMP_COUNT := 30
 const CLUMP_VALUE := 1.5
+# Способности из дерева:
+const MOON_ORBIT := 2.4    # «Спутник»: орбита в твоих радиусах
+const MOON_R := 0.24       # радиус спутника в твоих радиусах
+const MOON_SPIN := 1.3     # радиан в секунду
+const CHAIN_R := 4.0       # «Цепная аккреция»: соседи в стольких радиусах съеденной гальки
+const PULSE_EVERY := 15.0  # «Импульс» на первом уровне; дальше чаще
+const PULSE_GROW := 0.6    # за столько волна доходит до края
+const PULSE_REACH := 0.85  # доля радиуса притяжения, докуда бьёт волна
+const PULLED_SPEED := 1.4  # притянутое летит к тебе с такой долей твоей скорости
+# Хондры, вторая валюта: застывшие капли расплава внутри галек.
+const CHONDRULE_CHANCE := 0.06  # с настоящего слипания (мелочь не в счёт)
+const CHONDRULE_DEBRIS := 0.2   # с обломка столкновения или мелочи сгустка
+const CHONDRULE_GEODE := 2      # в жеоде их сразу несколько
+const CHONDRULE_BOULDER := 0.3  # валун ест в разы больше тел: шанс ниже, иначе хондр горы
 
 class Pebble:
 	var pos: Vector2  # в системе отсчёта пыли (мир = pos + dust_field.frame_offset)
@@ -120,6 +134,7 @@ class Pebble:
 	var life := 0.0        # >0 — обломок облака столкновения: рассыпется через столько секунд
 	var crash := false     # валун, летящий на столкновение (газ его не тормозит)
 	var clump := false     # из сгустка: стягивается к его центру
+	var pulled := false    # сорвано цепной аккрецией или импульсом: летит к тебе и прилипает
 
 var player: Player
 var dust_field: DustField
@@ -149,6 +164,9 @@ var clump_left := 0.0
 var clump_center := Vector2.ZERO  # в системе отсчёта пыли
 var clump_radius := 0.0
 var _clump_r0 := 0.0
+var _moon_angle := 0.0
+var _pulse_timer := 4.0
+var pulse_t := -1.0  # сколько идёт текущая волна импульса; <0 — волны нет
 
 
 func _ready() -> void:
@@ -199,6 +217,7 @@ func _process(delta: float) -> void:
 	_update_eddy(delta)
 	_update_crash(delta)
 	_update_clump(delta)
+	_update_abilities(delta)
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
 	var pull_cap := 0.5
@@ -229,7 +248,10 @@ func _process(delta: float) -> void:
 			_clump_pull(p, wp, delta)
 		if p.eddy and eddy_left > 0.0:
 			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
-		if rubble and p.own and p.hit_cd < 0.6:
+		if p.pulled:
+			var home := player.position - wp
+			p.vel = home.normalized() * player.max_speed() * PULLED_SPEED
+		elif rubble and p.own and p.hit_cd < 0.6:
 			# «Куча щебня»: свои куски разлетелись и возвращаются, их держит твой вес.
 			var back := player.position - wp
 			p.vel = p.vel.move_toward(back.normalized() * player.max_speed() * 0.8, player.max_speed() * 2.0 * delta)
@@ -249,7 +271,10 @@ func _process(delta: float) -> void:
 			evaporated.emit(wp, p.r)
 			pebbles.remove_at(i)
 		elif not player.dead:
-			_collide(p, i)
+			if _moon_catch(p, wp):
+				_eat(p, i, player.position + (wp - player.position).limit_length(player.radius), true)
+			else:
+				_collide(p, i)
 		i -= 1
 	_write()
 	_hint.queue_redraw()
@@ -450,7 +475,7 @@ func absorbable(p: Pebble) -> bool:
 
 ## Мелочь, которая прилипает на любой скорости: еда валуна, отбитые куски и крошечные гальки.
 func is_easy(p: Pebble) -> bool:
-	return p.food or p.chunk_mass > 0.0 or p.r < player.radius * easy_r()
+	return p.food or p.pulled or p.chunk_mass > 0.0 or p.r < player.radius * easy_r()
 
 
 ## Доля твоего радиуса, мельче которой тела прилипают на любой скорости.
@@ -617,33 +642,8 @@ func _collide(p: Pebble, index: int) -> void:
 		return  # только что отбитый кусок ещё разлетается
 	var easy := is_easy(p)
 	if easy or (absorbable(p) and impact <= stick):
-		var m := GameData.bite_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
-		if p.chunk_mass > 0.0:
-			m = p.chunk_mass
-		m *= ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
-		if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
-			chain += 1
-			_chain_timer = GameData.COMBO_WINDOW
-		var size_rel := p.r * (FOOD_MASS_R if p.food else 1.0) / player.radius
-		var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
-		if p.eddy:
-			value *= EDDY_VALUE
-		if p.life > 0.0:
-			value *= CRASH_VALUE * Skills.stat("debris_value")
-		if p.clump:
-			value *= CLUMP_VALUE * Skills.stat("debris_value")
-		if p.food:
-			value *= FOOD_VALUE
-		if GameState.is_boulder():
-			value *= GameData.boulder_value(GameState.mass)
-		if p.geode:
-			value *= Skills.stat("geode_value")
-			geode_found.emit(wp, value)
-		GameState.absorb_mass(m, value, p.material, at)
-		pebble_absorbed.emit(wp)
-		if Skills.stat("combo") > 0.0 and chain >= 2 and not easy:
-			combo_changed.emit(chain, combo_multiplier())
-		pebbles.remove_at(index)
+		_eat(p, index, at, easy)
+		_chain_from(p, wp)
 		return
 	if impact > stick and p.hit_cd <= 0.0:
 		p.hit_cd = 0.3
@@ -680,6 +680,135 @@ func _collide(p: Pebble, index: int) -> void:
 	var push := contact - dist + 0.5
 	player.position -= n * push * 0.5
 	p.pos += n * push * 0.5
+
+
+
+## Спутники кружат вокруг и подбирают то, что прилипло бы к тебе само.
+func moon_count() -> int:
+	return int(Skills.stat("moons"))
+
+
+func moon_pos(k: int) -> Vector2:
+	var n := moon_count()
+	var orbit := player.radius * MOON_ORBIT * sqrt(Skills.stat("moon_size"))
+	return player.position + Vector2.from_angle(_moon_angle + k * TAU / n) * orbit
+
+
+func moon_radius() -> float:
+	return player.radius * MOON_R * Skills.stat("moon_size")
+
+
+func _moon_catch(p: Pebble, wp: Vector2) -> bool:
+	var n := moon_count()
+	if n <= 0 or p.pulled or not is_easy(p) or (p.chunk_mass > 0.0 and p.hit_cd > 0.0):
+		return false
+	var mr := moon_radius()
+	for k in n:
+		if wp.distance_to(moon_pos(k)) < mr + p.r:
+			return true
+	return false
+
+
+func _update_abilities(delta: float) -> void:
+	_moon_angle = fmod(_moon_angle + MOON_SPIN * delta, TAU)
+	var lvl := Skills.stat("pulse")
+	if pulse_t >= 0.0:
+		pulse_t += delta
+		_pulse_wave()
+		if pulse_t > PULSE_GROW + 0.5:
+			pulse_t = -1.0
+	if lvl <= 0.0 or player.dead:
+		return
+	_pulse_timer -= delta
+	if _pulse_timer <= 0.0:
+		_pulse_timer = PULSE_EVERY / (0.5 + 0.5 * lvl)
+		pulse_t = 0.0
+
+
+## Волна импульса расходится и срывает с места всё, что можно съесть.
+func _pulse_wave() -> void:
+	var r := pulse_radius() * clampf(pulse_t / PULSE_GROW, 0.0, 1.0)
+	for p in pebbles:
+		if not p.pulled and absorbable(p) and not p.crash and world_pos(p).distance_to(player.position) < r:
+			p.pulled = true
+
+
+func pulse_radius() -> float:
+	return player.pull_radius() * PULSE_REACH
+
+
+## «Цепная аккреция»: съеденная галька тянет за собой мелких соседей.
+func _chain_from(p: Pebble, wp: Vector2) -> void:
+	var chance := Skills.stat("chain_eat")
+	if chance <= 0.0:
+		return
+	var reach := p.r * CHAIN_R + player.radius * 0.5
+	for q in pebbles:
+		if q.pulled or q.crash or q.r > p.r or not absorbable(q):
+			continue
+		if world_pos(q).distance_to(wp) < reach and rng.randf() < chance:
+			q.pulled = true
+
+
+func _draw_abilities() -> void:
+	var px := 1.0 / camera.zoom.x
+	if pulse_t >= 0.0:
+		var k := clampf(pulse_t / PULSE_GROW, 0.0, 1.0)
+		var fade := 1.0 - clampf((pulse_t - PULSE_GROW) / 0.5, 0.0, 1.0)
+		var r := pulse_radius() * (1.0 - pow(1.0 - k, 2.0))
+		_hint.draw_arc(player.position, r, 0.0, TAU, 96, Color(0.6, 0.85, 1.0, 0.55 * fade), 3.0 * px, true)
+		_hint.draw_arc(player.position, r * 0.96, 0.0, TAU, 96, Color(0.6, 0.85, 1.0, 0.18 * fade), 9.0 * px, true)
+	var mr := moon_radius()
+	var to_star := -player.position.normalized()
+	for k in moon_count():
+		var c := moon_pos(k)
+		_hint.draw_circle(c, mr, Color(0.33, 0.3, 0.28))
+		_hint.draw_circle(c + to_star * mr * 0.22, mr * 0.78, Color(0.62, 0.57, 0.5))
+		_hint.draw_circle(c + to_star * mr * 0.45, mr * 0.4, Color(0.8, 0.75, 0.66))
+
+
+## Присоединить гальку: масса, звёздная пыль, серия. Зовут удар игрока,
+## спутники и цепная аккреция. index — место гальки в pebbles, она удаляется.
+func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
+	var wp := world_pos(p)
+	var m := GameData.bite_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
+	if p.chunk_mass > 0.0:
+		m = p.chunk_mass
+	m *= ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
+	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
+		chain += 1
+		_chain_timer = GameData.COMBO_WINDOW
+	var size_rel := p.r * (FOOD_MASS_R if p.food else 1.0) / player.radius
+	var value := VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, VALUE_MASS_EXP) * pow(size_rel / 0.2, 1.5) * combo_multiplier()
+	if p.eddy:
+		value *= EDDY_VALUE
+	if p.life > 0.0:
+		value *= CRASH_VALUE * Skills.stat("debris_value")
+	if p.clump:
+		value *= CLUMP_VALUE * Skills.stat("debris_value")
+	if p.food:
+		value *= FOOD_VALUE
+	if GameState.is_boulder():
+		value *= GameData.boulder_value(GameState.mass)
+	if p.geode:
+		value *= Skills.stat("geode_value")
+		geode_found.emit(wp, value)
+	GameState.absorb_mass(m, value, p.material, at)
+	pebble_absorbed.emit(wp)
+	var found := 0
+	if p.geode:
+		found = CHONDRULE_GEODE
+	else:
+		var k := CHONDRULE_BOULDER if GameState.is_boulder() else 1.0
+		if (p.life > 0.0 or p.clump) and rng.randf() < CHONDRULE_DEBRIS * k:
+			found = 1
+		elif not easy and rng.randf() < CHONDRULE_CHANCE * k:
+			found = 1
+	if found > 0:
+		GameState.add_chondrules(found, wp)
+	if Skills.stat("combo") > 0.0 and chain >= 2 and not easy:
+		combo_changed.emit(chain, combo_multiplier())
+	pebbles.remove_at(index)
 
 
 ## Шанс расколоть крупную гальку целиком: нужен удар куда быстрее предела
@@ -980,6 +1109,7 @@ func _draw_hints() -> void:
 	var px := 1.0 / camera.zoom.x
 	_draw_shadows()
 	_draw_clump()
+	_draw_abilities()
 	var stick := player.stick_speed()
 	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон
 	# не тянул, когда вокруг рой крупных галек.

@@ -37,6 +37,11 @@ const BASE_STATS := {
 	"grav_focus": 1.0,   # скорость, до которой притяжение разгоняет тела
 	"debris_value": 1.0, # ценность обломков столкновений и мелочи сгустка
 	"collapse": 0.0,  # сгусток схлопывается в тебя («Гравитационный коллапс»)
+	# Способности:
+	"moons": 0.0,     # спутников на орбите, подбирают мелочь
+	"moon_size": 1.0, # размер и орбита спутников
+	"chain_eat": 0.0, # шанс, что сосед съеденной гальки полетит к тебе следом
+	"pulse": 0.0,     # уровень «Импульса»: волна срывает к тебе всё съедобное
 	# Ветвь «Состав»: сколько галек этого материала вокруг и как легко с ними слипаться.
 	"affinity_silicate": 1.0, "affinity_metal": 1.0, "affinity_carbon": 1.0, "affinity_ice": 1.0,
 	"glue_silicate": 1.0, "glue_metal": 1.0, "glue_carbon": 1.0, "glue_ice": 1.0,
@@ -90,6 +95,13 @@ func max_level(id: String) -> int:
 func cost(id: String) -> float:
 	var node: Dictionary = nodes[id]
 	return floor(float(node.cost) * pow(float(node.get("cost_growth", 1.0)), level(id)))
+
+
+## Хондры за следующий уровень: "chondrules" — список цен по уровням.
+func cost2(id: String) -> int:
+	var prices: Array = nodes[id].get("chondrules", [])
+	var lvl := level(id)
+	return int(prices[lvl]) if lvl < prices.size() else 0
 
 
 func is_owned(id: String) -> bool:
@@ -155,7 +167,7 @@ func chosen_path() -> String:
 
 
 func can_buy(id: String) -> bool:
-	return is_unlocked(id) and not is_maxed(id) and GameState.currency >= cost(id)
+	return is_unlocked(id) and not is_maxed(id) and GameState.currency >= cost(id) and GameState.chondrules >= cost2(id)
 
 
 func any_affordable() -> bool:
@@ -168,8 +180,10 @@ func any_affordable() -> bool:
 func buy(id: String) -> bool:
 	if not can_buy(id):
 		return false
+	var c2 := cost2(id)
 	if not GameState.spend(cost(id)):
 		return false
+	GameState.spend_chondrules(c2)
 	GameState.set_skill_level(id, level(id) + 1)
 	return true
 
@@ -177,6 +191,9 @@ func buy(id: String) -> bool:
 func recompute() -> void:
 	stats = BASE_STATS.duplicate()
 	for id in order:
+		# В старых сохранениях у узлов бывало больше уровней, чем теперь.
+		if level(id) > max_level(id):
+			GameState.skill_levels[id] = max_level(id)
 		var lvl := level(id)
 		if lvl <= 0:
 			continue

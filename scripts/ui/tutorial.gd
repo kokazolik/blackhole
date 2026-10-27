@@ -222,6 +222,13 @@ const TIPS := {
 		"pause": true,
 		"focus": "spot",
 	},
+	"chondrule": {
+		"id": "t_chondrule",
+		"text": "Внутри гальки оказалась хондра: капля камня, которую расплавила вспышка звезды, и она застыла стеклянной бусиной. Хондры редкие. Копи их: за хондры в книге открываются способности, вроде спутника, который сам собирает мелочь.",
+		"tap": true,
+		"pause": true,
+		"focus": "spot",
+	},
 	"gravity": {
 		"id": "t_gravity",
 		"text": "Чувствуешь? Ты стал так тяжёл, что мелочь в этом круге сама плывёт к тебе. Это уже не липкость, а твоя собственная гравитация. Чем ближе к километру, тем сильнее она тянет.",
@@ -726,7 +733,7 @@ func _prepare_focus(step: Dictionary) -> bool:
 				return false
 			var r: float = main.dust_field.view_radius() * {"swarm": 0.25, "shadow": 0.18, "crash": 0.25, "clump": 0.3}.get(tip, 0.1)
 			_focus = {"pos": tip_pos, "r": r}
-			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток"}.get(tip, ""), "color": GOLD}]
+			_marks = [{"pos": tip_pos, "r": r * 0.8, "label": {"swarm": "рой", "geode": "жеода", "chunks": "куски", "shadow": "ветровая тень", "crash": "обломки", "clump": "сгусток", "chondrule": "хондра"}.get(tip, ""), "color": GOLD}]
 		"pull":
 			var pr: float = pl.pull_radius()
 			_focus = {"pos": pl.position, "r": pr * 1.05}

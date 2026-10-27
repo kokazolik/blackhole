@@ -16,6 +16,8 @@ var _fps_t := 0.0
 var _fps_worst := 0.0
 var _currency_label: Label
 var _currency_icon: Control
+var _chondrule_box: HBoxContainer
+var _chondrule_label: Label
 var _mass_label: Label
 var _stage_label: Label
 var _stage_bar: Control
@@ -67,6 +69,8 @@ func _ready() -> void:
 	_shown_currency = GameState.currency
 	GameState.skills_changed.connect(func(): _spark_pending = true)
 	GameState.currency_changed.connect(_on_currency_changed)
+	GameState.chondrules_changed.connect(_on_chondrules_changed)
+	_on_chondrules_changed(GameState.chondrules)
 	GameState.mass_changed.connect(_refresh.unbind(1))
 	GameState.skills_changed.connect(_refresh)
 	_refresh()
@@ -91,6 +95,22 @@ func _build() -> void:
 	cur_row.add_child(_currency_icon)
 	_currency_label = _label(40, UiTheme.GOLD, UiTheme.FONT_NUMBERS)
 	cur_row.add_child(_currency_label)
+	# Хондры — вторая валюта для способностей; видно, когда первая уже найдена.
+	_chondrule_box = HBoxContainer.new()
+	_chondrule_box.add_theme_constant_override("separation", 6)
+	_chondrule_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bead_gap := Control.new()
+	bead_gap.custom_minimum_size = Vector2(14, 0)
+	bead_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_chondrule_box.add_child(bead_gap)
+	var bead := Control.new()
+	bead.custom_minimum_size = Vector2(22, 46)
+	bead.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bead.draw.connect(func() -> void: UiTheme.draw_chondrule(bead, bead.size * 0.5 + Vector2(0, 2), 9.0))
+	_chondrule_box.add_child(bead)
+	_chondrule_label = _label(28, UiTheme.CHONDRULE, UiTheme.FONT_NUMBERS)
+	_chondrule_box.add_child(_chondrule_label)
+	cur_row.add_child(_chondrule_box)
 	_mass_label = _label(16, UiTheme.TEXT_DIM, UiTheme.FONT_SEMI)
 	_mass_label.custom_minimum_size = Vector2(0, 0)
 	var mass_pad := MarginContainer.new()
@@ -346,6 +366,11 @@ func _label(font_size: int, color: Color, font: Font = null) -> Label:
 
 
 ## Число валюты подпрыгивает при каждом поступлении.
+func _on_chondrules_changed(value: int) -> void:
+	_chondrule_box.visible = value > 0
+	_chondrule_label.text = str(value)
+
+
 func _on_currency_changed(value: float) -> void:
 	var gained := value > _last_currency
 	_last_currency = value

@@ -43,6 +43,7 @@ var _colors := {}   # цвет узла, считается при перери�
 var _anim_until := 0.0  # до этого времени ветки растут и узлы распускаются
 var _view := Rect2()    # видимая часть древа в его координатах (с запасом)
 var _currency_label: Label
+var _chondrule_label: Label
 var _info: PanelContainer
 var _info_title: Label
 var _info_desc: RichTextLabel
@@ -170,6 +171,13 @@ func _build() -> void:
 	_currency_label.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
 	_currency_label.add_theme_color_override("font_color", UiTheme.GOLD)
 	add_child(_currency_label)
+	_chondrule_label = Label.new()
+	_chondrule_label.add_theme_font_size_override("font_size", 30)
+	_chondrule_label.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	_chondrule_label.add_theme_color_override("font_color", UiTheme.CHONDRULE)
+	_chondrule_label.draw.connect(func() -> void:
+		UiTheme.draw_chondrule(_chondrule_label, Vector2(-16, _chondrule_label.size.y * 0.5 + 2), 9.0))
+	add_child(_chondrule_label)
 
 	var close_btn := Button.new()
 	close_button = close_btn
@@ -240,6 +248,8 @@ func _build() -> void:
 
 	_buy_button = Button.new()
 	_buy_button.custom_minimum_size = Vector2(0, 70)
+	# Длинная цена («… и 10 хондр») переносится, а не раздувает панель за край экрана.
+	_buy_button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	UiTheme.paint_button(_buy_button, true, 24)
 	_buy_button.pressed.connect(_on_buy)
 	text_box.add_child(_buy_button)
@@ -264,6 +274,9 @@ func _refresh() -> void:
 	if not is_node_ready():
 		return
 	_currency_label.text = "✦ " + GameData.format_number(GameState.currency)
+	_chondrule_label.visible = GameState.chondrules > 0
+	_chondrule_label.text = str(GameState.chondrules)
+	_chondrule_label.position = Vector2(28 + _currency_label.get_minimum_size().x + 46, 27)
 	_info.visible = _selected != ""
 	if _selected != "":
 		var node: Dictionary = Skills.nodes[_selected]
@@ -278,6 +291,8 @@ func _refresh() -> void:
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		if node.get("legendary", false):
 			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")
+		elif node.get("ability", false):
+			_info_level.text = "Способность · изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		var blocker := Skills.blocked_by(_selected)
 		if blocker != "":
 			_info_level.text = "Путь закрыт: выбрано «%s»" % Skills.nodes[blocker].title
@@ -288,6 +303,8 @@ func _refresh() -> void:
 			_buy_button.disabled = true
 		else:
 			var price := GameData.format_number(Skills.cost(_selected))
+			if Skills.cost2(_selected) > 0:
+				price += " и %d %s" % [Skills.cost2(_selected), GameData.plural(Skills.cost2(_selected), "хондру", "хондры", "хондр")]
 			_buy_button.disabled = not Skills.can_buy(_selected)
 			_buy_button.text = ("Нужно " if _buy_button.disabled else "Изучить за ") + price
 			if not Skills.is_unlocked(_selected):
@@ -504,6 +521,12 @@ func _draw_node_under(id: String, p: Vector2, k: float) -> void:
 			var ray_len := r * (1.45 + (0.2 if i % 2 == 0 else 0.0) + 0.06 * pulse)
 			_g.draw_line(Vector2.from_angle(ang) * (r + 6.0), Vector2.from_angle(ang) * ray_len, gold, 2.0, true)
 		_g.draw_arc(Vector2.ZERO, r + 5.0, 0.0, TAU, 56, gold, 2.5, true)
+	elif Skills.nodes[id].get("ability", false):
+		# Способность: голубые камешки на орбите вокруг узла.
+		var sky := Color(0.55, 0.85, 1.0, 0.8 if owned else 0.5)
+		_g.draw_arc(Vector2.ZERO, r + 8.0, 0.0, TAU, 56, Color(sky, sky.a * 0.5), 1.5, true)
+		for i in 3:
+			_g.draw_circle(Vector2.from_angle(_time * 0.7 + i * TAU / 3.0) * (r + 8.0), 4.0, sky)
 
 	var glow_a := 0.25 + 0.2 * pulse if affordable else (0.3 if maxed else (0.2 if owned else 0.12))
 	var gr := r * (2.6 + (0.25 * pulse if affordable else 0.0))
@@ -696,6 +719,25 @@ func _draw_icon(id: String, col: Color) -> void:
 			for i in 4:
 				var v := Vector2(-15 + i * 10, 8 - i * 5)
 				_g.draw_circle(v, 2.5 + i * 0.9, Color(col, 0.45 + 0.18 * i))
+		"moon":
+			# Тело и спутник на наклонной орбите.
+			_g.draw_circle(Vector2.ZERO, 6.5, col)
+			_ellipse_arc(Vector2.ZERO, Vector2(17.0, 7.0), -0.35, Color(col, 0.7), w)
+			_g.draw_circle((Vector2.from_angle(_time * 0.8) * Vector2(17.0, 7.0)).rotated(-0.35), 3.4, col)
+		"chain":
+			# Съеденная галька тянет за собой соседей.
+			var pts := [Vector2(-13, 9), Vector2(-3, -2), Vector2(8, 6), Vector2(14, -9)]
+			for i in 3:
+				_g.draw_line(pts[i], pts[i + 1], Color(col, 0.55), 1.6, true)
+			for i in 4:
+				_g.draw_circle(pts[i], 3.0 + i * 0.6, Color(col, 0.55 + 0.15 * i))
+		"pulse":
+			# Волна расходится от тела.
+			_g.draw_circle(Vector2.ZERO, 4.5, col)
+			var t := fmod(_time * 0.6, 1.0)
+			for i in 3:
+				var k := fmod(t + i / 3.0, 1.0)
+				_g.draw_arc(Vector2.ZERO, 7.0 + 12.0 * k, 0.0, TAU, 32, Color(col, 1.0 - k), w, true)
 		"geode":
 			# Расколотая жеода: кристаллы внутри скорлупы.
 			_g.draw_arc(Vector2.ZERO, 14.0, 0.0, TAU, 28, col, w, true)
@@ -753,6 +795,13 @@ func _ellipse(c: Vector2, radii: Vector2, rot: float, col: Color) -> void:
 		pts.append(c + (Vector2.from_angle(i * TAU / 20.0) * radii).rotated(rot))
 	_g.draw_colored_polygon(pts, col)
 
+
+
+func _ellipse_arc(c: Vector2, radii: Vector2, rot: float, col: Color, width: float) -> void:
+	var pts := PackedVector2Array()
+	for i in 33:
+		pts.append(c + (Vector2.from_angle(i * TAU / 32.0) * radii).rotated(rot))
+	_g.draw_polyline(pts, col, width, true)
 
 func _hit_test(screen_pos: Vector2) -> String:
 	var local := (screen_pos - _canvas.position) / _canvas.scale.x

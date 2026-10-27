@@ -16,12 +16,21 @@ const PARCHMENT := Color(0.96, 0.9, 0.78)  # цвет текста расска�
 const GOLD := Color(1.0, 0.82, 0.42)
 const GOLD_DEEP := Color(0.92, 0.6, 0.18)
 const ICE := Color(0.62, 0.8, 1.0)
+const CHONDRULE := Color(0.5, 0.92, 0.82)  # вторая валюта, хондры
 const TEXT := Color(0.9, 0.93, 1.0)
 const TEXT_DIM := Color(0.62, 0.68, 0.82)
 const GLASS := Color(0.05, 0.07, 0.14, 0.62)
 const GLASS_BORDER := Color(0.55, 0.7, 1.0, 0.22)
 
 static var _theme: Theme
+
+
+## Хондра: застывшая стеклянная капля с бликом.
+static func draw_chondrule(ci: CanvasItem, c: Vector2, r: float) -> void:
+	ci.draw_circle(c, r * 1.6, Color(CHONDRULE, 0.12))
+	ci.draw_circle(c, r, CHONDRULE.darkened(0.35))
+	ci.draw_circle(c + Vector2(-0.12, -0.12) * r, r * 0.78, CHONDRULE)
+	ci.draw_circle(c + Vector2(-0.35, -0.35) * r, r * 0.28, Color(1, 1, 1, 0.85))
 
 
 static func get_theme() -> Theme:
