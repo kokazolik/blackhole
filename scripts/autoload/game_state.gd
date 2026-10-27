@@ -64,7 +64,7 @@ func absorb_mass(base_mass: float, base_value: float, material: String, at: Vect
 	var gained_mass: float = base_mass * body_bonus("mass")
 	mass += gained_mass
 	materials[material] = materials.get(material, 0.0) + gained_mass
-	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * body_bonus("value")
+	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
 	add_currency(gained)
 	mass_changed.emit(mass)
 	absorbed.emit(at, material, gained)
