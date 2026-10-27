@@ -30,7 +30,6 @@ const RIPPLE_SHADER := preload("res://shaders/pulse_ripple.gdshader")
 const EDDY_SHADER := preload("res://shaders/eddy.gdshader")
 const EDDY_EXTENT := 1.3  # половина стороны квадрата вихря в его радиусах (как EXTENT в шейдере)
 const MAX_PEBBLES := 140
-const MAX_MOONS := 6  # спутники рисуются тем же MultiMesh, что и гальки
 # Ветровая тень на валуне: за крупным телом (по ветру) газ почти стоит.
 const SHADOW_LEN := 7.0     # длина тени в радиусах тела
 const SHADOW_WIDTH := 1.25  # полуширина у самого тела, в радиусах
@@ -102,11 +101,11 @@ const CLUMP_TIME := 25.0              # за столько он сжимает�
 const CLUMP_COUNT := 30
 const CLUMP_VALUE := 1.5
 # Способности из дерева:
-const MOON_ORBIT := 2.4    # «Спутник»: орбита в твоих радиусах
-const MOON_R := 0.24       # радиус спутника в твоих радиусах
+const MOON_ORBIT := 2.4    # «Пылевое гало»: орбита облачков в твоих радиусах
+const MOON_R := 0.24       # радиус облачка (там, где оно подхватывает) в твоих радиусах
 const MOON_SPIN := 1.3     # радиан в секунду
 const CHAIN_R := 4.0       # «Цепная аккреция»: соседи в стольких радиусах съеденной гальки
-const PULSE_EVERY := 15.0  # «Импульс» на первом уровне; дальше чаще
+const PULSE_EVERY := 15.0  # «Ловушка давления» на первом уровне; дальше чаще
 const PULSE_GROW := 0.6    # за столько волна доходит до края
 const PULSE_REACH := 0.85  # доля радиуса притяжения, докуда бьёт волна
 const PULLED_SPEED := 1.4  # притянутое летит к тебе с такой долей твоей скорости
@@ -147,6 +146,7 @@ var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
+var _halo_glow := _make_glow()  # мягкое свечение облачков гало
 var _ripple := ColorRect.new()  # рябь волны импульса (шейдер по картинке экрана)
 var chain := 0           # шагов в текущей серии слипаний
 var _chain_timer := 0.0
@@ -179,10 +179,10 @@ func _ready() -> void:
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
 	_mm.use_custom_data = true
 	_mm.mesh = quad
-	_mm.instance_count = MAX_PEBBLES + MAX_MOONS
+	_mm.instance_count = MAX_PEBBLES
 	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
-	_buf.resize((MAX_PEBBLES + MAX_MOONS) * 12)
+	_buf.resize(MAX_PEBBLES * 12)
 	var mat := ShaderMaterial.new()
 	mat.shader = SHADER
 	mat.set_shader_parameter("atlas", ATLAS)
@@ -207,6 +207,20 @@ func _ready() -> void:
 	add_child(_ripple)
 	_hint.draw.connect(_draw_hints)
 	add_child(_hint)
+
+
+static func _make_glow() -> GradientTexture2D:
+	var g := Gradient.new()
+	g.set_color(0, Color(1, 1, 1, 1))
+	g.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 64
+	tex.height = 64
+	return tex
 
 
 func world_pos(p: Pebble) -> Vector2:
@@ -732,6 +746,7 @@ func _update_abilities(delta: float) -> void:
 	if _pulse_timer <= 0.0:
 		_pulse_timer = PULSE_EVERY / (0.5 + 0.5 * lvl)
 		pulse_t = 0.0
+		(_ripple.material as ShaderMaterial).set_shader_parameter("seed", randf())
 
 
 ## Волна импульса расходится и срывает с места всё, что можно съесть.
@@ -760,7 +775,8 @@ func _chain_from(p: Pebble, wp: Vector2) -> void:
 
 
 func _draw_abilities() -> void:
-	# Волна импульса — рябь по картинке мира (см. pulse_ripple.gdshader).
+	_draw_halo()
+	# Ловушка давления — волна уплотнения газа по картинке мира (см. pulse_ripple.gdshader).
 	_ripple.visible = pulse_t >= 0.0
 	if pulse_t >= 0.0:
 		var k := clampf(pulse_t / PULSE_GROW, 0.0, 1.0)
@@ -772,6 +788,38 @@ func _draw_abilities() -> void:
 		var mat := _ripple.material as ShaderMaterial
 		mat.set_shader_parameter("ring", r / half)
 		mat.set_shader_parameter("fade", fade * minf(1.0, k * 4.0))
+		var ice := smoothstep(GameData.SNOW_LINE - GameData.SNOW_LINE_WIDTH, GameData.SNOW_LINE + GameData.SNOW_LINE_WIDTH, player.position.length())
+		mat.set_shader_parameter("tint", Color(0.92, 0.78, 0.6).lerp(Color(0.75, 0.86, 1.0), ice))
+
+
+## Пылевое гало: облачка заряженной пыли кружат вокруг тебя, а по орбите —
+## редкие парящие пылинки. Ни одного твёрдого тела, только пыль в свете звезды.
+func _draw_halo() -> void:
+	var n := moon_count()
+	if n <= 0:
+		return
+	var px := 1.0 / camera.zoom.x
+	var mr := moon_radius()
+	var orbit := player.radius * MOON_ORBIT * sqrt(Skills.stat("moon_size"))
+	var dust := Color(0.86, 0.78, 0.64)
+	var t := Time.get_ticks_msec() * 0.001
+	# Тонкое кольцо пылинок по всей орбите.
+	for i in 36:
+		var a := _moon_angle * 0.6 + i * TAU / 36.0 + sin(i * 7.3) * 0.08
+		var rr := orbit * (1.0 + 0.12 * sin(i * 3.1 + t * 0.7))
+		_hint.draw_circle(player.position + Vector2.from_angle(a) * rr, 0.6 * px + mr * 0.04, Color(dust, 0.22))
+	for k in n:
+		var c := moon_pos(k)
+		var g := mr * 2.6
+		_hint.draw_texture_rect(_halo_glow, Rect2(c - Vector2(g, g), Vector2(g, g) * 2.0), false, Color(dust, 0.16))
+		# Пылинки облачка роятся вокруг его центра и чуть тянутся хвостом по орбите.
+		for i in 16:
+			var f := float(i) / 16.0
+			var a := t * (0.9 + f) + i * 2.399
+			var rr := mr * (0.25 + 0.85 * fmod(i * 0.618, 1.0))
+			var trail := Vector2.from_angle(_moon_angle + k * TAU / n - PI * 0.5) * mr * 0.9 * f
+			var sz := 0.7 * px + mr * (0.05 + 0.05 * fmod(i * 0.37, 1.0))
+			_hint.draw_circle(c + Vector2.from_angle(a) * rr - trail, sz, Color(dust.lightened(0.15 * (1.0 - f)), 0.75 - 0.4 * f))
 
 
 ## Присоединить гальку: масса, звёздная пыль, серия. Зовут удар игрока,
@@ -1073,28 +1121,8 @@ func _write() -> void:
 		_buf[b + 10] = 0.0
 		# 1 — жеода, 2 + доля — обломок с формой по этой доле.
 		_buf[b + 11] = 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0)
-	# Спутники — такие же камни из атласа, из твоего же вещества, медленно кувыркаются.
-	var n := clampi(moon_count(), 0, mini(MAX_MOONS, MAX_PEBBLES + MAX_MOONS - pebbles.size()))
-	if n > 0:
-		var s := moon_radius() * QUAD
-		var base := GameData.MATERIAL_ORDER.find(_main_material()) * 4
-		for k in n:
-			var b := (pebbles.size() + k) * 12
-			var pos := moon_pos(k)
-			_buf[b] = s
-			_buf[b + 1] = 0.0
-			_buf[b + 2] = 0.0
-			_buf[b + 3] = pos.x
-			_buf[b + 4] = 0.0
-			_buf[b + 5] = s
-			_buf[b + 6] = 0.0
-			_buf[b + 7] = pos.y
-			_buf[b + 8] = base + (k * 3 + 1) % 4
-			_buf[b + 9] = _moon_angle * (0.7 + 0.2 * k) + k * 1.9
-			_buf[b + 10] = 0.0
-			_buf[b + 11] = 0.0
 	_mm.buffer = _buf
-	_mm.visible_instance_count = pebbles.size() + n
+	_mm.visible_instance_count = pebbles.size()
 
 
 ## Ветровая тень — едва заметная прохладная полоса за крупным телом.

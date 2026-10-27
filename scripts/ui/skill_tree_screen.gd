@@ -1113,11 +1113,13 @@ func _draw_icon(id: String, col: Color) -> void:
 			for i in 4:
 				var v := Vector2(-15 + i * 10, 8 - i * 5)
 				_g.draw_circle(v, 2.5 + i * 0.9, Color(col, 0.45 + 0.18 * i))
-		"moon":
-			# Тело и спутник на наклонной орбите.
-			_g.draw_circle(Vector2.ZERO, 6.5, col)
-			_ellipse_arc(Vector2.ZERO, Vector2(17.0, 7.0), -0.35, Color(col, 0.7), w)
-			_g.draw_circle((Vector2.from_angle(_time * 0.8) * Vector2(17.0, 7.0)).rotated(-0.35), 3.4, col)
+		"halo":
+			# Тело в облачке парящих пылинок: точки кружат, ближние ярче.
+			_g.draw_circle(Vector2.ZERO, 6.0, col)
+			for i in 14:
+				var ang := _time * (0.5 + 0.03 * i) + i * 2.4
+				var rr := 10.0 + 7.0 * fmod(i * 0.37, 1.0)
+				_g.draw_circle(Vector2.from_angle(ang) * rr, 1.1 + 0.6 * fmod(i * 0.61, 1.0), Color(col, 0.9 - (rr - 10.0) * 0.07))
 		"chain":
 			# Съеденная галька тянет за собой соседей.
 			var pts := [Vector2(-13, 9), Vector2(-3, -2), Vector2(8, 6), Vector2(14, -9)]
