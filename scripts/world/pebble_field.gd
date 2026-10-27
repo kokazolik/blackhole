@@ -26,9 +26,11 @@ signal clump_started(world_position: Vector2)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
+const RIPPLE_SHADER := preload("res://shaders/pulse_ripple.gdshader")
 const EDDY_SHADER := preload("res://shaders/eddy.gdshader")
 const EDDY_EXTENT := 1.3  # половина стороны квадрата вихря в его радиусах (как EXTENT в шейдере)
 const MAX_PEBBLES := 140
+const MAX_MOONS := 6  # спутники рисуются тем же MultiMesh, что и гальки
 # Ветровая тень на валуне: за крупным телом (по ветру) газ почти стоит.
 const SHADOW_LEN := 7.0     # длина тени в радиусах тела
 const SHADOW_WIDTH := 1.25  # полуширина у самого тела, в радиусах
@@ -145,6 +147,7 @@ var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
+var _ripple := ColorRect.new()  # рябь волны импульса (шейдер по картинке экрана)
 var chain := 0           # шагов в текущей серии слипаний
 var _chain_timer := 0.0
 var _swarm_timer := -1.0  # до следующего роя; <0 — навыка нет
@@ -176,10 +179,10 @@ func _ready() -> void:
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
 	_mm.use_custom_data = true
 	_mm.mesh = quad
-	_mm.instance_count = MAX_PEBBLES
+	_mm.instance_count = MAX_PEBBLES + MAX_MOONS
 	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
-	_buf.resize(MAX_PEBBLES * 12)
+	_buf.resize((MAX_PEBBLES + MAX_MOONS) * 12)
 	var mat := ShaderMaterial.new()
 	mat.shader = SHADER
 	mat.set_shader_parameter("atlas", ATLAS)
@@ -196,6 +199,12 @@ func _ready() -> void:
 	_eddy_fx.visible = false
 	add_child(_eddy_fx)
 	add_child(_mm_node)
+	var ripple_mat := ShaderMaterial.new()
+	ripple_mat.shader = RIPPLE_SHADER
+	_ripple.material = ripple_mat
+	_ripple.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ripple.visible = false
+	add_child(_ripple)
 	_hint.draw.connect(_draw_hints)
 	add_child(_hint)
 
@@ -751,20 +760,18 @@ func _chain_from(p: Pebble, wp: Vector2) -> void:
 
 
 func _draw_abilities() -> void:
-	var px := 1.0 / camera.zoom.x
+	# Волна импульса — рябь по картинке мира (см. pulse_ripple.gdshader).
+	_ripple.visible = pulse_t >= 0.0
 	if pulse_t >= 0.0:
 		var k := clampf(pulse_t / PULSE_GROW, 0.0, 1.0)
 		var fade := 1.0 - clampf((pulse_t - PULSE_GROW) / 0.5, 0.0, 1.0)
 		var r := pulse_radius() * (1.0 - pow(1.0 - k, 2.0))
-		_hint.draw_arc(player.position, r, 0.0, TAU, 96, Color(0.6, 0.85, 1.0, 0.55 * fade), 3.0 * px, true)
-		_hint.draw_arc(player.position, r * 0.96, 0.0, TAU, 96, Color(0.6, 0.85, 1.0, 0.18 * fade), 9.0 * px, true)
-	var mr := moon_radius()
-	var to_star := -player.position.normalized()
-	for k in moon_count():
-		var c := moon_pos(k)
-		_hint.draw_circle(c, mr, Color(0.33, 0.3, 0.28))
-		_hint.draw_circle(c + to_star * mr * 0.22, mr * 0.78, Color(0.62, 0.57, 0.5))
-		_hint.draw_circle(c + to_star * mr * 0.45, mr * 0.4, Color(0.8, 0.75, 0.66))
+		var half := pulse_radius() * 1.15
+		_ripple.position = player.position - Vector2(half, half)
+		_ripple.size = Vector2(half, half) * 2.0
+		var mat := _ripple.material as ShaderMaterial
+		mat.set_shader_parameter("ring", r / half)
+		mat.set_shader_parameter("fade", fade * minf(1.0, k * 4.0))
 
 
 ## Присоединить гальку: масса, звёздная пыль, серия. Зовут удар игрока,
@@ -1066,8 +1073,28 @@ func _write() -> void:
 		_buf[b + 10] = 0.0
 		# 1 — жеода, 2 + доля — обломок с формой по этой доле.
 		_buf[b + 11] = 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0)
+	# Спутники — такие же камни из атласа, из твоего же вещества, медленно кувыркаются.
+	var n := clampi(moon_count(), 0, mini(MAX_MOONS, MAX_PEBBLES + MAX_MOONS - pebbles.size()))
+	if n > 0:
+		var s := moon_radius() * QUAD
+		var base := GameData.MATERIAL_ORDER.find(_main_material()) * 4
+		for k in n:
+			var b := (pebbles.size() + k) * 12
+			var pos := moon_pos(k)
+			_buf[b] = s
+			_buf[b + 1] = 0.0
+			_buf[b + 2] = 0.0
+			_buf[b + 3] = pos.x
+			_buf[b + 4] = 0.0
+			_buf[b + 5] = s
+			_buf[b + 6] = 0.0
+			_buf[b + 7] = pos.y
+			_buf[b + 8] = base + (k * 3 + 1) % 4
+			_buf[b + 9] = _moon_angle * (0.7 + 0.2 * k) + k * 1.9
+			_buf[b + 10] = 0.0
+			_buf[b + 11] = 0.0
 	_mm.buffer = _buf
-	_mm.visible_instance_count = pebbles.size()
+	_mm.visible_instance_count = pebbles.size() + n
 
 
 ## Ветровая тень — едва заметная прохладная полоса за крупным телом.

@@ -39,6 +39,7 @@ var _pulse := 0.0
 var _spin := 0.0
 var _trail: Array[Vector2] = []  # след в мировых координатах, летит по орбите вместе с пылью
 var _trail_timer := 0.0
+var _trail_count := 0  # сколько точек следа уже было: крупинки привязаны к своей точке
 var _glow_tex := _make_glow()
 var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
 var _pebble := Sprite2D.new()  # процедурная галька, проступает при переходе
@@ -222,6 +223,7 @@ func _update_trail(delta: float) -> void:
 	if _trail_timer >= TRAIL_STEP:
 		_trail_timer = 0.0
 		_trail.push_front(position)
+		_trail_count += 1
 		if _trail.size() > TRAIL_POINTS:
 			_trail.pop_back()
 
@@ -259,13 +261,20 @@ func _update_color() -> void:
 func _draw() -> void:
 	if dead:
 		return
-	# Шлейф мелкой пыли позади.
+	# Шлейф: мягкая пылевая дымка, расплывается и тает к хвосту, в ней —
+	# редкие крупинки, сорванные с тела.
+	var haze := body_color.darkened(0.25)
 	for i in range(1, _trail.size()):
 		var t := 1.0 - float(i) / TRAIL_POINTS
 		var p := _trail[i] - position
-		if p.length() < radius:
+		if p.length() < radius * 0.8:
 			continue
-		draw_circle(p, radius * (0.1 + 0.25 * t), Color(body_color, 0.14 * t))
+		var hs := radius * (1.1 + 1.3 * (1.0 - t))
+		draw_texture_rect(_glow_tex, Rect2(p - Vector2(hs, hs), Vector2(hs, hs) * 2.0), false, Color(haze, 0.07 * t * t))
+		var seed := float((_trail_count - i) % 97)
+		if int(seed) % 3 == 0:
+			var off := Vector2(sin(seed * 12.9898), cos(seed * 78.233)) * radius * (0.3 + 0.7 * (1.0 - t))
+			draw_circle(p + off, radius * 0.035 + 0.4, Color(body_color.lightened(0.2), 0.5 * t))
 
 	# Свечение и пылинка-комок.
 	var r := radius * (1.0 + 0.12 * _pulse)
