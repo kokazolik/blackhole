@@ -39,7 +39,13 @@ const RING_BOOST := 2.5               # в кольце-ловушке гале�
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
 const R_RANGE := Vector2(0.17, 1.25)
 const R_SKEW := 2.2
-const EASY_R := 0.2          # мельче этой доли твоего радиуса гальки прилипают на любой скорости, как пыль
+const BOULDER_SKEW := 1.5
+const BOULDER_COUNT := 1.5  # на валуне тел вокруг больше
+# Съесть можно всё, что меньше тебя (до EAT_R твоего радиуса). Что меньше в
+# 2,5 раза и больше (Skills.stat("grip"), база 0.4) — прилипает на любой скорости,
+# остальное — только если подлетать медленно, пока дуга зелёная.
+const EAT_R := 1.0
+const EASY_MAX := 0.95       # навыки «Хватки» не поднимают порог «без дуги» выше этого
 # Удар о крупную гальку откалывает от неё куски. Ты теряешь своё, а куски — мелочь,
 # их можно доесть. Без навыков от сколов это всё же убыток.
 const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
@@ -52,7 +58,7 @@ const SPLIT_MAX := 0.6       # максимальный шанс расколо�
 const SPLIT_KEEP := 0.85     # доля вещества, что остаётся в частях (остальное — пыль)
 const SELF_SPLIT_K := 0.2    # во сколько раз реже трескаешься ты сам
 const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
-const SIZE_GAP := 1.35                 # несъедобные — минимум на столько крупнее предела хватки
+const SIZE_GAP := 0.15                 # вокруг твоего размера тел нет: либо заметно меньше, либо заметно больше
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
@@ -350,7 +356,7 @@ func _maintain() -> void:
 	# рост не срывается в лавину.
 	var stage_mass := GameData.BOULDER_MASS if GameState.is_boulder() else 30.0
 	var thin := pow(maxf(GameState.mass / (stage_mass * THINNING_FROM), 1.0), -MASS_THINNING)
-	var target := mini(int(BASE_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k * thin + 0.5), MAX_PEBBLES)
+	var target := mini(int(BASE_COUNT * (BOULDER_COUNT if GameState.is_boulder() else 1.0) * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k * thin + 0.5), MAX_PEBBLES)
 	var food_target := int(FOOD_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.boulder_k + 0.5)
 	var bodies := 0
 	var food := 0
@@ -380,12 +386,15 @@ func _spawn(at: Vector2) -> void:
 		return
 	var p := Pebble.new()
 	p.pos = at - dust_field.frame_offset
-	p.r = player.radius * lerpf(R_RANGE.x, R_RANGE.y, pow(rng.randf(), R_SKEW))
+	# На валуне крупной съедобной добычи больше: за неё дают много.
+	p.r = player.radius * lerpf(R_RANGE.x, R_RANGE.y, pow(rng.randf(), BOULDER_SKEW if GameState.is_boulder() else R_SKEW))
 	# Чуть-чуть крупнее предела не бывает: несъедобная галька должна выглядеть
 	# заметно крупнее самой большой съедобной, а не «такой же».
-	var limit := player.radius * minf(Skills.stat("grip"), 0.95)
-	if p.r >= limit and p.r < limit * SIZE_GAP:
-		p.r = limit * SIZE_GAP
+	# Тел почти с тебя ростом не бывает: съедобное должно быть видно меньше тебя,
+	# несъедобное — видно крупнее.
+	var rel := p.r / player.radius
+	if absf(rel - EAT_R) < SIZE_GAP:
+		p.r = player.radius * (EAT_R - SIZE_GAP if rel < EAT_R else EAT_R + SIZE_GAP)
 	p.geode = rng.randf() < Skills.stat("geode")
 	p.material = _pick_material(dist)
 	p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
@@ -436,12 +445,17 @@ func _pick_material(dist: float) -> String:
 
 ## Можно ли присоединить гальку: предел размера растёт с навыками ветви «Захват».
 func absorbable(p: Pebble) -> bool:
-	return p.food or p.r < player.radius * minf(Skills.stat("grip"), 0.95)
+	return p.food or p.r < player.radius * EAT_R
 
 
 ## Мелочь, которая прилипает на любой скорости: еда валуна, отбитые куски и крошечные гальки.
 func is_easy(p: Pebble) -> bool:
-	return p.food or p.chunk_mass > 0.0 or p.r < player.radius * EASY_R
+	return p.food or p.chunk_mass > 0.0 or p.r < player.radius * easy_r()
+
+
+## Доля твоего радиуса, мельче которой тела прилипают на любой скорости.
+func easy_r() -> float:
+	return minf(Skills.stat("grip"), EASY_MAX)
 
 
 ## Серия гаснет, если долго не слипаться.
@@ -487,12 +501,11 @@ func _spawn_swarm(lvl: float) -> void:
 		center = player.position + player.position.normalized() * view_r * 0.75
 	var spread := view_r * (0.12 + 0.02 * lvl)
 	var count := mini(int(SWARM_COUNT * (1.0 + 0.35 * (lvl - 1.0))), MAX_PEBBLES - pebbles.size())
-	var grip := minf(Skills.stat("grip"), 0.95)
 	for k in count:
 		var p := Pebble.new()
 		p.pos = center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread)) - dust_field.frame_offset
 		# Рой из галек, которые ты способен присоединить: гоняться за ним есть смысл.
-		p.r = player.radius * rng.randf_range(R_RANGE.x, maxf(grip * 0.95, R_RANGE.x))
+		p.r = player.radius * rng.randf_range(R_RANGE.x, EAT_R * 0.7)
 		p.material = _pick_material(center.length())
 		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		p.angle = rng.randf() * TAU
@@ -549,7 +562,6 @@ func _spawn_eddy() -> void:
 	eddy_left = EDDY_DURATION
 	_eddy_t = 0.0
 	(_eddy_fx.material as ShaderMaterial).set_shader_parameter("seed", rng.randf())
-	var grip := minf(Skills.stat("grip"), 0.95)
 	var count := mini(EDDY_COUNT, MAX_PEBBLES - pebbles.size())
 	for k in count:
 		var p := Pebble.new()
@@ -558,9 +570,9 @@ func _spawn_eddy() -> void:
 		p.pos = eddy_center + Vector2.from_angle(a) * d
 		# Половина по зубам, остальные крупнее: сталкиваться с ними на ходу больно.
 		if rng.randf() < 0.5:
-			p.r = player.radius * rng.randf_range(R_RANGE.x, maxf(grip * 0.95, R_RANGE.x))
+			p.r = player.radius * rng.randf_range(R_RANGE.x, EAT_R - SIZE_GAP)
 		else:
-			p.r = player.radius * rng.randf_range(grip * SIZE_GAP, maxf(0.9, grip * SIZE_GAP))
+			p.r = player.radius * rng.randf_range(EAT_R + SIZE_GAP, 1.5)
 		p.material = _pick_material(center.length())
 		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		p.angle = rng.randf() * TAU
@@ -605,7 +617,7 @@ func _collide(p: Pebble, index: int) -> void:
 		return  # только что отбитый кусок ещё разлетается
 	var easy := is_easy(p)
 	if easy or (absorbable(p) and impact <= stick):
-		var m := GameData.pebble_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
+		var m := GameData.bite_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
 		if p.chunk_mass > 0.0:
 			m = p.chunk_mass
 		m *= ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)

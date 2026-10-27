@@ -309,6 +309,17 @@ static func pebble_mass(r: float, player_mass: float) -> float:
 	return player_mass * pow(r / body_radius(player_mass), 3.0) * PEBBLE_DENSITY
 
 
+## Сколько массы прирастает, когда съел тело радиуса r. Теперь можно есть всё,
+## что меньше тебя, и по честному кубу крупная добыча сразу удваивала бы тело:
+## прирост растёт как квадрат отношения радиусов, а не как куб.
+const BITE_K := 0.05
+const BITE_EXP := 2.0
+
+
+static func bite_mass(r: float, player_mass: float) -> float:
+	return player_mass * BITE_K * pow(r / body_radius(player_mass), BITE_EXP) * PEBBLE_DENSITY
+
+
 # --- Этап «Валун» ---
 # Метровый барьер: тела около метра сильнее всего тормозятся газом и быстрее всех
 # падают на звезду. Сразу после превращения снос почти вдвое сильнее, чем у
@@ -352,13 +363,13 @@ static func barrier_drift(m: float) -> float:
 
 # На этапе «Валун» тело уже само весит как тысячи галек, и каждое слипание
 # прибавляет ему лишь малую долю: рост к планетезимали растянут на ~25 минут.
-const BOULDER_GAIN := 0.7
+const BOULDER_GAIN := 1.15
 const BOULDER_GAIN_FADE := 0.15
-# Звёздной пыли за слипание валун получает меньше: тел вокруг много, ветка дорогая.
-const BOULDER_VALUE := 0.03
+# Доход за слипание на валуне тот же, что был на гальке (игрок богат), цены ветки под него.
+const BOULDER_VALUE := 1.0
 # К концу этапа тело в сотни раз тяжелее, и без притормаживания доход взлетал
 # в сотни раз: книга скупалась за минуту. На валуне он растёт с массой слабее.
-const BOULDER_VALUE_FADE := 0.25
+const BOULDER_VALUE_FADE := 0.35
 
 
 static func boulder_value(m: float) -> float:
@@ -370,7 +381,7 @@ static func boulder_value(m: float) -> float:
 const BOULDER_MATERIAL := {
 	"metal": {"effects": {"drift": -0.12, "thrust": 0.1}, "text": "металл тяжёлый: снос −12%, тяга +10%"},
 	"silicate": {"effects": {"chip": -0.25}, "text": "камень прочный: сколов на 25% меньше"},
-	"ice": {"effects": {"stick": 0.2, "grip": 0.02}, "text": "лёд липкий: слипание +20%, хватка +2%"},
+	"ice": {"effects": {"stick": 0.2, "grip": 0.04}, "text": "лёд липкий: слипание +20%, без дуги прилипает на 4% крупнее"},
 	"carbon": {"effects": {"chip": -0.12, "stick": 0.12}, "text": "пористый углерод гасит удары: сколов −12%, слипание +12%"},
 	"chondrite": {"effects": {"drift": -0.04, "chip": -0.08, "stick": 0.06}, "text": "смесь: снос −4%, сколов −8%, слипание +6%"},
 }

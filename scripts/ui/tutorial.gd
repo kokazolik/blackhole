@@ -79,7 +79,7 @@ const PEBBLE_STEPS := [
 	},
 	{
 		"id": "p_small",
-		"text": "Вот галька меньше тебя, её можно присоединить. Сплошное кольцо цвета её вещества значит, что она тебе по силам.",
+		"text": "Вот галька меньше тебя, её можно присоединить. Всё, что меньше тебя, тебе по силам. А совсем мелкие, меньше тебя в два с половиной раза, прилипают на любой скорости.",
 		"tap": true,
 		"pause": true,
 		"focus": "small",
@@ -93,7 +93,7 @@ const PEBBLE_STEPS := [
 	},
 	{
 		"id": "p_join",
-		"text": "Теперь попробуй сам. Подлетай к гальке медленно и следи за дугой с твоей стороны: зелёная — вы слипнетесь, красная — удар слишком быстрый, от тебя отколются осколки.",
+		"text": "Теперь попробуй сам. К гальке почти с тебя размером подлетай медленно и следи за дугой с твоей стороны: зелёная — вы слипнетесь, красная — удар слишком быстрый, от тебя отколются осколки.",
 		"focus": "join",
 	},
 	{
@@ -694,7 +694,7 @@ func _prepare_focus(step: Dictionary) -> bool:
 				# Рядом нет такой — подкладываем, чтобы было что показать. Ближе к звезде:
 				# туда сносит, туда и смотреть.
 				var side := Vector2.from_angle(pl.position.angle() + PI + randf_range(-0.8, 0.8))
-				var r := pl.radius * (minf(Skills.stat("grip"), 0.95) * 0.85 if kind == "small" else 1.15)
+				var r := pl.radius * (0.7 if kind == "small" else 1.3)
 				p = pf.spawn_for_guide(pl.position + side * pl.radius * 7.0, r)
 			_focus = {"pebble": p, "r": maxf(p.r * 2.6, pl.radius * 1.3)}
 			if kind == "small":
@@ -756,7 +756,7 @@ func _nearest_pebble(small: bool, food := false) -> PebbleField.Pebble:
 	for p in pf.pebbles:
 		if p.food != food:
 			continue
-		if not food and (pf.absorbable(p) != small or (small and p.r < main.player.radius * minf(Skills.stat("grip"), 0.95) * 0.6)):
+		if not food and (pf.absorbable(p) != small or (small and pf.is_easy(p))):
 			continue  # крошечную показывать не стоит: её легко спутать с пылью
 		var d := pf.world_pos(p).distance_to(pp)
 		if d < bd and d < lim:

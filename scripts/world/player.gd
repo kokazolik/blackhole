@@ -10,7 +10,7 @@ signal burned_up
 
 const ACCEL_FACTOR := 3.0
 const PEBBLE_ACCEL_FACTOR := 1.4  # галька тяжелее: тяга разгоняет её дольше
-const PEBBLE_SPEED := 60.0         # предельная скорость свежей гальки (без навыков), ед./с
+const PEBBLE_SPEED := 66.0         # предельная скорость свежей гальки (без навыков), ед./с
 const PEBBLE_SPEED_EXP := 0.6      # как растёт скорость гальки с радиусом
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
 # Галька рисуется шейдером: обломки окрашены по составу, и вид перетекает за ним.
