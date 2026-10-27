@@ -191,29 +191,58 @@ func buy(id: String) -> bool:
 
 
 func recompute() -> void:
-	stats = BASE_STATS.duplicate()
+	# В старых сохранениях у узлов бывало больше уровней, чем теперь.
 	for id in order:
-		# В старых сохранениях у узлов бывало больше уровней, чем теперь.
 		if level(id) > max_level(id):
 			GameState.skill_levels[id] = max_level(id)
-		var lvl := level(id)
+	_body = _current_body()
+	stats = compute(GameState.skill_levels)
+	stats_changed.emit()
+
+
+## Итоговые параметры при этих уровнях узлов (для «было → станет» — с уровнем выше).
+func compute(levels: Dictionary) -> Dictionary:
+	var out := BASE_STATS.duplicate()
+	for id in order:
+		var lvl := int(levels.get(id, 0))
 		if lvl <= 0:
 			continue
 		var effects: Dictionary = nodes[id].get("effects", {})
 		for key in effects:
 			if key == "dust_level":
-				stats.dust_level = maxi(int(stats.dust_level), int(effects[key]))
+				out.dust_level = maxi(int(out.dust_level), int(effects[key]))
 			else:
-				stats[key] = float(stats.get(key, 1.0)) + float(effects[key]) * lvl
+				out[key] = float(out.get(key, 1.0)) + float(effects[key]) * lvl
 	# Вещество продолжает путь: выбранный на гальке состав даёт валуну свой бонус.
-	_body = _current_body()
-	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_body, {}).get("effects", {})
+	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_current_body(), {}).get("effects", {})
 	for key in bonus:
-		stats[key] = float(stats.get(key, 1.0)) + float(bonus[key])
+		out[key] = float(out.get(key, 1.0)) + float(bonus[key])
 	# Скидки складываются, но совсем убрать сколы и ветер нельзя.
-	stats.chip = maxf(stats.chip, 0.1)
-	stats.drift = maxf(stats.drift, 0.2)
-	stats_changed.emit()
+	out.chip = maxf(out.chip, 0.1)
+	out.drift = maxf(out.drift, 0.2)
+	return out
+
+
+## Параметры, если изучить у узла ещё один уровень.
+func preview(id: String) -> Dictionary:
+	var levels := GameState.skill_levels.duplicate()
+	levels[id] = mini(level(id) + 1, max_level(id))
+	return compute(levels)
+
+
+## Что даёт параметру каждый изученный узел: [название, уровень, прибавка].
+## Бонус вещества валуну идёт строкой с уровнем 0.
+func contributions(key: String) -> Array:
+	var out := []
+	for id in order:
+		var lvl := level(id)
+		var effects: Dictionary = nodes[id].get("effects", {})
+		if lvl > 0 and effects.has(key):
+			out.append([nodes[id].title, lvl, float(effects[key]) * lvl if key != "dust_level" else float(effects[key])])
+	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_current_body(), {}).get("effects", {})
+	if bonus.has(key):
+		out.append(["Вещество: " + GameData.BODY_TYPES[_current_body()].name.to_lower(), 0, float(bonus[key])])
+	return out
 
 
 func _load_definitions() -> void:

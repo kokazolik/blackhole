@@ -34,10 +34,17 @@ const BRANCH_COLOR := Color(0.95, 0.78, 0.45)
 var _canvas: Node2D  # общий сдвиг и масштаб древа; рисуют три слоя внутри
 # Слои: под узлами — свечение и искры (каждый кадр), сами узлы, ветки и подписи
 # (только когда что-то поменялось), поверх — вращающиеся украшения (каждый кадр).
-# Подписи с обводкой и сглаженные дуги дороги, поэтому статичное не перерисовывается.
+# Подписи с обводкой и сглаженные дуги дороги, поэтому у каждого узла и каждой ветки
+# свой холст: перерисовывается только тот, что поменялся или сейчас растёт.
 var _layer_under := Node2D.new()
 var _layer_static := Node2D.new()
 var _layer_over := Node2D.new()
+var _edges_root := Node2D.new()
+var _nodes_root := Node2D.new()
+var _fork_item := Node2D.new()
+var _items := {}        # узел или ветка -> его холст
+var _sigs := {}         # узел или ветка -> как нарисован сейчас
+var _static_dirty := true
 var _g: CanvasItem  # слой, в который сейчас рисуем
 var _colors := {}   # цвет узла, считается при перерисовке статичного слоя
 var _anim_until := 0.0  # до этого времени ветки растут и узлы распускаются
@@ -48,6 +55,7 @@ var _info: PanelContainer
 var _info_title: Label
 var _info_desc: RichTextLabel
 var _info_level: Label
+var _info_change: RichTextLabel  # «было → станет» для каждого параметра узла
 var _buy_button: Button
 var _price_row: HBoxContainer   # цена на кнопке: иконки валют с числами
 var _price_dust: Label
@@ -56,6 +64,10 @@ var _price_bead: Control
 var _price_word: Label
 var _price_col := Color.WHITE  # цвет искры на кнопке
 var close_button: Button
+var _stats_button: Button
+var _stats_panel: PanelContainer  # «Мои параметры»: что даёт каждый узел
+var _stats_list: VBoxContainer
+var _stats_scroll: ScrollContainer
 var _selected := ""
 var _press_pos := Vector2.ZERO
 var _dragging := false
@@ -68,6 +80,12 @@ var _glow := _make_glow()
 var _edges := {}       # "родитель>узел" -> время начала роста
 var _node_shown := {}  # узел -> время, когда начинает появляться
 var _bursts := {}      # узел -> время покупки (вспышка)
+# Плавный пролёт камеры к новой ветви: откуда, куда, когда начался и сколько длится.
+var _cam_from := Vector3.ZERO  # x, y — сдвиг древа, z — масштаб
+var _cam_to := Vector3.ZERO
+var _cam_t0 := 0.0
+var _cam_dur := 0.0
+const CAM_FLY_TIME := 1.4
 
 
 static func _make_glow() -> GradientTexture2D:
@@ -99,30 +117,117 @@ func _ready() -> void:
 func open() -> void:
 	visible = true
 	get_tree().paused = true
-	_canvas.scale = Vector2.ONE
-	_canvas.position = Vector2((size.x - INFO_WIDTH) * 0.5, size.y * 0.5) - _node_pos("start")
-	_sync_branches(false)
+	_cam_dur = 0.0
+	# Камера там, где игрок её оставил; в первый раз — на «Начале».
+	var v := GameState.tree_view
+	if v.size() == 3:
+		var k := clampf(float(v[2]), ZOOM_RANGE.x, ZOOM_RANGE.y)
+		_canvas.scale = Vector2(k, k)
+		_canvas.position = _area_center() - Vector2(v[0], v[1]) * k
+	else:
+		_canvas.scale = Vector2.ONE
+		_canvas.position = _area_center() - _node_pos("start")
 	_select("" if Skills.is_owned("start") else "start")
+	if GameState.tree_seen == null or GameState.tree_seen.is_empty():
+		GameState.tree_seen = []
+		_sync_branches(false)
+	else:
+		# Новые ветви (открылась стадия) не появляются молча: камера летит к ним,
+		# и они вырастают у игрока на глазах.
+		_sync_branches(false, true)
+		var fresh := _unseen()
+		if not fresh.is_empty():
+			_fly_to(fresh)
+			_sync_branches(true, false, CAM_FLY_TIME * 0.8)
+			_select(fresh[0])
 	_refresh()
+
+
+func _area_center() -> Vector2:
+	return Vector2((size.x - INFO_WIDTH) * 0.5, size.y * 0.5)
+
+
+## Узлы, которые уже видны в книге, но игрок их ещё не видел.
+func _unseen() -> Array:
+	var out := []
+	for id in Skills.order:
+		if id in GameState.tree_seen or not _would_show(id):
+			continue
+		out.append(id)
+	return out
+
+
+func _would_show(id: String) -> bool:
+	if Skills.nodes[id].get("path", "") == "" and not Skills.is_unlocked(id):
+		return false
+	var reqs: Array = Skills.nodes[id].get("requires", [])
+	if reqs.is_empty():
+		return true
+	for req in reqs:
+		if Skills.is_owned(req):
+			return true
+	return false
+
+
+## Камера плавно перелетает к новым узлам: они по центру, а ветка тянется к ним
+## от родителя из-за края.
+func _fly_to(ids: Array) -> void:
+	var box := Rect2(_node_pos(ids[0]), Vector2.ZERO)
+	for id in ids:
+		box = box.expand(_node_pos(id))
+	box = box.grow(NODE_RADIUS * 3.0)
+	var area := Vector2(size.x - INFO_WIDTH - 48.0, size.y - 160.0)
+	var k := clampf(minf(maxf(_canvas.scale.x, 0.8), minf(area.x / box.size.x, area.y / box.size.y)), ZOOM_RANGE.x, ZOOM_RANGE.y)
+	var pos := _area_center() - box.get_center() * k
+	_cam_from = Vector3(_canvas.position.x, _canvas.position.y, _canvas.scale.x)
+	_cam_to = Vector3(pos.x, pos.y, k)
+	_cam_t0 = _time
+	_cam_dur = CAM_FLY_TIME
+
+
+func _update_camera() -> void:
+	if _cam_dur <= 0.0:
+		return
+	var t := clampf((_time - _cam_t0) / _cam_dur, 0.0, 1.0)
+	var e := t * t * (3.0 - 2.0 * t)
+	var c := _cam_from.lerp(_cam_to, e)
+	_canvas.position = Vector2(c.x, c.y)
+	_canvas.scale = Vector2(c.z, c.z)
+	if t >= 1.0:
+		_cam_dur = 0.0
+
+
+func _store_view() -> void:
+	var k := _canvas.scale.x
+	var c := (_area_center() - _canvas.position) / k
+	GameState.tree_view = [c.x, c.y, k]
 
 
 func _on_skills_changed() -> void:
-	_sync_branches(visible)
+	# Закрытая книга ветви не трогает: новое покажется при открытии (см. open).
+	if visible:
+		_sync_branches(true)
 	_refresh()
+	if _stats_panel.visible:
+		_fill_stats()
 
 
 ## Ветка идёт от купленного узла к узлу, который стал доступен. Новые ветки
 ## растут по очереди, а узел на конце распускается, когда ветка дотянется.
-func _sync_branches(animate: bool) -> void:
+## only_seen — без анимации показать лишь то, что игрок уже видел; остальное
+## потом вырастет с задержкой delay (пока камера летит к новой ветви).
+func _sync_branches(animate: bool, only_seen := false, delay := 0.0) -> void:
 	if not animate:
 		_edges.clear()
 		_node_shown.clear()
-	var delay := 0.0
+		_sigs.clear()
 	for id in Skills.order:
 		# Пути веществ видны сразу, как только открыта «Избирательность»: игрок
 		# заранее видит развилку. Закрытые пути остаются на виду — серыми, с замком.
 		var is_path: bool = Skills.nodes[id].get("path", "") != ""
 		if not Skills.is_unlocked(id) and not is_path:
+			continue
+		if only_seen and id not in GameState.tree_seen:
 			continue
 		var reqs: Array = Skills.nodes[id].get("requires", [])
 		if reqs.is_empty() and not _node_shown.has(id):
@@ -138,10 +243,17 @@ func _sync_branches(animate: bool) -> void:
 			if not _node_shown.has(id):
 				_node_shown[id] = start + GROW_TIME
 				_anim_until = maxf(_anim_until, start + GROW_TIME + APPEAR_TIME + 0.1)
-	_layer_static.queue_redraw()
+	for id in _node_shown:
+		if id not in GameState.tree_seen:
+			GameState.tree_seen.append(id)
+	_static_dirty = true
 
 
 func close() -> void:
+	_cam_dur = 0.0
+	_store_view()
+	if _stats_panel.visible:
+		_toggle_stats()
 	visible = false
 	get_tree().paused = false
 	closed.emit()
@@ -168,7 +280,9 @@ func _build() -> void:
 	for layer in [_layer_under, _layer_static, _layer_over]:
 		_canvas.add_child(layer)
 	_layer_under.draw.connect(_draw_under)
-	_layer_static.draw.connect(_draw_static)
+	for root in [_edges_root, _nodes_root, _fork_item]:
+		_layer_static.add_child(root)
+	_fork_item.draw.connect(_draw_fork_item)
 	_layer_over.draw.connect(_draw_over)
 
 	_currency_label = Label.new()
@@ -197,6 +311,8 @@ func _build() -> void:
 	close_btn.offset_bottom = 90
 	close_btn.pressed.connect(close)
 	add_child(close_btn)
+
+	_build_stats()
 
 	_info = PanelContainer.new()
 	# Панель справа: в горизонтальном режиме не перекрывает древо.
@@ -245,6 +361,16 @@ func _build() -> void:
 	_info_desc.fit_content = false
 	_info_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	text_box.add_child(_info_desc)
+	_info_change = RichTextLabel.new()
+	_info_change.bbcode_enabled = true
+	_info_change.fit_content = true
+	_info_change.scroll_active = false
+	_info_change.add_theme_font_override("normal_font", UiTheme.FONT_SERIF)
+	_info_change.add_theme_font_override("bold_font", UiTheme.FONT_SERIF_BOLD)
+	_info_change.add_theme_font_size_override("normal_font_size", 20)
+	_info_change.add_theme_font_size_override("bold_font_size", 20)
+	_info_change.add_theme_color_override("default_color", Color(UiTheme.PARCHMENT, 0.75))
+	text_box.add_child(_info_change)
 	_info_level = Label.new()
 	_info_level.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
 	_info_level.add_theme_font_size_override("font_size", 19)
@@ -289,6 +415,132 @@ func _build() -> void:
 	_price_row.add_child(_price_bead)
 	_price_chondrules = _price_label()
 	_price_row.add_child(_price_chondrules)
+
+
+## «Скорость 1,6 → 1,7» по каждому параметру узла; изученный до конца — только итог.
+func _change_text(id: String) -> String:
+	var effects: Dictionary = Skills.nodes[id].get("effects", {})
+	var lines := PackedStringArray()
+	var show_next := not Skills.is_maxed(id) and Skills.blocked_by(id) == ""
+	var after := Skills.preview(id) if show_next else {}
+	for key in effects:
+		if not StatInfo.INFO.has(key):
+			continue
+		var was := Skills.stat(key)
+		var line := StatInfo.title(key) + "  [b]" + StatInfo.format(key, was) + "[/b]"
+		if show_next and not is_equal_approx(float(after[key]), was):
+			var col := "#9fe08a" if StatInfo.better(key, was, float(after[key])) else "#ff9a80"
+			line = StatInfo.title(key) + "  " + StatInfo.format(key, was) + " → [b][color=%s]%s[/color][/b]" % [col, StatInfo.format(key, float(after[key]))]
+		lines.append(line)
+	return "\n".join(lines)
+
+
+## Кнопка внизу слева и лист «Мои параметры» поверх древа (панель узла остаётся справа).
+func _build_stats() -> void:
+	_stats_button = Button.new()
+	_stats_button.text = "Мои параметры"
+	UiTheme.paint_button(_stats_button, false, 22)
+	_stats_button.anchor_top = 1.0
+	_stats_button.anchor_bottom = 1.0
+	_stats_button.offset_left = 24
+	_stats_button.offset_right = 284
+	_stats_button.offset_top = -90
+	_stats_button.offset_bottom = -24
+	_stats_button.pressed.connect(_toggle_stats)
+	add_child(_stats_button)
+
+	_stats_panel = PanelContainer.new()
+	_stats_panel.anchor_right = 1.0
+	_stats_panel.anchor_bottom = 1.0
+	_stats_panel.offset_left = 24
+	_stats_panel.offset_right = -INFO_WIDTH - 48
+	_stats_panel.offset_top = 104
+	_stats_panel.offset_bottom = -104
+	_stats_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_stats_panel.add_theme_stylebox_override("panel", UiTheme.painted_panel(28))
+	_stats_panel.visible = false
+	# Древо под листом притушено, чтобы не мешало читать.
+	_stats_panel.draw.connect(func() -> void:
+		_stats_panel.draw_rect(Rect2(Vector2(8, 8), _stats_panel.size - Vector2(16, 16)), Color(0.02, 0.01, 0.05, 0.75)))
+	add_child(_stats_panel)
+	_stats_scroll = ScrollContainer.new()
+	_stats_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_stats_panel.add_child(_stats_scroll)
+	_stats_list = VBoxContainer.new()
+	_stats_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stats_list.add_theme_constant_override("separation", 6)
+	_stats_scroll.add_child(_stats_list)
+
+
+func _toggle_stats() -> void:
+	_stats_panel.visible = not _stats_panel.visible
+	_stats_button.text = "К древу" if _stats_panel.visible else "Мои параметры"
+	if _stats_panel.visible:
+		_fill_stats()
+		_stats_scroll.scroll_vertical = 0
+
+
+## Параметр показываем, если его что-то меняет; главные — всегда, со своего этапа.
+const CORE_STATS := ["value", "speed", "gravity", "reach", "drift", "stick", "thrust", "chip"]
+
+
+func _fill_stats() -> void:
+	for c in _stats_list.get_children():
+		c.queue_free()
+	var stage := mini(GameState.stage, 2)
+	var income := Skills.stat("value") * Skills.stat("value_mul") * (1.0 if GameState.is_boulder() else Skills.stat("pebble_value_mul"))
+	_stats_row("Доход с добычи", "×" + StatInfo.num(income), "всё, что прибавляет к звёздной пыли, перемножено", true)
+	for g in StatInfo.GROUPS.size():
+		var rows := []
+		for key in StatInfo.INFO:
+			if StatInfo.group(key) != g:
+				continue
+			var contrib := Skills.contributions(key)
+			if contrib.is_empty() and not (key in CORE_STATS and g <= stage):
+				continue
+			rows.append([key, contrib])
+		if rows.is_empty():
+			continue
+		var head := Label.new()
+		head.text = StatInfo.GROUPS[g]
+		head.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+		head.add_theme_font_size_override("font_size", 22)
+		head.add_theme_color_override("font_color", Color(UiTheme.GOLD, 0.7))
+		_stats_list.add_child(head)
+		for r in rows:
+			var key: String = r[0]
+			var parts := PackedStringArray()
+			for c in r[1]:
+				parts.append("%s%s %s" % [c[0], " ур. %d" % c[1] if c[1] > 1 else "", StatInfo.format_delta(key, c[2])])
+			_stats_row(StatInfo.title(key), StatInfo.format(key, Skills.stat(key)), " · ".join(parts) if not parts.is_empty() else "пока ничего не прибавлено")
+
+
+func _stats_row(title: String, value: String, note: String, big := false) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 0)
+	var line := HBoxContainer.new()
+	var name := Label.new()
+	name.text = title
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+	name.add_theme_font_size_override("font_size", 26 if big else 22)
+	name.add_theme_color_override("font_color", UiTheme.PARCHMENT)
+	line.add_child(name)
+	var val := Label.new()
+	val.text = value
+	val.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	val.add_theme_font_size_override("font_size", 28 if big else 22)
+	val.add_theme_color_override("font_color", UiTheme.GOLD)
+	line.add_child(val)
+	box.add_child(line)
+	var sub := Label.new()
+	sub.text = note
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+	sub.add_theme_font_size_override("font_size", 17)
+	sub.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.6))
+	box.add_child(sub)
+	_stats_list.add_child(box)
 
 
 func _price_label() -> Label:
@@ -351,6 +603,8 @@ func _refresh() -> void:
 			_info_desc.text += "\n\nВещество продолжает путь. " + (
 				"Твоё тело — %s: %s." % [GameData.BODY_TYPES[GameState.body_type()].name.to_lower(), bonus.text] if not bonus.is_empty()
 				else "Состав ещё не сложился, и бонуса от вещества нет: металл, камень, лёд и углерод дают валуну каждый своё.")
+		_info_change.text = _change_text(_selected)
+		_info_change.visible = _info_change.text != ""
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
 		if node.get("legendary", false):
 			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")
@@ -389,20 +643,21 @@ func _refresh() -> void:
 				if not req.is_empty():
 					_buy_button.text = "Сначала «%s»%s" % [Skills.nodes[req[0]].title, " ур. %d" % lv if lv > 1 else ""]
 		_fit_desc_later()
-	_layer_static.queue_redraw()
+	_static_dirty = true
 
 
 func _process(delta: float) -> void:
 	# Узлы пульсируют, ветки растут и по ним бегут искры, поэтому перерисовка каждый кадр.
 	if visible:
 		_time += delta
+		_update_camera()
 		_layout_bg()
 		var inv := 1.0 / _canvas.scale.x
 		_view = Rect2(-_canvas.position * inv, size * inv).grow(NODE_RADIUS * 4.0)
 		_layer_under.queue_redraw()
 		_layer_over.queue_redraw()
-		if _time < _anim_until:
-			_layer_static.queue_redraw()
+		if _static_dirty or _time < _anim_until + 0.1:
+			_sync_static()
 
 
 func _layout_bg() -> void:
@@ -432,17 +687,79 @@ func _draw_under() -> void:
 	_g.draw_set_transform(Vector2.ZERO)
 
 
-func _draw_static() -> void:
-	_g = _layer_static
+## Перерисовывает только те холсты, что поменялись: растущую ветку и распускающийся
+## узел каждый кадр, остальные — когда меняется цвет или уровень.
+func _sync_static() -> void:
+	var full := _static_dirty
+	_static_dirty = false
 	for key in _edges:
 		var t: float = (_time - float(_edges[key])) / GROW_TIME
-		if t > 0.0:
-			var parts: PackedStringArray = (key as String).split(">")
-			_draw_branch(_node_pos(parts[0]), _node_pos(parts[1]), minf(t, 1.0), absi((key as String).hash()))
+		var sig := "" if t <= 0.0 else ("done" if t >= 1.0 else str(t))
+		if _sigs.get(key, null) == sig:
+			continue
+		_sigs[key] = sig
+		_item(key, _edges_root, Vector2.ZERO).queue_redraw()
 	for id in Skills.order:
-		if _is_visible_node(id):
-			_draw_node(id, _node_pos(id), _appear(id))
-	_g.draw_set_transform(Vector2.ZERO)
+		if not _node_shown.has(id):
+			if _items.has(id):
+				_items[id].visible = false
+			continue
+		var k := _appear(id) if _time >= float(_node_shown[id]) else -1.0
+		var sig := ""
+		if k >= 0.0:
+			if k < 1.0:
+				sig = str(k)
+			elif full or not (_sigs.get(id, "") as String).begins_with("s|"):
+				_colors[id] = _node_color(id)
+				sig = "s|%s|%d|%s" % [_colors[id].to_html(), Skills.level(id), Skills.blocked_by(id)]
+			else:
+				continue
+		if _sigs.get(id, null) == sig:
+			continue
+		_sigs[id] = sig
+		var item := _item(id, _nodes_root, _node_pos(id))
+		item.visible = k >= 0.0
+		item.queue_redraw()
+	if full:
+		_fork_item.queue_redraw()
+		# Ветки, которых больше нет (новый забег), стираются.
+		for key in _items:
+			if ">" in key and not _edges.has(key) and _sigs.get(key, "") != "gone":
+				_sigs[key] = "gone"
+				_items[key].queue_redraw()
+
+
+func _item(key: String, root: Node2D, at: Vector2) -> Node2D:
+	if not _items.has(key):
+		var item := Node2D.new()
+		item.position = at
+		root.add_child(item)
+		_items[key] = item
+		if ">" in key:
+			item.draw.connect(_draw_edge_item.bind(key, item))
+		else:
+			item.draw.connect(_draw_node_item.bind(key, item))
+	return _items[key]
+
+
+func _draw_edge_item(key: String, item: Node2D) -> void:
+	var t: float = (_time - float(_edges.get(key, INF))) / GROW_TIME
+	if t <= 0.0:
+		return
+	_g = item
+	var parts := key.split(">")
+	_draw_branch(_node_pos(parts[0]), _node_pos(parts[1]), minf(t, 1.0), absi(key.hash()))
+
+
+func _draw_node_item(id: String, item: Node2D) -> void:
+	if not _is_visible_node(id):
+		return
+	_g = item
+	_draw_node(id, Vector2.ZERO, _appear(id))
+
+
+func _draw_fork_item() -> void:
+	_g = _fork_item
 	_draw_path_fork()
 
 
@@ -892,6 +1209,7 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
+				_cam_dur = 0.0
 				_pressed = true
 				_dragging = false
 				_press_pos = event.position
@@ -952,6 +1270,7 @@ func _current_pinch_dist() -> float:
 
 
 func _zoom_at(screen_pos: Vector2, factor: float) -> void:
+	_cam_dur = 0.0
 	var old := _canvas.scale.x
 	var new_scale := clampf(old * factor, ZOOM_RANGE.x, ZOOM_RANGE.y)
 	_canvas.position = screen_pos - (screen_pos - _canvas.position) * (new_scale / old)

@@ -31,6 +31,8 @@ var boulder_intro_done := false
 var fps_120 := false  # настройка, а не прогресс: «Начать заново» её не сбрасывает
 var heal_pool := 0.0  # отколотая масса, которая ещё прирастёт обратно (не сохраняется)
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
+var tree_view: Array = []  # где игрок оставил камеру книги: [x, y, масштаб] точки в центре
+var tree_seen = []  # узлы, что игрок уже видел в книге; null — старое сохранение
 
 
 func _ready() -> void:
@@ -195,7 +197,10 @@ func save_game() -> void:
 		"boulder_intro_done": boulder_intro_done,
 		"tips_seen": tips_seen,
 		"fps_120": fps_120,
+		"tree_view": tree_view,
 	}
+	if tree_seen != null:
+		data.tree_seen = tree_seen
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(data))
@@ -219,6 +224,9 @@ func load_game() -> void:
 	boulder_intro_done = bool(data.get("boulder_intro_done", false))
 	tips_seen = Array(data.get("tips_seen", []))
 	fps_120 = bool(data.get("fps_120", false))
+	tree_view = Array(data.get("tree_view", []))
+	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
+	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	stage = maxi(stage, GameData.stage_index(mass))
 	for key in data.get("materials", {}):
@@ -260,6 +268,8 @@ func _reset_values() -> void:
 	chondrules = 0
 	mass = 1.0
 	skill_levels = {}
+	tree_view = []
+	tree_seen = []
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:
