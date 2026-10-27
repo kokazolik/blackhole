@@ -73,18 +73,20 @@ void fragment() {
 	float hx = texture(height_tex, t1 + vec2(TEX, 0.0)).r - texture(height_tex, t1 - vec2(TEX, 0.0)).r;
 	float hy = texture(height_tex, t1 + vec2(0.0, TEX)).r - texture(height_tex, t1 - vec2(0.0, TEX)).r;
 	vec2 g = vec2(hx, hy) * HS / (2.0 * TEX);
-	// Крупный слой той же плитки: пятна тона и пологие бугры, прячет повтор.
+	// Крупный слой той же плитки, сильно размытый (дальний мип-уровень): пологие
+	// бугры и пятна тона без очертаний хондр, прячет повтор плитки.
 	mat2 rot = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8));
-	vec2 t2 = rot * ps / (tile * 4.7) + offset.yx * 1.7;
-	vec4 c2 = texture(color_tex, t2);
-	float h2 = texture(height_tex, t2).r;
-	float h2x = texture(height_tex, t2 + vec2(TEX * 4.0, 0.0)).r - h2;
-	float h2y = texture(height_tex, t2 + vec2(0.0, TEX * 4.0)).r - h2;
-	vec2 g2 = transpose(rot) * (vec2(h2x, h2y) * HS / (4.0 * TEX)) / 4.7;
-	g += g2 * 2.2;
+	vec2 t2 = rot * ps / (tile * 3.3) + offset.yx * 1.7;
+	const float LOD = 5.0;
+	const float STEP2 = 24.0 * TEX;
+	float lum2 = dot(textureLod(color_tex, t2, LOD).rgb, vec3(0.3, 0.5, 0.2));
+	float h2 = textureLod(height_tex, t2, LOD).r;
+	float h2x = textureLod(height_tex, t2 + vec2(STEP2, 0.0), LOD).r - h2;
+	float h2y = textureLod(height_tex, t2 + vec2(0.0, STEP2), LOD).r - h2;
+	vec2 g2 = transpose(rot) * (vec2(h2x, h2y) * HS / STEP2) / 3.3;
+	g += g2 * 6.0;
 
-	float lum2 = dot(c2.rgb, vec3(0.3, 0.5, 0.2));
-	float macro = 0.82 + 0.4 * lum2 + 0.18 * (noise(ps * 3.0 + offset * 5.0) - 0.5);
+	float macro = 0.75 + 1.4 * (lum2 - 0.2) + 0.2 * (noise(ps * size_pr / 30.0 + offset * 5.0) - 0.5);
 	vec3 albedo = c1.rgb * tint * macro;
 	float metal = c1.a;
 
