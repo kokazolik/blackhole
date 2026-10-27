@@ -157,6 +157,22 @@ static func stage_index(mass: float) -> int:
 	return idx
 
 
+## Коротко для цен: три значащие цифры без лишних нулей — 300K, 1.25M, 45.5K.
+static func format_short(v: float) -> String:
+	if v < 1000.0:
+		return str(int(floor(v)))
+	var suffixes := ["K", "M", "B", "T"]
+	var i := -1
+	while v >= 1000.0 and i < suffixes.size() - 1:
+		v /= 1000.0
+		i += 1
+	var digits := 0 if v >= 100.0 else (1 if v >= 10.0 else 2)
+	var s := String.num(v, digits)
+	if "." in s:
+		s = s.rstrip("0").rstrip(".")
+	return s + suffixes[i]
+
+
 ## Русское склонение по числу: 1 хондру, 2 хондры, 5 хондр.
 static func plural(n: int, one: String, few: String, many: String) -> String:
 	var n100 := n % 100

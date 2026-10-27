@@ -49,6 +49,12 @@ var _info_title: Label
 var _info_desc: RichTextLabel
 var _info_level: Label
 var _buy_button: Button
+var _price_row: HBoxContainer   # цена на кнопке: иконки валют с числами
+var _price_dust: Label
+var _price_chondrules: Label
+var _price_bead: Control
+var _price_word: Label
+var _price_col := Color.WHITE  # цвет искры на кнопке
 var close_button: Button
 var _selected := ""
 var _press_pos := Vector2.ZERO
@@ -235,16 +241,15 @@ func _build() -> void:
 	_info_desc.add_theme_font_override("normal_font", UiTheme.FONT_SERIF)
 	_info_desc.add_theme_font_size_override("normal_font_size", 21)
 	_info_desc.add_theme_color_override("default_color", UiTheme.PARCHMENT)
+	# Описание занимает всё свободное место, а длинное уменьшает шрифт (см. _fit_desc).
+	_info_desc.fit_content = false
+	_info_desc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	text_box.add_child(_info_desc)
 	_info_level = Label.new()
 	_info_level.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
 	_info_level.add_theme_font_size_override("font_size", 19)
 	_info_level.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.6))
 	text_box.add_child(_info_level)
-
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	text_box.add_child(spacer)
 
 	_buy_button = Button.new()
 	_buy_button.custom_minimum_size = Vector2(0, 70)
@@ -253,6 +258,59 @@ func _build() -> void:
 	UiTheme.paint_button(_buy_button, true, 24)
 	_buy_button.pressed.connect(_on_buy)
 	text_box.add_child(_buy_button)
+	# «Изучить» и цена иконками валют — одной строкой по центру кнопки.
+	_price_row = HBoxContainer.new()
+	_price_row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_price_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_price_row.add_theme_constant_override("separation", 6)
+	_price_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_buy_button.add_child(_price_row)
+	_price_word = Label.new()
+	_price_word.text = "Изучить"
+	_price_word.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+	_price_word.add_theme_font_size_override("font_size", 24)
+	_price_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_price_row.add_child(_price_word)
+	var word_gap := Control.new()
+	word_gap.custom_minimum_size = Vector2(10, 0)
+	word_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_price_row.add_child(word_gap)
+	var spark := Control.new()
+	spark.custom_minimum_size = Vector2(24, 0)
+	spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spark.draw.connect(func() -> void: UiTheme.draw_spark(spark, spark.size * 0.5, 11.0, _price_col))
+	_price_row.add_child(spark)
+	_price_dust = _price_label()
+	_price_row.add_child(_price_dust)
+	_price_bead = Control.new()
+	_price_bead.custom_minimum_size = Vector2(30, 0)
+	_price_bead.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_price_bead.draw.connect(func() -> void: UiTheme.draw_chondrule(_price_bead, _price_bead.size * 0.5 + Vector2(4, 0), 9.0))
+	_price_row.add_child(_price_bead)
+	_price_chondrules = _price_label()
+	_price_row.add_child(_price_chondrules)
+
+
+func _price_label() -> Label:
+	var l := Label.new()
+	l.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+	l.add_theme_font_size_override("font_size", 24)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## Размер панели известен только после раскладки: подбираем шрифт на следующем кадре.
+func _fit_desc_later() -> void:
+	await get_tree().process_frame
+	_fit_desc()
+
+
+## Длинное описание не должно уходить за край: уменьшаем шрифт, пока текст не влезет.
+func _fit_desc() -> void:
+	for fs in [21, 20, 19, 18, 17, 16, 15, 14]:
+		_info_desc.add_theme_font_size_override("normal_font_size", fs)
+		if _info_desc.get_content_height() <= _info_desc.size.y:
+			return
 
 
 func _node_pos(id: String) -> Vector2:
@@ -281,6 +339,11 @@ func _refresh() -> void:
 	if _selected != "":
 		var node: Dictionary = Skills.nodes[_selected]
 		_info_title.text = node.title
+		# Длинное название уменьшается, чтобы влезть в панель.
+		var title_size := 32
+		while title_size > 22 and UiTheme.FONT_SERIF_BOLD.get_string_size(node.title, HORIZONTAL_ALIGNMENT_LEFT, -1, title_size).x > INFO_WIDTH - 60.0:
+			title_size -= 1
+		_info_title.add_theme_font_size_override("font_size", title_size)
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
 		if _selected == "boulder_root":
@@ -293,6 +356,7 @@ func _refresh() -> void:
 			_info_level.text = "Легендарный навык" + (" · изучен" if Skills.is_owned(_selected) else "")
 		elif node.get("ability", false):
 			_info_level.text = "Способность · изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
+		_price_row.visible = false
 		var blocker := Skills.blocked_by(_selected)
 		if blocker != "":
 			_info_level.text = "Путь закрыт: выбрано «%s»" % Skills.nodes[blocker].title
@@ -302,16 +366,29 @@ func _refresh() -> void:
 			_buy_button.text = "Изучено"
 			_buy_button.disabled = true
 		else:
-			var price := GameData.format_number(Skills.cost(_selected))
-			if Skills.cost2(_selected) > 0:
-				price += " и %d %s" % [Skills.cost2(_selected), GameData.plural(Skills.cost2(_selected), "хондру", "хондры", "хондр")]
 			_buy_button.disabled = not Skills.can_buy(_selected)
-			_buy_button.text = ("Нужно " if _buy_button.disabled else "Изучить за ") + price
+			_buy_button.text = ""
+			_price_row.visible = true
+			# Чего не хватает, то красным. На тусклой кнопке цвета светлее, иначе не прочесть.
+			var short := Color(0.62, 0.12, 0.08) if not _buy_button.disabled else Color(1.0, 0.5, 0.4)
+			var ok := Color(0.28, 0.16, 0.04) if not _buy_button.disabled else Color(0.88, 0.82, 0.7)
+			_price_col = ok if GameState.currency >= Skills.cost(_selected) else short
+			_price_row.get_child(2).queue_redraw()
+			_price_word.add_theme_color_override("font_color", ok)
+			_price_dust.text = GameData.format_short(Skills.cost(_selected))
+			_price_dust.add_theme_color_override("font_color", ok if GameState.currency >= Skills.cost(_selected) else short)
+			var c2 := Skills.cost2(_selected)
+			_price_bead.visible = c2 > 0
+			_price_chondrules.visible = c2 > 0
+			_price_chondrules.text = str(c2)
+			_price_chondrules.add_theme_color_override("font_color", ok if GameState.chondrules >= c2 else short)
 			if not Skills.is_unlocked(_selected):
+				_price_row.visible = false
 				var req: Array = node.get("requires", [])
 				var lv := int(node.get("requires_level", 1))
 				if not req.is_empty():
-					_buy_button.text = "Нужно: %s ур. %d" % [Skills.nodes[req[0]].title, lv]
+					_buy_button.text = "Сначала «%s»%s" % [Skills.nodes[req[0]].title, " ур. %d" % lv if lv > 1 else ""]
+		_fit_desc_later()
 	_layer_static.queue_redraw()
 
 

@@ -25,6 +25,15 @@ const GLASS_BORDER := Color(0.55, 0.7, 1.0, 0.22)
 static var _theme: Theme
 
 
+## Звёздная пыль: четырёхлучевая искра с мягким ореолом.
+static func draw_spark(ci: CanvasItem, c: Vector2, r: float, col: Color = GOLD) -> void:
+	ci.draw_circle(c, r * 1.07, Color(col, 0.12))
+	var w := r * 0.29
+	ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -r), c + Vector2(w, -w), c + Vector2(r, 0), c + Vector2(w, w),
+		c + Vector2(0, r), c + Vector2(-w, w), c + Vector2(-r, 0), c + Vector2(-w, -w)]), col)
+	ci.draw_circle(c, r * 0.21, Color(1, 1, 0.9, col.a))
+
+
 ## Хондра: застывшая стеклянная капля с бликом.
 static func draw_chondrule(ci: CanvasItem, c: Vector2, r: float) -> void:
 	ci.draw_circle(c, r * 1.6, Color(CHONDRULE, 0.12))

@@ -54,9 +54,7 @@ func _on_chipped(at: Vector2, lost: float) -> void:
 	var angle := (at - player.position).angle()
 	if _hits.size() < LIMIT:
 		_hits.append({"angle": angle, "color": Color(1.0, 0.55, 0.3), "t": 0.0})
-	if _popups.size() >= LIMIT:
-		_popups.pop_front()
-	_popups.append({"pos": at, "text": "−%.1f массы" % lost, "color": Color(1.0, 0.5, 0.35), "t": 0.0, "drift": randf_range(-0.4, 0.4)})
+	popup_sum(at, lost, "−%.1f массы", Color(1.0, 0.5, 0.35), 20, "chip")
 
 
 func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
@@ -74,17 +72,59 @@ func _on_absorbed(at: Vector2, material: String, gained: float) -> void:
 				"color": color,
 				"t": -i * 0.03,
 			})
+	# Ешь горстями — «+N» сливаются в одно число, а не лепятся друг на друга.
+	for p in _popups:
+		if p.has("gained") and p.t < 0.35 and p.pos.distance_to(at) < player.radius * 2.0:
+			p.gained += gained
+			p.text = _gain_text(p.gained)
+			p.color = color
+			return
 	if _popups.size() >= LIMIT:
 		_popups.pop_front()
-	var text := "+%d" % roundi(gained) if is_equal_approx(gained, roundf(gained)) else "+%.1f" % gained
-	_popups.append({"pos": at, "text": text, "color": color, "t": 0.0, "drift": randf_range(-0.4, 0.4)})
+	_popups.append({"pos": at, "text": _gain_text(gained), "color": color, "t": 0.0, "drift": randf_range(-0.4, 0.4), "gained": gained})
+
+
+func _gain_text(gained: float) -> String:
+	if gained >= 1000.0:
+		return "+" + GameData.format_number(gained)
+	return "+%d" % roundi(gained) if is_equal_approx(gained, roundf(gained)) else "+%.1f" % gained
 
 
 ## Всплывающая надпись в мировых координатах: серия, жеода и т. п.
-func popup(at: Vector2, text: String, color: Color, size := 20) -> void:
+## С ключом свежая надпись того же рода заменяется, а не встаёт рядом.
+func popup(at: Vector2, text: String, color: Color, size := 20, key := "") -> void:
+	var p := _find(key)
+	if p.is_empty():
+		_add({"pos": at, "text": text, "color": color, "t": 0.0, "drift": 0.0, "size": size, "key": key})
+	else:
+		p.text = text
+		p.t = minf(p.t, 0.15)
+
+
+## Надпись-сумма: удары и хондры подряд складываются в одно число.
+func popup_sum(at: Vector2, amount: float, fmt: String, color: Color, size: int, key: String) -> void:
+	var p := _find(key)
+	if p.is_empty():
+		_add({"pos": at, "text": fmt % amount, "color": color, "t": 0.0, "drift": 0.0, "size": size, "key": key, "sum": amount})
+	else:
+		p.sum += amount
+		p.text = fmt % p.sum
+		p.t = minf(p.t, 0.15)
+
+
+func _find(key: String) -> Dictionary:
+	if key == "":
+		return {}
+	for p in _popups:
+		if p.get("key", "") == key and p.t < 0.7:
+			return p
+	return {}
+
+
+func _add(p: Dictionary) -> void:
 	if _popups.size() >= LIMIT:
 		_popups.pop_front()
-	_popups.append({"pos": at, "text": text, "color": color, "t": 0.0, "drift": 0.0, "size": size})
+	_popups.append(p)
 
 
 func _process(delta: float) -> void:
@@ -162,11 +202,34 @@ func _draw() -> void:
 	# в пикселях экрана (масштаб 1/zoom), чтобы шрифт был чётким при любом приближении.
 	var px := 1.0 / camera.zoom.x
 	var font: Font = UiTheme.FONT_NUMBERS
+	# Надписи не наслаиваются: в бою их бывает много сразу, и каждая следующая
+	# (по возрасту) поднимается над теми, с кем пересеклась. Сдвиг плавный.
+	var placed: Array[Rect2] = []
+	for p in _popups:
+		var k0: float = p.t / POPUP_TIME
+		var fs0 := float(p.get("size", 20))
+		var base: Vector2 = (p.pos - camera.get_screen_center_position()) / px + Vector2(p.drift * 20.0 * k0, -36.0 * (1.0 - pow(1.0 - k0, 2.0)) - 8.0)
+		var bw := font.get_string_size(p.text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(fs0)).x
+		var r := Rect2(base + Vector2(-bw * 0.5, -fs0 + float(p.get("shift", 0.0))), Vector2(bw, fs0 + 2.0))
+		var need := 0.0
+		for _pass in 12:
+			var moved := false
+			for o in placed:
+				if r.intersects(o):
+					var up := r.end.y - o.position.y + 1.0
+					r.position.y -= up
+					need -= up
+					moved = true
+			if not moved:
+				break
+		# Новая надпись сразу встаёт на место, старые подвигаются плавно.
+		p.shift = float(p.get("shift", 0.0)) + (need if not p.has("shift") else need * 0.5)
+		placed.append(r)
 	for p in _popups:
 		var k: float = p.t / POPUP_TIME
 		var pop := 1.0 + 0.5 * exp(-k * 14.0) * sin(k * 30.0) if k < 0.3 else 1.0
 		var font_size := roundi(float(p.get("size", 20)) * pop)
-		var pos: Vector2 = p.pos + Vector2(p.drift * 20.0 * k, -36.0 * (1.0 - pow(1.0 - k, 2.0)) - 8.0) * px
+		var pos: Vector2 = p.pos + Vector2(p.drift * 20.0 * k, -36.0 * (1.0 - pow(1.0 - k, 2.0)) - 8.0 + float(p.get("shift", 0.0))) * px
 		var alpha := 1.0 if k < 0.6 else 1.0 - (k - 0.6) / 0.4
 		var w := font.get_string_size(p.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		draw_set_transform(pos, 0.0, Vector2(px, px))

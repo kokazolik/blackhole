@@ -89,7 +89,7 @@ func _ready() -> void:
 	GameState.chondrule_found.connect(func(at: Vector2, amount: int) -> void:
 		_chondrule_time = _intro_time
 		_chondrule_pos = at
-		fx.popup(at + Vector2(0, -player.radius * 1.6), "Хондра +%d" % amount, UiTheme.CHONDRULE, 22))
+		fx.popup_sum(at + Vector2(0, -player.radius * 1.6), amount, "Хондра +%d", UiTheme.CHONDRULE, 22, "chondrule"))
 	pebble_field.geode_found.connect(func(at: Vector2, value: float) -> void:
 		_geode_time = _intro_time
 		_geode_pos = at
@@ -104,9 +104,9 @@ func _ready() -> void:
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
 	pebble_field.pebble_split.connect(func(at: Vector2) -> void:
-		fx.popup(at + Vector2(0, -player.radius * 2.0), "Раскол!", Color(1.0, 0.75, 0.45), 24))
+		fx.popup(at + Vector2(0, -player.radius * 2.0), "Раскол!", Color(1.0, 0.75, 0.45), 24, "split"))
 	pebble_field.self_split.connect(func(_at: Vector2) -> void:
-		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Ты треснул!", Color(1.0, 0.45, 0.35), 24))
+		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Ты треснул!", Color(1.0, 0.45, 0.35), 24, "selfsplit"))
 	pebble_field.chunks_broken.connect(func(at: Vector2) -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
@@ -225,7 +225,7 @@ func _start_pebble_intro(delay: float, boulder := false) -> void:
 
 func _on_combo(chain: int, multiplier: float) -> void:
 	if chain >= 2:
-		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Серия %d · ×%.2f" % [chain, multiplier], Color(1.0, 0.8, 0.45), 22)
+		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Серия %d · ×%.2f" % [chain, multiplier], Color(1.0, 0.8, 0.45), 22, "combo")
 
 
 func _show_caption(title: String, subtitle: String) -> void:
