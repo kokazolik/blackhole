@@ -79,6 +79,7 @@ const FOOD_MASS_R := 0.52            # еда рисуется крупнее, �
 const FOOD_VALUE := 3.0
 const SWARM_COUNT := 16               # галек в рое на первом уровне навыка
 const RESTITUTION := 0.35             # сколько скорости остаётся после отскока
+const PEBBLE_RESTITUTION := 0.15      # рыхлые гальки между собой почти не отпрыгивают: пыль гасит удар
 const HINT_RANGE := 7.0               # в радиусах игрока: где видно кольцо-подсказку удара
 # Вихрь турбулентности: газ закручивает гальки в круговорот. Появляется в стороне
 # и стоит на месте — нырять туда или нет, решает игрок. Внутри больше добычи и жеод,
@@ -297,12 +298,9 @@ func _process(delta: float) -> void:
 		p.pos += (p.vel + calm_drift(wp, GameData.gas_drift(wp, p.r), p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
+		giant.shove(p, wp)
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
-			pebbles.remove_at(i)
-		elif giant.sweeps(wp, p.r):
-			# Странник смёл гальку: она прилипла к нему, в стороны брызнула пыль.
-			_debris(wp, (wp - giant.world_center()).normalized(), 15.0, p.material, 3)
 			pebbles.remove_at(i)
 		elif not player.dead:
 			if _moon_catch(p, wp):
@@ -310,8 +308,69 @@ func _process(delta: float) -> void:
 			else:
 				_collide(p, i)
 		i -= 1
+	_collide_pebbles(pull_r if pull > 0.0 else 0.0)
 	_write()
 	_hint.queue_redraw()
+
+
+## Тела сталкиваются друг с другом: рыхлые комки отскакивают слабо, тяжёлое
+## сдвигает лёгкое. Быстрый удар выбивает пыль. Летящие по сценарию (вихрь,
+## сгусток, притянутые, только что отбитые куски) и мелочь валуна не мешаем.
+## Гальки, что уже плывут к тебе по твоему притяжению (flow_r), идут потоком и не
+## толкаются: иначе они застревали бы друг в друге на подлёте.
+func _collide_pebbles(flow_r: float) -> void:
+	var list: Array[Pebble] = []
+	var max_r := 0.0
+	var me := player.position - dust_field.frame_offset
+	for p in pebbles:
+		if p.food or p.pulled or p.crash or (p.clump and clump_left > 0.0) or (p.eddy and eddy_left > 0.0) \
+				or (p.chunk_mass > 0.0 and p.hit_cd > 0.0):
+			continue
+		if flow_r > 0.0 and p.pos.distance_squared_to(me) < flow_r * flow_r and absorbable(p):
+			continue
+		list.append(p)
+		max_r = maxf(max_r, p.r)
+	if list.size() < 2:
+		return
+	# Сортировка по x: соседей ищем только в полосе ширины двух радиусов.
+	list.sort_custom(func(a: Pebble, b: Pebble) -> bool: return a.pos.x < b.pos.x)
+	var stick := player.stick_speed()
+	for ia in list.size() - 1:
+		var a := list[ia]
+		var reach := (a.r + max_r) * 0.92
+		for ib in range(ia + 1, list.size()):
+			var b := list[ib]
+			if b.pos.x - a.pos.x > reach:
+				break
+			var to := b.pos - a.pos
+			var contact := (a.r + b.r) * 0.92
+			var d2 := to.length_squared()
+			if d2 >= contact * contact or d2 < 0.000001:
+				continue
+			var d := sqrt(d2)
+			var n := to / d
+			var ma := a.r * a.r * a.r
+			var mb := b.r * b.r * b.r
+			var wa := mb / (ma + mb)  # доля сдвига лёгкому — больше
+			var overlap := contact - d
+			a.pos -= n * overlap * wa
+			b.pos += n * overlap * (1.0 - wa)
+			var impact := (a.vel - b.vel).dot(n)  # скорость сближения
+			if impact <= 0.0:
+				continue
+			var j := impact * (1.0 + PEBBLE_RESTITUTION)
+			a.vel -= n * j * wa
+			b.vel += n * j * (1.0 - wa)
+			a.spin += rng.randf_range(-0.5, 0.5) * impact / maxf(a.r, 1.0) * wa
+			b.spin += rng.randf_range(-0.5, 0.5) * impact / maxf(b.r, 1.0) * (1.0 - wa)
+			a.spin = clampf(a.spin, -3.0, 3.0)
+			b.spin = clampf(b.spin, -3.0, 3.0)
+			if impact > stick and a.hit_cd <= 0.0 and b.hit_cd <= 0.0:
+				a.hit_cd = 0.3
+				b.hit_cd = 0.3
+				var at := a.pos + n * a.r + dust_field.frame_offset
+				_debris(at, n.orthogonal() * (1.0 if rng.randf() < 0.5 else -1.0), impact * 0.5, \
+					a.material if a.r < b.r else b.material, clampi(int(impact / stick * 2.0), 2, 6))
 
 
 ## Крупные тела рядом, за которыми есть ветровая тень. Только на валуне: у гальки
@@ -1106,6 +1165,10 @@ func _main_material() -> String:
 ## Пыль брызгами от удара (о Странника и т. п.).
 func spray(at: Vector2, dir: Vector2, impact: float) -> void:
 	_debris(at, dir, impact, _main_material(), 6)
+
+
+func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> void:
+	_debris(at, dir, impact, material, 3)
 
 
 ## Осколки разлетаются веером от точки удара и становятся обычной пылью.

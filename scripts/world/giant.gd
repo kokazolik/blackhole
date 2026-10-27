@@ -2,7 +2,7 @@ class_name Giant
 extends Node2D
 ## Странник: на этапе «Галька» мимо иногда проплывает огромный валун, в десятки раз
 ## крупнее тебя. В диске тела всех размеров летят рядом, и тот, кем ты станешь,
-## уже существует. Съесть его нельзя: он сметает гальки на своём пути, о него
+## уже существует. Съесть его нельзя: он расталкивает гальки на своём пути, о него
 ## можно удариться, а за ним тянется шлейф пыли, сорванной встречным газом.
 
 const FIRST_DELAY := 100.0        # после начала этапа «Галька», с
@@ -145,6 +145,24 @@ func _shed_dust(c: Vector2, delta: float) -> void:
 		dust_field.add_debris(at, _vel * 0.3 + a * _rng.randf_range(5.0, 25.0) * GameData.world_k, mini(level, Skills.max_dust_level()), "silicate")
 
 
-## Гальки на его пути прилипают к нему: он сметает всё, что не успело увернуться.
-func sweeps(wp: Vector2, r: float) -> bool:
-	return active and wp.distance_to(world_center()) < radius * 0.95 + r * 0.5
+## Гальки на его пути не исчезают: он расталкивает их, как ледокол, и гонит
+## перед собой. Удар быстрее предела слипания выбивает из гальки пыль.
+func shove(p: PebbleField.Pebble, wp: Vector2) -> void:
+	if not active:
+		return
+	var c := world_center()
+	var to := wp - c
+	var contact := radius * 0.93 + p.r * 0.92
+	var d2 := to.length_squared()
+	if d2 >= contact * contact or d2 < 0.000001:
+		return
+	var d := sqrt(d2)
+	var n := to / d
+	p.pos += n * (contact - d)
+	var into := (p.vel - _vel).dot(n)
+	if into < 0.0:
+		p.vel -= n * into * (1.0 + BOUNCE)
+		p.spin = clampf(p.spin + _rng.randf_range(-1.0, 1.0) * -into / maxf(p.r, 1.0), -3.0, 3.0)
+		if -into > player.stick_speed() and p.hit_cd <= 0.0:
+			p.hit_cd = 0.3
+			pebble_field.spray_from(wp - n * p.r, n, -into * 0.5, p.material)
