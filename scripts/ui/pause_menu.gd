@@ -147,6 +147,16 @@ func _show_dev() -> void:
 			_dev_say("Странник появится, как только продолжишь")
 		else:
 			_dev_say("Странник бывает только на этапе гальки"))
+	for ecl in [0, 1]:
+		_dev_button("Галька: на свету" if ecl == 0 else "Галька: затмение", func():
+			var main := get_tree().current_scene
+			var dr: Variant = main.get("drifters") if main else null
+			if dr and GameState.stage == 0 and GameState.tutorial_done and main.player.pebble_k <= 0.0:
+				dr.force_eclipse = ecl
+				dr._h_timer = 0.05
+				_dev_say("Галька прилетит, как только продолжишь")
+			else:
+				_dev_say("Галька бывает только на этапе пылинки, после обучения"))
 	_dev_button("Сбросить подсказки", func():
 		GameState.tips_seen = []
 		GameState.save_game()

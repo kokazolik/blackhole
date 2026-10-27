@@ -310,7 +310,6 @@ func _process(delta: float) -> void:
 		p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
-		giant.shove(p, wp)
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
 			pebbles.remove_at(i)

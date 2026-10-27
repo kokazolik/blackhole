@@ -425,17 +425,6 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 
 ## Осколки после удара: обычная пыль, которая разлетается и тормозится газом.
 ## pos и vel в мировых координатах.
-## Сдвинуть пылинку снаружи (её сметает огромная галька). pos и vel в системе
-## отсчёта пыли. Неподвижная пыль вдали от игрока не обходится каждый кадр,
-## поэтому ставим её в ближний список.
-func shove(d: Dust, pos: Vector2, vel: Vector2) -> void:
-	d.pos = pos
-	d.vel = vel
-	_write_origin(d)
-	if not _near.has(d):
-		_near.append(d)
-
-
 func add_debris(pos: Vector2, vel: Vector2, level: int, material: String) -> void:
 	if _add_dust(pos, maxi(level, 1), material):
 		var d: Dust = dust.back()

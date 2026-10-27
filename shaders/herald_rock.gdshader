@@ -10,6 +10,7 @@ uniform sampler2D height_tex : repeat_enable, filter_linear_mipmap;
 uniform vec2 light_dir = vec2(-1.0, 0.0);
 uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
 uniform vec3 tint = vec3(1.0);
+uniform float backlight = 0.0;  // звезда за галькой: по краю светится кайма
 uniform float quad = 1.08;     // половина квадрата в радиусах тела
 uniform float tile = 0.05;     // плитка в радиусах тела
 uniform float size_pr = 1000.0; // радиус тела в радиусах игрока
@@ -119,5 +120,9 @@ void fragment() {
 	col += star_light * (metal * (0.3 * mu0 + 2.2 * pow(nh, 40.0)) + hs.g * 0.25 * pow(nh, 60.0)) * shadow * step(0.0, day);
 	// Едва заметная подсветка ночной стороны пылью диска.
 	col += albedo * vec3(0.05, 0.05, 0.065) * (0.5 + 0.5 * n0.z);
+	// Затмение: огромная звезда выглядывает из-за края, и тонкая кромка с пылью
+	// на ней светится, как кольцо при затмении.
+	float back = backlight * max(-dot(normalize(vec3(u, 0.0)), L), 0.0);
+	col += star_light * back * (vec3(1.0, 0.82, 0.55) * exp(-e * 0.9) * 1.1 + vec3(0.35, 0.25, 0.16) * exp(-e * 0.12) * 0.25);
 	COLOR = vec4(col, alpha * COLOR.a);
 }

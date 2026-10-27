@@ -5,8 +5,8 @@ extends Node2D
 ## Камешек — тот, кем ты скоро станешь. Он в тысячу раз крупнее тебя, поэтому
 ## на экран попадает только его край: почти прямая стена, которая
 ## медленно проплывает мимо. Вблизи видно, из чего он сложен: хондры, светлые
-## включения, искры металла в тёмной матрице. Пыль на пути он сметает, а от
-## его края ты отскакиваешь.
+## включения, искры металла в тёмной матрице. От его края ты отскакиваешь, а
+## пыль проходит под ним и не скапливается у края.
 
 signal appeared(kind: String, world_position: Vector2)
 
@@ -17,6 +17,11 @@ const HERALD_GAP := Vector2(6.0, 12.0)  # край проходит в стол�
 const HERALD_CROSS := 30.0          # за сколько проплывает мимо, с
 const HERALD_SPIN := 0.012          # медленное вращение, рад/с
 const HERALD_LIT_CONE := 1.2        # отклонение от «звезда за спиной», рад: край к тебе освещён
+const ECLIPSE_CHANCE := 0.5         # доля пролётов между тобой и звездой (после первого)
+const ECLIPSE_CONE := 0.15          # отклонение от направления на звезду, рад
+const ECLIPSE_GAP := 0.3           # край при затмении — на таком расстоянии, в радиусах обзора
+const SHADOW_DEPTH := 0.72          # насколько темнеет всё в тени гальки
+const SHADOW_SOFT := Vector2(15.0, 0.012)  # полутень: в твоих радиусах + доля расстояния от края
 const TILE := 45.0                  # плитка поверхности в твоих радиусах
 const TILE_SIZE := 1024
 const QUAD := 1.08
@@ -41,6 +46,10 @@ var _h_spin := 0.0
 var _lump_a := PackedFloat32Array()
 var _lump_p := PackedFloat32Array()
 var _h_sprite := Sprite2D.new()
+var _shadow := Node2D.new()
+var _shadow_mat := ShaderMaterial.new()
+var eclipse := false  # галька между тобой и звездой
+var force_eclipse := -1  # для меню разработчика: 0 — освещённый пролёт, 1 — затмение
 var _baked := false
 
 
@@ -53,7 +62,15 @@ func _ready() -> void:
 	blank.fill(Color.WHITE)
 	_h_sprite.texture = ImageTexture.create_from_image(blank)
 	_h_sprite.visible = false
+	_h_sprite.z_index = 2  # над тенью: свою ночную сторону галька рисует сама
 	add_child(_h_sprite)
+	# Тень гальки: экран умножается на затемнение, без отдельного прохода по пыли.
+	_shadow_mat.shader = preload("res://shaders/herald_shadow.gdshader")
+	_shadow.material = _shadow_mat
+	_shadow.z_index = 1
+	_shadow.visible = false
+	_shadow.draw.connect(_draw_shadow)
+	add_child(_shadow)
 	_lump_a.resize(LUMP_K.size())
 	_lump_p.resize(LUMP_K.size())
 	if GameState.stage == 0:
@@ -138,34 +155,50 @@ func _update_herald(delta: float) -> void:
 	_h_pos += _h_vel * delta
 	_h_travel += _h_vel.length() * delta
 	_h_spin += HERALD_SPIN * delta
-	if _h_travel > _h_length:
+	var c := herald_center()
+	# Уходит, только когда и она, и её тень целиком ушли с экрана.
+	var off := c.distance_to(player.position) - herald_radius * 1.01 > dust_field.view_radius()
+	if (_h_travel > _h_length * 0.5 and off and not _shadow.visible) or _h_travel > _h_length * 3.0:
 		_herald_end()
 		return
-	var c := herald_center()
 	_h_sprite.position = c
 	_h_sprite.rotation = _h_spin
 	var mat := _h_sprite.material as ShaderMaterial
-	mat.set_shader_parameter("light_dir", (-c).normalized().rotated(-_h_spin))
+	# Галька огромна: свет на видимом крае считаем от твоего места, а не от её центра.
+	mat.set_shader_parameter("light_dir", (-player.position).normalized().rotated(-_h_spin))
 	mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
-	_sweep_dust()
 	_herald_collide(c)
+	_update_shadow(c)
 
 
 ## Галька плывёт мимо боком: ближе всего её край в паре-тройке твоих радиусов,
-## и почти всё время на экране только он. Обычно она снаружи, звезда светит на
-## обращённый к тебе край; иногда сбоку — тогда по нему идёт терминатор.
+## и почти всё время на экране только он. То она снаружи, и звезда светит на
+## обращённый к тебе край (иногда сбоку — тогда по нему идёт терминатор), то
+## между тобой и звездой: её край — чёрный силуэт, и на тебя наползает её тень.
 func _herald_start() -> void:
 	var view_r := dust_field.view_radius()
 	herald_radius = player.radius * HERALD_SIZE
 	var outward := player.position.normalized()
+	# Первый пролёт всегда освещён: Звездочёт показывает её поверхность.
+	eclipse = "herald" in GameState.tips_seen and _rng.randf() < ECLIPSE_CHANCE
+	if force_eclipse >= 0:
+		eclipse = force_eclipse == 1
+		force_eclipse = -1
 	var n := outward.rotated(_rng.randf_range(-HERALD_LIT_CONE, HERALD_LIT_CONE))
 	var along := n.orthogonal() * (1.0 if _rng.randf() < 0.5 else -1.0)
 	var gap := player.radius * _rng.randf_range(HERALD_GAP.x, HERALD_GAP.y)
 	var reach := herald_radius + view_r * 1.05
 	var half := sqrt(maxf(reach * reach - pow(herald_radius + gap, 2), 1.0))
+	if eclipse:
+		# Заслоняет звезду: проходит со стороны звезды, край виден у края экрана,
+		# а тень шириной во всю гальку наползает и уходит дольше, чем виден край.
+		n = -outward.rotated(_rng.randf_range(-ECLIPSE_CONE, ECLIPSE_CONE))
+		along = n.orthogonal() * (1.0 if _rng.randf() < 0.5 else -1.0)
+		gap = view_r * ECLIPSE_GAP
+		half = herald_radius + view_r * 1.3
 	var mid := player.position + n * (herald_radius + gap)
 	var start := mid - along * half
-	if (start - n * herald_radius).length() < GameData.sublimation_distance() * 1.2:
+	if player.position.length() < GameData.sublimation_distance() * 1.3:
 		_h_timer = 10.0
 		return
 	_h_length = half * 2.0
@@ -189,6 +222,7 @@ func _herald_start() -> void:
 	var t := Vector3(1.0, 1.0, 1.0) + Vector3(0.08, 0.03, -0.05) * (w.x - 0.45) * 4.0 \
 			- Vector3(0.1, 0.1, 0.1) * (w.z - 0.28) * 4.0 + Vector3(-0.03, 0.0, 0.06) * (w.w - 0.15) * 4.0
 	mat.set_shader_parameter("tint", t)
+	mat.set_shader_parameter("backlight", 1.0 if eclipse else 0.0)
 	_h_sprite.scale = Vector2.ONE * herald_radius * QUAD * 2.0 / 16.0
 	_h_sprite.position = herald_center()
 	_h_sprite.visible = true
@@ -199,24 +233,32 @@ func _herald_start() -> void:
 func _herald_end() -> void:
 	herald_active = false
 	_h_sprite.visible = false
+	_shadow.visible = false
 
 
-## Пыль на пути галька сметает: пылинки, оказавшиеся внутри, выталкивает на край
-## и уносит с собой.
-func _sweep_dust() -> void:
-	var outer := herald_radius * 1.05
-	for d in dust_field.dust:
-		if d.idx < 0:
-			continue
-		var to := d.pos - _h_pos
-		var dsq := to.length_squared()
-		if dsq > pow(outer + d.r, 2) or dsq < 0.0001:
-			continue
-		var dist := sqrt(dsq)
-		var dir := to / dist
-		var e := herald_radius * _edge(dir.rotated(-_h_spin).angle()) + d.r
-		if dist < e:
-			dust_field.shove(d, _h_pos + dir * e, _h_vel + dir * 6.0)
+## Тень: полоса шириной в гальку от неё прочь от звезды. Звезда огромная, поэтому
+## край тени размыт и тем шире, чем дальше от гальки. Рисуется, только пока
+## тень на экране.
+func _update_shadow(c: Vector2) -> void:
+	var to_star := (-player.position).normalized()
+	var rel := player.position - c
+	var behind := rel.dot(-to_star)
+	var lateral := absf(rel.dot(to_star.orthogonal()))
+	var view_r := dust_field.view_radius()
+	_shadow.visible = behind > 0.0 and lateral < herald_radius + view_r * 1.5
+	if not _shadow.visible:
+		return
+	_shadow_mat.set_shader_parameter("body", c)
+	_shadow_mat.set_shader_parameter("radius", herald_radius)
+	_shadow_mat.set_shader_parameter("to_star", to_star)
+	_shadow_mat.set_shader_parameter("soft", Vector2(SHADOW_SOFT.x * player.radius, SHADOW_SOFT.y))
+	_shadow_mat.set_shader_parameter("depth", SHADOW_DEPTH)
+	_shadow.queue_redraw()
+
+
+func _draw_shadow() -> void:
+	var r := dust_field.view_radius() * 1.1
+	_shadow.draw_rect(Rect2(player.position - Vector2(r, r), Vector2(r, r) * 2.0), Color.WHITE)
 
 
 ## Галька в миллиард раз тяжелее: от неё отскакиваешь, её не сдвинуть.

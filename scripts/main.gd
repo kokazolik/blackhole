@@ -6,6 +6,12 @@ const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется м
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
 const BOULDER_ZOOM := 0.99            # валун: камера дальше — гальки вокруг стали мелочью
 const PEBBLE_ZOOM := 1.65             # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
+# Новый этап — отъезд, как в «Степенях десяти»: камера улетает далеко, ты
+# сжимаешься в точку среди того, что вокруг, и возвращается.
+const PULL_K := 0.12                  # во сколько раз дальше в крайней точке
+const PULL_OUT := 1.8                 # отъезд, с
+const PULL_HOLD := 1.2                # пауза вдали, с
+const PULL_BACK := 3.2                # возврат, с
 
 var player: Player
 var dust_field: DustField
@@ -21,6 +27,8 @@ var fx: AbsorbFx
 var sky_events: Node2D
 var _intro_time := 0.0
 var _zoom_ease := 0.0  # с какого момента камера снова плавно приближается
+var _pull_t := -1.0    # время отъезда при смене этапа, <0 — нет
+var _pull_mark := Node2D.new()  # кольцо «ты здесь», пока камера далеко
 var _caption: Control
 var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
 var _chip_time := -10.0
@@ -49,6 +57,9 @@ func _ready() -> void:
 	var starfield := preload("res://scripts/world/starfield.gd").new()
 	starfield.camera = camera
 	bg_layer.add_child(starfield)
+	var far_bodies := preload("res://scripts/world/far_bodies.gd").new()
+	far_bodies.camera = camera
+	bg_layer.add_child(far_bodies)
 	sky_events = preload("res://scripts/world/sky_events.gd").new()
 	sky_events.camera = camera
 	bg_layer.add_child(sky_events)
@@ -83,6 +94,7 @@ func _ready() -> void:
 	fx = AbsorbFx.new()
 	fx.player = player
 	fx.camera = camera
+	fx.z_index = 3  # подписи над тенью огромной гальки
 	add_child(fx)
 	var burn_fx := BurnFx.new()
 	burn_fx.player = player
@@ -121,10 +133,10 @@ func _ready() -> void:
 			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
 	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
 		if "giant" in GameState.tips_seen:
-			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а пыль за ним — твоя"))
+			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а мелочь вокруг он не трогает"))
 	drifters.appeared.connect(func(kind: String, _at: Vector2) -> void:
 		if kind in GameState.tips_seen:
-			_show_caption("Галька", "в тысячу раз крупнее тебя: её край — стена, а пыль на пути она сметает"))
+			_show_caption("Галька", "в тысячу раз крупнее тебя: её край — стена, о неё отскакиваешь"))
 	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
 		if "clump" in GameState.tips_seen:
 			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
@@ -184,24 +196,27 @@ func _on_stage_reached(index: int) -> void:
 	tw.tween_property(flash, "color:a", 0.55, 0.25)
 	tw.tween_property(flash, "color:a", 0.0, 1.6)
 	tw.tween_callback(flash.queue_free)
-	# Скачок масштаба: камера отъезжает и плавно возвращается, пыль вокруг мельчает —
-	# видно, насколько ты вырос.
-	camera.zoom *= 0.55
-	_zoom_ease = 0.0
+	# Скачок масштаба: камера улетает далеко и возвращается, пыль вокруг мельчает —
+	# видно, насколько ты вырос и какая ты мелочь среди диска.
+	_pull_t = 0.0
+	if not _pull_mark.is_inside_tree():
+		_pull_mark.z_index = 3
+		_pull_mark.draw.connect(_draw_pull_mark)
+		add_child(_pull_mark)
 	if index == GameData.PLANETESIMAL_STAGE:
 		_show_caption("Планетезималь", "тело в километр: его держит собственная гравитация")
 		if not "planetesimal" in GameState.tips_seen:
-			_start_finale(4.5)
+			_start_finale(PULL_OUT + PULL_HOLD + PULL_BACK)
 		return
 	if index == GameData.BOULDER_STAGE:
 		_boulder_time = _intro_time
 		_show_caption("Валун", "камень ростом с человека")
 		if not GameState.boulder_intro_done:
-			_start_pebble_intro(4.5, true)
+			_start_pebble_intro(PULL_OUT + PULL_HOLD + PULL_BACK, true)
 		return
 	_show_caption("Галька", "камешек размером с горошину")
 	if not GameState.pebble_intro_done:
-		_start_pebble_intro(4.5)
+		_start_pebble_intro(PULL_OUT + PULL_HOLD + PULL_BACK)
 
 
 ## Финал этапа «Валун»: Звездочёт рассказывает о планетезимали.
@@ -340,15 +355,53 @@ func _process(delta: float) -> void:
 	# Приближение идёт в логарифмах: вход издалека выглядит равномерным полётом.
 	_intro_time += delta
 	_zoom_ease += delta
-	var rate := lerpf(0.9, 2.0, clampf(_zoom_ease / 3.0, 0.0, 1.0))
-	var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
-	camera.zoom = Vector2(z, z)
+	if _pull_t >= 0.0:
+		_pull_t += delta
+		camera.zoom = Vector2.ONE * _target_zoom() * _pull_k(_pull_t)
+		_pull_mark.queue_redraw()
+		if _pull_t >= PULL_OUT + PULL_HOLD + PULL_BACK:
+			_pull_t = -1.0
+			_zoom_ease = 3.0
+	else:
+		var rate := lerpf(0.9, 2.0, clampf(_zoom_ease / 3.0, 0.0, 1.0))
+		var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
+		camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
 	hud.set_temperature(player.temperature)
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
 	_check_tips()
+
+
+## Множитель приближения при отъезде: плавно в логарифмах туда, пауза, обратно.
+func _pull_k(t: float) -> float:
+	var k := 0.0
+	if t < PULL_OUT:
+		k = smoothstep(0.0, 1.0, t / PULL_OUT)
+	elif t < PULL_OUT + PULL_HOLD:
+		k = 1.0
+	else:
+		k = 1.0 - smoothstep(0.0, 1.0, (t - PULL_OUT - PULL_HOLD) / PULL_BACK)
+	return exp(log(PULL_K) * k)
+
+
+## Вдали ты меньше пикселя: кольцо показывает, где ты.
+func _draw_pull_mark() -> void:
+	if _pull_t < 0.0:
+		return
+	var k := log(_pull_k(_pull_t)) / log(PULL_K)  # 0 — рядом, 1 — дальше всего
+	var a := smoothstep(0.35, 0.8, k)
+	if a <= 0.0:
+		return
+	var px := 1.0 / camera.zoom.x
+	var c := player.position
+	_pull_mark.draw_arc(c, 18.0 * px, 0.0, TAU, 48, Color(1.0, 0.85, 0.5, 0.75 * a), 1.5 * px, true)
+	_pull_mark.draw_circle(c, 2.0 * px, Color(1.0, 0.92, 0.7, a))
+	var font := ThemeDB.fallback_font
+	_pull_mark.draw_set_transform(c + Vector2(24.0, -10.0) * px, 0.0, Vector2(px, px))
+	_pull_mark.draw_string(font, Vector2.ZERO, "ты", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6, 0.9 * a))
+	_pull_mark.draw_set_transform(Vector2.ZERO)
 
 
 ## Звездочёт показывает явление, когда оно впервые встретилось, по одному за раз.
