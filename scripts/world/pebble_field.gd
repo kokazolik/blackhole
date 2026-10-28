@@ -16,6 +16,7 @@ signal combo_changed(chain: int, multiplier: float)  # 0 — серия сорв
 signal swarm_started(world_position: Vector2)
 signal geode_found(world_position: Vector2, value: float)
 signal chunks_broken(world_position: Vector2)
+signal impact_shake(strength: float)
 signal pebble_split(world_position: Vector2)
 signal self_split(world_position: Vector2)
 signal eddy_started(world_position: Vector2)
@@ -69,6 +70,8 @@ const GIANT_CHIP_LOSS := 0.012  # крошка: доля массы на каж�
 const GIANT_SPLIT_LOSS := Vector2(0.15, 0.3)  # раскол: от сильного до лобового удара
 const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 0.15                 # вокруг твоего размера тел нет: либо заметно меньше, либо заметно больше
+const CONTACT_K := 0.97  # край тела на картинке чуть внутри радиуса
+const HIT_PAUSE := 0.45  # после удара тело не глотается сразу, сперва отлетает
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
 # Звёздная пыль за гальку: растёт с твоей массой (как доход в idle-играх) и с тем,
@@ -156,6 +159,10 @@ class Pebble:
 	var grow_to := 0.0     # >0 — тело ещё набирает размер (валун из сгустка)
 	var drift := Vector2.ZERO  # снос встречным газом: меняется медленно, пересчитывается раз в DRIFT_EVERY
 	var drift_t := 0.0
+	var look := 1.0        # видимый радиус к r: после откола тело не съёживается, на нём остаётся срез
+	var scar_dir := Vector2.ZERO  # сторона среза в системе текстуры тела (крутится вместе с ним)
+	var scar_g := 0.0      # >0 — срез: до него от центра столько видимых радиусов
+	var scar_f := 0.0      # доля объёма, ушедшая в срез
 
 var player: Player
 var dust_field: DustField
@@ -800,18 +807,26 @@ func _collide(p: Pebble, index: int) -> void:
 	var wp := world_pos(p)
 	var to := wp - player.position
 	var dist := to.length()
-	var contact := player.radius + p.r * 0.92
-	if dist >= contact or dist < 0.001:
+	if dist < 0.001:
 		return
 	var n := to / dist
+	var contact := player.radius + _reach(p, -n)
+	if dist >= contact:
+		return
 	var rel := player.motion() - (p.vel + p.drift)
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
 	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
 	var at := player.position + n * player.radius
 	if p.chunk_mass > 0.0 and p.hit_cd > 0.0:
-		return  # только что отбитый кусок ещё разлетается
+		# Только что отбитый кусок ещё разлетается: не липнет, но и не проходит сквозь тебя.
+		p.pos += n * (contact - dist)
+		var vn := (p.vel + p.drift - player.motion()).dot(n)
+		if vn < 0.0:
+			p.vel -= n * vn * 1.3
+		return
 	var easy := is_easy(p)
-	if easy or (absorbable(p) and impact <= stick):
+	# После удара тело не проглатывается тут же: сперва отскок, потом уже можно доесть.
+	if easy or (absorbable(p) and impact <= stick and p.hit_cd <= 0.0):
 		_eat(p, index, at, easy)
 		_chain_from(p, wp)
 		return
@@ -820,7 +835,8 @@ func _collide(p: Pebble, index: int) -> void:
 	# разгону ничего не раскалывалось — тела отскакивали, как мячики.
 	var brittle := stick / maxf(Skills.stat("stick"), 1.0)
 	if impact > minf(stick, brittle) and p.hit_cd <= 0.0:
-		p.hit_cd = 0.3
+		p.hit_cd = HIT_PAUSE
+		impact_shake.emit(clampf(impact / stick - 0.6, 0.2, 1.0) * clampf(p.r / player.radius, 0.3, 1.0))
 		var excess := maxf(impact / stick, 1.0)
 		var excess_other := impact / brittle
 		var m_other := GameData.pebble_mass(p.r, GameState.mass)
@@ -854,10 +870,29 @@ func _collide(p: Pebble, index: int) -> void:
 			_bounce(n, impact, p, 0.3)
 			return
 	_bounce(n, maxf(impact, 0.0), p, 1.0)
-	# Расталкиваем, чтобы тела не застряли друг в друге.
+	# Расталкиваем целиком, лёгкое сдвигается больше: тела не входят друг в друга.
 	var push := contact - dist + 0.5
-	player.position -= n * push * 0.5
-	p.pos += n * push * 0.5
+	var m_p := GameData.pebble_mass(p.r, GameState.mass)
+	var share := m_p / (GameState.mass + m_p)
+	player.position -= n * push * share
+	p.pos += n * push * (1.0 - share)
+
+
+## Насколько тело выступает от центра в сторону dir: у сколотого по срезу ближе.
+func _reach(p: Pebble, dir: Vector2) -> float:
+	var big := p.r * p.look * CONTACT_K
+	if p.scar_g <= 0.0:
+		return big
+	var cosv := dir.dot(p.scar_dir.rotated(-p.angle))
+	return big * p.scar_g / cosv if cosv > p.scar_g else big
+
+
+## Срез для шейдера одним числом: сторона (256 шагов) + глубина в дробной части.
+func _scar_code(p: Pebble) -> float:
+	if p.scar_g <= 0.0:
+		return 0.0
+	var k := int(round(fposmod(p.scar_dir.angle(), TAU) / TAU * 256.0)) % 256
+	return k + clampf(1.0 - p.scar_g, 0.02, 0.9)
 
 
 
@@ -1222,14 +1257,30 @@ func chunk_center() -> Vector2:
 func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: float, m_other: float) -> void:
 	if total <= 0.0:
 		return
-	p.r *= pow(maxf(1.0 - total / m_other, 0.05), 1.0 / 3.0)
+	# Тело не съёживается шаром: его видимый край остаётся, а со стороны удара
+	# срезана шапка того объёма, что откололся. Масса считается по r, как прежде.
+	var visual := p.r * p.look
+	var f := clampf(total / m_other, 0.0, 0.6)
+	var side_tex := (-n).rotated(p.angle)
+	if p.scar_g > 0.0 and p.scar_dir.dot(side_tex) > 0.7:
+		p.scar_f = minf(p.scar_f + f * (1.0 - p.scar_f), 0.6)  # тот же бок: срез глубже
+	else:
+		p.scar_f = f
+		p.scar_dir = side_tex
+	# Срез наклонён к нам, и сверху грань кажется больше шапки: рисуем мельче.
+	p.scar_g = 1.0 - minf(_cap_height(p.scar_f) * 0.7, 0.45)
+	p.r *= pow(maxf(1.0 - f, 0.05), 1.0 / 3.0)
+	p.look = visual / p.r
 	var avg_r := player.radius * (CHUNK_R.x + CHUNK_R.y) * 0.5
 	var avg_m := GameData.pebble_mass(avg_r, GameState.mass)
 	var count := clampi(int(round(total / maxf(avg_m, 0.0001))), 2, 5)
 	count = mini(count, MAX_PEBBLES - pebbles.size())
 	if count <= 0:
 		return
-	var at := wp - n * p.r  # точка удара на поверхности гальки
+	var at := wp - n * _reach(p, -n)  # точка удара на поверхности гальки
+	# Пыль выброса — завесой по обе стороны от тебя, а не сквозь тебя.
+	_puff(at, (-n).rotated(1.1), p.material, 7)
+	_puff(at, (-n).rotated(-1.1), p.material, 7)
 	var res := _cap_pieces((-n).rotated(-p.angle), count)
 	var cells: Array[PackedVector2Array] = res[0]
 	for cell in cells:
@@ -1237,19 +1288,39 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
 		var centre := _set_shape(c, cell)
 		var out := centre.rotated(p.angle)
-		c.pos = wp + out * p.r - dust_field.frame_offset
+		# Кусок появляется у места удара, но снаружи тебя.
+		var cp := wp + out * visual
+		var from_me := cp - player.position
+		var need := player.radius + c.r * 0.9
+		if from_me.length() < need:
+			cp = player.position + from_me.normalized() * need if from_me.length() > 0.001 else cp + n * need
+		c.pos = cp - dust_field.frame_offset
 		c.chunk_mass = total / cells.size()
 		c.material = p.material
 		c.cell = p.cell
 		c.angle = p.angle
 		c.spin = rng.randf_range(-1.5, 1.5)
-		# Разлетаются в стороны от удара, а не прямо в тебя.
+		# Разлетаются в стороны от линии удара и вперёд, от тебя: отскакивают от
+		# твоей поверхности, а не пролетают сквозь. Начальная скорость — твоя плюс разлёт.
 		var side := 1.0 if out.cross(-n) > 0.0 else -1.0
-		var d := (-n).rotated(side * rng.randf_range(0.7, 1.5))
-		c.vel = d * maxf(impact, player.stick_speed()) * rng.randf_range(0.6, 1.0)
+		var d := n.rotated(side * rng.randf_range(0.55, 1.15))
+		c.vel = player.motion() * 0.7 + d * maxf(impact, player.stick_speed()) * rng.randf_range(0.5, 0.9)
 		c.hit_cd = 1.0
 		pebbles.append(c)
 	chunks_broken.emit(at)
+
+
+## Высота сферической шапки (в радиусах) с долей объёма f: f = t²(3 − t)/4.
+static func _cap_height(f: float) -> float:
+	var lo := 0.0
+	var hi := 1.0
+	for k in 20:
+		var t := (lo + hi) * 0.5
+		if t * t * (3.0 - t) * 0.25 < f:
+			lo = t
+		else:
+			hi = t
+	return (lo + hi) * 0.5
 
 
 ## Отскок: у кого меньше масса, того отбрасывает сильнее.
@@ -1302,7 +1373,7 @@ func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> v
 func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
 	if _puffs.size() >= 24:
 		return
-	var size := player.radius * clampf(0.25 + 0.06 * count, 0.35, 1.4)
+	var size := player.radius * clampf(0.3 + 0.08 * count, 0.45, 1.6)
 	var base: Color = GameData.MATERIALS[material].color
 	var col := base.lerp(Color(0.62, 0.6, 0.57), 0.65)
 	var blobs: Array[Vector3] = []
@@ -1340,6 +1411,12 @@ func _draw_puffs() -> void:
 		var wind: Vector2 = f.wind
 		var wp: Vector2 = f.pos + dust_field.frame_offset + f.dir * size * 0.35 * stop
 		var fade := pow(1.0 - k, 1.5) * minf(t * 12.0, 1.0)
+		# Миг удара: свежая пыль в первые доли секунды плотная и ярко освещена.
+		if t < 0.18:
+			var fl := pow(1.0 - t / 0.18, 2.0)
+			var fr := size * (0.45 + 2.5 * t)
+			_hint.draw_texture_rect(_halo_glow, Rect2(wp - Vector2(fr, fr), Vector2(fr, fr) * 2.0), false,
+					Color(1.0, 0.95, 0.85, 0.4 * fl))
 		for b: Vector3 in f.blobs:
 			var off := Vector2(b.x, b.y)
 			# Мельче пыль — сильнее её уносит: облачко вытягивается хвостом.
@@ -1348,7 +1425,7 @@ func _draw_puffs() -> void:
 			var lit := 0.75 + 0.45 * (off.normalized().dot(to_star) if off.length() > 0.01 else 0.0)
 			var col: Color = f.col
 			_hint.draw_texture_rect(_halo_glow, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), false,
-					Color(col.r * lit, col.g * lit, col.b * lit, 0.42 * fade))
+					Color(col.r * lit, col.g * lit, col.b * lit, 0.5 * fade))
 		# Струйки: тонкие клинья от точки удара, вытягиваются и гаснут к концу.
 		# Струйки живут недолго: газ их останавливает, и они расплываются по ветру.
 		var ray_fade := pow(maxf(1.0 - t / (f.life * 0.55), 0.0), 2.0) * minf(t * 15.0, 1.0)
@@ -1394,7 +1471,7 @@ func _shape_tag(p: Pebble) -> float:
 ## Тело запоминаем в твоих радиусах: ты растёшь и масштаб мира меняется, а оно
 ## должно лежать там же, где коснулось.
 func _start_sinking(p: Pebble, wp: Vector2) -> void:
-	var size_rel := p.r / player.radius
+	var size_rel := p.r * p.look / player.radius
 	if size_rel < SINK_FROM or _sinking.size() >= MAX_SINKING or player.dead:
 		return
 	var to := wp - player.position
@@ -1405,6 +1482,7 @@ func _start_sinking(p: Pebble, wp: Vector2) -> void:
 		"t": 0.0, "time": lerpf(SINK_TIME.x, SINK_TIME.y, k),
 		"cell": p.cell, "angle": p.angle, "spin": p.spin,
 		"tag": _shape_tag(p),
+		"scar": 0.0 if p.shard else _scar_code(p),
 		"quad": QUAD * (SHARD_QUAD if p.shard else 1.0),
 	})
 
@@ -1423,7 +1501,7 @@ func _write() -> void:
 	_boulder_look = GameState.is_boulder()
 	for k in pebbles.size():
 		var p := pebbles[k]
-		var s := p.r * QUAD * (SHARD_QUAD if p.shard else 1.0)
+		var s := p.r * p.look * QUAD * (SHARD_QUAD if p.shard else 1.0)
 		var b := k * 12
 		var pos := p.pos + off
 		_buf[b] = s
@@ -1436,7 +1514,7 @@ func _write() -> void:
 		_buf[b + 7] = pos.y
 		_buf[b + 8] = p.cell
 		_buf[b + 9] = p.angle
-		_buf[b + 10] = 0.0
+		_buf[b + 10] = 0.0 if p.shard else _scar_code(p)
 		_buf[b + 11] = _shape_tag(p)
 	# Погружение: тело съезжает к твоему центру под тобой и съёживается, будто
 	# растекается по тебе. Рисуем под игроком, поэтому край тонет в его диске.
@@ -1459,7 +1537,7 @@ func _write() -> void:
 		_buf[b + 7] = pos.y
 		_buf[b + 8] = d.cell
 		_buf[b + 9] = d.angle
-		_buf[b + 10] = 0.0
+		_buf[b + 10] = d.scar
 		_buf[b + 11] = d.tag
 		n += 1
 	_mm.buffer = _buf

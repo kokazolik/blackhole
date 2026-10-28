@@ -2,7 +2,8 @@ shader_type canvas_item;
 // Чужая галька из атласа для MultiMesh: освещена звездой как шар, медленно вращается,
 // у снеговой линии покрывается инеем, у звезды тлеет.
 //
-// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — скорость вращения,
+// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — срез после откола
+//                  (целая часть — сторона из 256, дробная — глубина; 0 — цело),
 //                  w — 1 у жеоды: сквозь трещины сверкают кристаллы, вокруг золотистый ореол;
 //                  2 + доля — обломок; −(1 + доля) — бугристый валун (форма по доле).
 
@@ -203,7 +204,7 @@ float metal_glint(vec2 q, int mat, float s) {
 
 void fragment() {
 	vec2 p = UV - 0.5;
-	float a = v_data.y + v_data.z * TIME;
+	float a = v_data.y;
 	float c = cos(a);
 	float s = sin(a);
 	vec2 sp = vec2(c * p.x - s * p.y, s * p.x + c * p.y) + 0.5;
@@ -311,6 +312,61 @@ void fragment() {
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
 		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 		outc = vec4(scol, mask);
+	}
+	if (v_data.z > 0.0 && v_data.w < 1.5) {
+		// Срез после откола: со стороны удара шапка тела ушла кусками, и на её
+		// месте плоская грань свежего излома. Плоскость наклонена к нам, чтобы
+		// грань была видна сверху; она темнее и насыщеннее пыльной корки и искрит.
+		float sang = floor(v_data.z) / 256.0 * 6.2832;
+		float depth = fract(v_data.z);
+		vec2 u = vec2(cos(sang), sin(sang));
+		vec2 qt = (sp - 0.5) / 0.36;
+		const float CT = 0.94;
+		const float ST = 0.35;
+		float rough = (vnoise(qt * 4.0 + v_data.x * 1.7) - 0.5) * 0.1 + (vnoise(qt * 11.0 + v_data.x) - 0.5) * 0.04;
+		float hpl = (1.0 - depth) * CT + rough;
+		float ztop = sqrt(max(1.0 - dot(qt, qt), 0.0));
+		float along = dot(qt, u);
+		float over = along * CT + ztop * ST - hpl;
+		float aa = fwidth(qt.x) * 1.5;
+		if (over > -aa) {
+			float zp = (hpl - along * CT) / ST;
+			float vis = smoothstep(0.0, aa * 2.0, zp + ztop);
+			// Неровная поверхность излома: ступеньки и бугорки.
+			float e = 0.03;
+			float g0 = vnoise(qt * 7.0 + v_data.x * 3.3);
+			float gx = vnoise((qt + vec2(e, 0.0)) * 7.0 + v_data.x * 3.3) - g0;
+			float gy = vnoise((qt + vec2(0.0, e)) * 7.0 + v_data.x * 3.3) - g0;
+			vec3 fn = normalize(vec3(u * CT, ST) - vec3(gx, gy, 0.0) / e * 0.06);
+			vec3 fs = vec3(c * fn.x + s * fn.y, -s * fn.x + c * fn.y, fn.z);
+			float fdiff = max(dot(fs, normalize(vec3(light_dir, 0.25))), 0.0);
+			vec4 ft = textureLod(atlas, (cell + clamp(sp, 0.0, 1.0)) * 0.25, 3.0);
+			vec3 fraw = ft.rgb / max(ft.a, 0.05);
+			fraw *= 1.0 + (vnoise(qt * 13.0 + v_data.x * 3.1) - 0.5) * 0.4;
+			vec3 falb = material_look(fraw, mat, qt, v_data.x);
+			if (mat == 3) {
+				falb = mix(fraw, vec3(0.8, 0.88, 0.96), 0.35) * 0.9;
+			} else {
+				float fl = dot(falb, vec3(0.33));
+				falb = max(mix(vec3(fl), falb, 1.2), vec3(0.0)) * 0.5;
+			}
+			// Вкрапления другого тона и трещинки, как на обломках.
+			vec3 cv = shard_vor(qt * 3.2 + v_data.x * 7.0);
+			float clast = step(h2(cv.yz + 2.2), 0.3);
+			falb *= mix(1.0, mix(0.7, 1.25, h2(cv.yz + 5.5)), clast * smoothstep(0.02, 0.07, cv.x));
+			falb *= 1.0 - 0.3 * clast * (1.0 - smoothstep(0.0, 0.04, cv.x));
+			vec3 fcol = falb * star_light * (0.1 + 1.5 * fdiff);
+			fcol += star_light * step(0.95, vnoise(qt * 26.0 + v_data.x * 5.0)) * pow(fdiff, 2.0) * 0.35;
+			fcol += metal_glint(qt, mat, v_data.x * 11.0) * star_light * pow(fdiff, 3.0) * 0.8;
+			// Острое ребро излома ловит свет тонкой светлой кромкой.
+			float rim = 1.0 - smoothstep(0.0, aa * 3.0, abs(over));
+			fcol *= 1.0 + 0.35 * rim * fdiff;
+			fcol = mix(fcol, vec3(0.82, 0.92, 1.0) * (dot(fcol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
+			fcol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * fdiff);
+			float k = smoothstep(-aa, aa, over);
+			outc.rgb = mix(outc.rgb, fcol, k);
+			outc.a *= mix(1.0, vis, k);
+		}
 	}
 	if (v_data.w > 0.5 && v_data.w < 1.5) {
 		// Жеода: кристаллы вспыхивают по очереди, вокруг мягкий ореол.

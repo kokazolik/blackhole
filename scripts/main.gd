@@ -33,6 +33,7 @@ var _caption: Control
 var guide: Tutorial  # Звездочёт сейчас что-то рассказывает
 var _chip_time := -10.0
 var _chunk_time := -10.0
+var _shake := 0.0  # сила встряски камеры от удара
 var _boulder_time := 0.0  # когда стал валуном (для подсказки о веществе)
 var _chunk_pos := Vector2.ZERO
 var _geode_time := -10.0
@@ -124,6 +125,7 @@ func _ready() -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.0), "Раскол!", Color(1.0, 0.75, 0.45), 24, "split"))
 	pebble_field.self_split.connect(func(_at: Vector2) -> void:
 		fx.popup(player.position + Vector2(0, -player.radius * 2.6), "Ты треснул!", Color(1.0, 0.45, 0.35), 24, "selfsplit"))
+	pebble_field.impact_shake.connect(func(k: float) -> void: _shake = maxf(_shake, k))
 	pebble_field.chunks_broken.connect(func(at: Vector2) -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
@@ -352,6 +354,9 @@ func _target_zoom() -> float:
 func _process(delta: float) -> void:
 	player.move_input = joystick.output
 	camera.position = player.position
+	# Лёгкая встряска при ударе: доли твоего радиуса, гаснет за треть секунды.
+	_shake = maxf(_shake - delta * 3.0, 0.0)
+	camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * player.radius * 0.08 * _shake * _shake
 	# Приближение идёт в логарифмах: вход издалека выглядит равномерным полётом.
 	_intro_time += delta
 	_zoom_ease += delta
