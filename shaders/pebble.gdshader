@@ -317,13 +317,15 @@ void fragment() {
 	}
 	float carve_any = v_data.z + v_carve.x + v_carve.y + v_carve.z + v_carve.w;
 	if (carve_any > 0.5 && v_data.w < 1.5) {
-		// Откусы от отколотых кусков: кусок ушёл целиком, в силуэте тела
-		// остаётся выемка с рваным краем. Её стенка — свежий излом: узкая
-		// тёмная кайма по краю, а не светлая пыльная корка.
+		// Выемки от отколотых кусков. Это то же тело, просто без куска: край
+		// выемки — ломаный, из прямых отрезков излома, без размытия. Внутри края
+		// видна стенка выемки — свежий излом той же породы, со своим светом:
+		// со стороны звезды светлее, с другой — в тени. Граница корки и стенки —
+		// резкое ребро.
 		vec2 qt = (sp - 0.5) / 0.36;
-		float aa = fwidth(qt.x) * 1.5;
-		float keep = 1.0;
-		float wall = 0.0;
+		float aa = fwidth(qt.x);
+		float hole = 10.0;   // расстояние до края выемки (меньше 0 — дыра)
+		vec2 wall_n = vec2(0.0);
 		float codes[5] = float[5](v_data.z, v_carve.x, v_carve.y, v_carve.z, v_carve.w);
 		for (int i = 0; i < 10; i++) {
 			float code = codes[i / 2];
@@ -331,18 +333,58 @@ void fragment() {
 			if (lv < 0.5) {
 				continue;
 			}
-			float bang = float(i) / 10.0 * 6.2832;
-			float depth = lv / 31.0 * 0.75;
-			vec2 bc = vec2(cos(bang), sin(bang)) * (1.0 + 0.5 - depth);
-			float rough = (vnoise(qt * 5.0 + v_data.x * 1.7 + float(i) * 9.0) - 0.5) * 0.12
-					+ (vnoise(qt * 14.0 + v_data.x + float(i) * 5.0) - 0.5) * 0.05;
-			float d = length(qt - bc) - 0.5 + rough;
-			keep *= smoothstep(-aa, aa, d);
-			wall = max(wall, 1.0 - smoothstep(0.0, 0.09, d));
+			float fi = float(i);
+			float bang = fi / 10.0 * 6.2832;
+			float depth = lv / 31.0 * 0.5;
+			vec2 bc = vec2(cos(bang), sin(bang)) * (1.0 + 0.7 - depth);
+			// Выемка — неправильный выпуклый многоугольник из плоскостей излома:
+			// расстояние до него — наибольшее из расстояний до его граней.
+			vec2 rel = qt - bc;
+			float d = -10.0;
+			vec2 fnb = vec2(1.0, 0.0);
+			for (int k = 0; k < 6; k++) {
+				float fk = float(k);
+				float h = rnd(fk * 3.7 + fi * 11.0 + v_data.x * 1.3);
+				float fa = (fk + 0.5 * h) * 6.2832 / 6.0 + fi * 1.3 + v_data.x;
+				vec2 nk = vec2(cos(fa), sin(fa));
+				float dk = dot(rel, nk) - 0.7 * (0.82 + 0.25 * rnd(h * 9.1 + fk));
+				if (dk > d) {
+					d = dk;
+					fnb = nk;
+				}
+			}
+			// Мелкие зазубрины на ребре: тонкие, без размытия.
+			d += (vnoise(qt * 28.0 + fi * 3.0) - 0.5) * 0.02;
+			float dh = d;  // >0 — тело снаружи выемки
+			if (dh < hole) {
+				hole = dh;
+				wall_n = -fnb;
+			}
 		}
-		float l = dot(outc.rgb, vec3(0.33));
-		vec3 fresh = mat == 3 ? outc.rgb * 1.1 : max(mix(vec3(l), outc.rgb, 1.25), vec3(0.0)) * 0.55;
-		outc.rgb = mix(outc.rgb, fresh, wall * 0.85);
+		float keep = smoothstep(-aa, aa, hole);
+		// Стенка — узкая полоса у края; её ширина зависит от наклона к нам.
+		const float WALL = 0.07;
+		float in_wall = 1.0 - smoothstep(WALL - aa, WALL + aa, hole);
+		if (in_wall > 0.0) {
+			vec3 wn = normalize(vec3(wall_n * 0.75, 0.55));
+			vec3 ws = vec3(c * wn.x + s * wn.y, -s * wn.x + c * wn.y, wn.z);
+			float wdiff = max(dot(ws, normalize(vec3(light_dir, 0.25))), 0.0);
+			vec4 ft = textureLod(atlas, (cell + clamp(sp, 0.0, 1.0)) * 0.25, 3.0);
+			vec3 fraw = ft.rgb / max(ft.a, 0.05);
+			fraw *= 1.0 + (vnoise(qt * 30.0 + v_data.x * 3.1) - 0.5) * 0.5;
+			vec3 falb = material_look(fraw, mat, qt, v_data.x);
+			if (mat == 3) {
+				falb = mix(fraw, vec3(0.8, 0.88, 0.96), 0.35) * 0.9;
+			} else {
+				float fl = dot(falb, vec3(0.33));
+				falb = max(mix(vec3(fl), falb, 1.2), vec3(0.0)) * 0.7;
+			}
+			vec3 wcol = falb * star_light * (0.08 + 1.6 * wdiff);
+			wcol += star_light * step(0.94, vnoise(qt * 40.0 + v_data.x * 5.0)) * pow(wdiff, 2.0) * 0.4;
+			wcol = mix(wcol, vec3(0.82, 0.92, 1.0) * (dot(wcol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
+			wcol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * wdiff);
+			outc.rgb = mix(outc.rgb, wcol, in_wall);
+		}
 		outc.a *= keep;
 	}
 	if (v_data.w > 0.5 && v_data.w < 1.5) {
