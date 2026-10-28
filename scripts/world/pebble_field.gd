@@ -101,7 +101,7 @@ const EDDY_VALUE := 1.5               # множитель звёздной пы
 const EDDY_SPIN := 1.7                # скорость круговорота в долях скорости слипания
 # События этапа «Валун».
 const CRASH_INTERVAL := 150.0         # столкновение валунов вдали: раз в пару минут
-const CRASH_FLIGHT := 2.6             # секунд до удара после появления
+const CRASH_FLIGHT := 4.0             # секунд до удара: валуны прилетают из-за краёв экрана
 const CRASH_PIECES := 11              # обломков с каждого валуна
 const CRASH_MASS := 0.1               # масса облака в долях твоей
 const CRASH_LIFE := 30.0              # облако живёт полминуты, потом рассыпается в пыль
@@ -151,6 +151,8 @@ class Pebble:
 	var crash := false     # валун, летящий на столкновение (газ его не тормозит)
 	var clump := false     # из сгустка: стягивается к его центру
 	var pulled := false    # сорвано цепной аккрецией или импульсом: летит к тебе и прилипает
+	var merge: Pebble = null  # мелочь сгустка, что вливается в рождённый им валун
+	var grow_to := 0.0     # >0 — тело ещё набирает размер (валун из сгустка)
 	var drift := Vector2.ZERO  # снос встречным газом: меняется медленно, пересчитывается раз в DRIFT_EVERY
 	var drift_t := 0.0
 
@@ -295,6 +297,22 @@ func _process(delta: float) -> void:
 				continue
 		if p.clump and clump_left > 0.0:
 			_clump_pull(p, wp, delta)
+		if p.grow_to > 0.0:
+			p.r = lerpf(p.r, p.grow_to, 1.0 - exp(-2.0 * delta))
+			if p.r > p.grow_to * 0.98:
+				p.r = p.grow_to
+				p.grow_to = 0.0
+		if p.merge != null:
+			var to_m := world_pos(p.merge) - wp
+			if not p.merge in pebbles:
+				p.merge = null
+			elif to_m.length() < p.merge.r * 0.5:
+				pebbles.remove_at(i)  # влилась в новый валун
+				i -= 1
+				continue
+			else:
+				p.vel = to_m * 3.0
+				p.r *= exp(-1.2 * delta)
 		if p.eddy and eddy_left > 0.0:
 			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
 		if p.pulled:
@@ -315,7 +333,8 @@ func _process(delta: float) -> void:
 				p.vel = p.vel.limit_length(player.max_speed() * pull_cap)
 		p.drift_t -= delta
 		if p.drift_t <= 0.0:
-			p.drift = GameData.gas_drift(wp, p.r)
+			# Валуны на столкновение газ не сносит: иначе разные по размеру разминутся.
+			p.drift = Vector2.ZERO if p.crash else GameData.gas_drift(wp, p.r)
 			p.drift_t = DRIFT_EVERY * rng.randf_range(0.8, 1.2)  # вразброс, чтобы не все в один кадр
 		p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
 		p.angle += p.spin * delta
@@ -493,7 +512,10 @@ func _maintain() -> void:
 	var pp := player.position
 	var i := pebbles.size() - 1
 	while i >= 0:
-		if world_pos(pebbles[i]).distance_to(pp) > active_r * 1.2:
+		var q := pebbles[i]
+		# Тела событий рождаются за краем экрана и должны успеть доплыть.
+		var event := q.swarm or q.eddy or q.clump or q.crash
+		if world_pos(q).distance_to(pp) > active_r * (1.7 if event else 1.2):
 			pebbles.remove_at(i)
 		i -= 1
 	var density := GameData.radial_density(pp.length()) * (1.0 + RING_BOOST * GameData.trap_strength(pp.length()))
@@ -639,17 +661,40 @@ func _update_swarm(delta: float) -> void:
 		_spawn_swarm(lvl)
 
 
+## Сколько пройти от точки (относительно центра экрана) вдоль dir, чтобы выйти за край.
+static func _exit_dist(local: Vector2, dir: Vector2, hs: Vector2) -> float:
+	var t := INF
+	if absf(dir.x) > 0.001:
+		t = minf(t, (signf(dir.x) * hs.x - local.x) / dir.x)
+	if absf(dir.y) > 0.001:
+		t = minf(t, (signf(dir.y) * hs.y - local.y) / dir.y)
+	return t
+
+
+## Точку внутри круга видимости выносим на его край: тело события рождается
+## за экраном и вплывает в кадр.
+func _offscreen(world: Vector2, view_r: float) -> Vector2:
+	var to := world - player.position
+	var lim := view_r * 1.05
+	if to.length() < lim:
+		to = (to if to.length() > 0.001 else Vector2.RIGHT).normalized() * lim
+	return player.position + to
+
+
 func _spawn_swarm(lvl: float) -> void:
 	var view_r := dust_field.view_radius()
 	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
-	var center := player.position + dir.rotated(rng.randf_range(-0.6, 0.6)) * view_r * 0.75
-	if center.length() < GameData.sublimation_distance() * 1.3:
-		center = player.position + player.position.normalized() * view_r * 0.75
+	# Рой сбивается впереди, за краем экрана: ты подлетаешь к нему, а не он
+	# возникает из ничего у тебя на глазах.
 	var spread := view_r * (0.12 + 0.02 * lvl)
+	var ahead := view_r * 1.05 + spread * 2.0
+	var center := player.position + dir.rotated(rng.randf_range(-0.6, 0.6)) * ahead
+	if center.length() < GameData.sublimation_distance() * 1.3:
+		center = player.position + player.position.normalized() * ahead
 	var count := mini(int(SWARM_COUNT * (1.0 + 0.35 * (lvl - 1.0))), MAX_PEBBLES - pebbles.size())
 	for k in count:
 		var p := Pebble.new()
-		p.pos = center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread)) - dust_field.frame_offset
+		p.pos = _offscreen(center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread)), view_r) - dust_field.frame_offset
 		# Рой из галек, которые ты способен присоединить: гоняться за ним есть смысл.
 		p.r = player.radius * rng.randf_range(R_RANGE.x, EAT_R * 0.7)
 		p.material = _pick_material(center.length())
@@ -700,10 +745,11 @@ func eddy_flow(world: Vector2) -> Vector2:
 func _spawn_eddy() -> void:
 	var view_r := dust_field.view_radius()
 	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
-	var center := player.position + dir.rotated(rng.randf_range(0.5, 1.0) * (1.0 if rng.randf() < 0.5 else -1.0)) * view_r * 0.85
+	# Вихрь закручивается за краем экрана, впереди-сбоку: в него влетаешь.
+	eddy_radius = view_r * 0.38
+	var center := player.position + dir.rotated(rng.randf_range(0.5, 1.0) * (1.0 if rng.randf() < 0.5 else -1.0)) * (view_r * 1.05 + eddy_radius * 0.8)
 	if center.length() < GameData.sublimation_distance() * 1.4:
 		return
-	eddy_radius = view_r * 0.38
 	eddy_center = center - dust_field.frame_offset
 	eddy_left = EDDY_DURATION
 	_eddy_t = 0.0
@@ -713,7 +759,7 @@ func _spawn_eddy() -> void:
 		var p := Pebble.new()
 		var a := rng.randf() * TAU
 		var d := eddy_radius * sqrt(rng.randf_range(0.04, 1.0))
-		p.pos = eddy_center + Vector2.from_angle(a) * d
+		p.pos = _offscreen(eddy_center + dust_field.frame_offset + Vector2.from_angle(a) * d, view_r) - dust_field.frame_offset
 		# Половина по зубам, остальные крупнее: сталкиваться с ними на ходу больно.
 		if rng.randf() < 0.5:
 			p.r = player.radius * rng.randf_range(R_RANGE.x, EAT_R - SIZE_GAP)
@@ -1438,14 +1484,18 @@ func _update_crash(delta: float) -> void:
 
 
 func _start_crash() -> void:
-	var view_r := dust_field.view_radius()
 	var dir := player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)
-	var center := player.position + dir.rotated(rng.randf_range(-0.8, 0.8)) * view_r * 0.45
+	# Удар — на экране, а валуны влетают в кадр с боков, из-за его краёв.
+	var hs := get_viewport_rect().size * 0.5 / camera.zoom.x
+	# Выше или ниже тебя (ближе к курсу), чтобы их путь не шёл через тебя.
+	var up := signf(dir.y) if absf(dir.y) > 0.2 else (1.0 if rng.randf() < 0.5 else -1.0)
+	var local := Vector2(rng.randf_range(-0.3, 0.3) * hs.x, up * rng.randf_range(0.4, 0.6) * hs.y)
+	var center := player.position + local
 	if center.length() < GameData.sublimation_distance() * 1.4 or pebbles.size() > MAX_PEBBLES - 2 * CRASH_PIECES - 2:
 		_crash_timer = 20.0
 		return
-	var axis := Vector2.from_angle(rng.randf() * TAU)
-	var gap := view_r * 0.32
+	var axis := Vector2.RIGHT.rotated(rng.randf_range(-0.35, 0.35))
+	var gap := maxf(_exit_dist(local, axis, hs), _exit_dist(local, -axis, hs)) + player.radius * 1.5
 	for side in [-1.0, 1.0]:
 		var p := Pebble.new()
 		p.r = player.radius * rng.randf_range(1.0, 1.35)
@@ -1553,9 +1603,17 @@ func _start_clump() -> void:
 	clump_radius = _clump_r0
 	clump_center = center - dust_field.frame_offset
 	clump_left = CLUMP_TIME
+	# Сгусток собирает то, что уже есть: мелочь рядом подхватывает поток, а
+	# остальное стекается из-за краёв экрана. Из ничего на глазах тела не берутся.
+	for q in pebbles:
+		if count > 0 and q.food and not (q.clump or q.eddy or q.swarm or q.pulled) \
+				and world_pos(q).distance_to(center) < view_r * 0.7:
+			q.clump = true
+			count -= 1
 	for k in count:
 		var p := Pebble.new()
-		p.pos = clump_center + Vector2.from_angle(rng.randf() * TAU) * _clump_r0 * sqrt(rng.randf())
+		var from := pp + Vector2.from_angle(rng.randf() * TAU) * view_r * rng.randf_range(1.08, 1.5)
+		p.pos = from - dust_field.frame_offset
 		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y)
 		p.food = true
 		p.clump = true
@@ -1594,17 +1652,20 @@ func _clump_end() -> void:
 			left += 1
 			mat = p.material
 	var c := clump_center
-	var i := pebbles.size() - 1
-	while i >= 0:
-		if pebbles[i].clump:
-			pebbles.remove_at(i)
-		i -= 1
 	if left < 4:
+		for q in pebbles:
+			q.clump = false  # остатки расплываются обычной мелочью
 		return
-	# Несобранное слипается в одно тело: из сгустка родился валун.
+	# Несобранное слипается в одно тело: из сгустка родился валун. Он растёт на
+	# глазах, а мелочь стекается в него.
 	var p := Pebble.new()
 	p.pos = c
-	p.r = player.radius * clampf(0.35 + 0.03 * left, 0.5, 1.3)
+	p.grow_to = player.radius * clampf(0.35 + 0.03 * left, 0.5, 1.3)
+	p.r = p.grow_to * 0.35
+	for q in pebbles:
+		if q.clump:
+			q.clump = false
+			q.merge = p
 	p.material = mat
 	p.cell = GameData.MATERIAL_ORDER.find(mat) * 4 + rng.randi() % 4
 	p.angle = rng.randf() * TAU
