@@ -164,8 +164,19 @@ float spots(vec2 x, float share, float rad) {
 		return 0.0;
 	}
 	vec2 c = 0.25 + 0.5 * vec2(h2(i + 4.1), h2(i + 8.3));
-	float r = rad * (0.5 + h2(i + 2.9));
-	return 1.0 - smoothstep(r * 0.7, r, length(f - c));
+	float r = rad * (0.4 + 0.9 * h2(i + 2.9));
+	return 1.0 - smoothstep(r * 0.45, r, length(f - c));
+}
+
+// Налёт тончайшей пыли на старой поверхности: светлее, серее и матовее. Внутри
+// газового диска звёздный ветер камней не достаёт, «выветривания» тут нет:
+// разницу между коркой и свежим сколом даёт именно пыль. Лёд налёт пачкает.
+vec3 dust_coat(vec3 alb, int mat) {
+	float l = dot(alb, vec3(0.33));
+	if (mat == 3) {
+		return alb;
+	}
+	return mix(alb, vec3(l) * vec3(1.04, 1.0, 0.95) * 1.12 + 0.03, 0.3);
 }
 
 vec3 material_look(vec3 alb, int mat, vec2 q, float s) {
@@ -203,7 +214,22 @@ void fragment() {
 	vec2 q = p / 0.36;
 	vec3 n = normalize(vec3(q, sqrt(max(1.0 - dot(q, q), 0.0)) + 0.05));
 	float diff = max(dot(n, normalize(vec3(light_dir, 0.25))), 0.0);
-	vec3 alb0 = material_look(tex.rgb, mat, (sp - 0.5) / 0.36, v_data.x);
+	// Тон и силуэт берём из атласа, а мелкий рисунок — свой: нарисованные в атласе
+	// кольца читались как кратеры, а у сантиметровой гальки в диске их нет.
+	// Атлас размытый (дальний мип), поверх — зерно и хондры: сплошные светлые
+	// круглые капли с мягким краем, как в разрезе хондрита.
+	vec2 uvc = (cell + clamp(sp, 0.0, 1.0)) * 0.25;
+	vec4 soft = textureLod(atlas, uvc, 3.0);
+	vec3 tone = soft.rgb / max(soft.a, 0.05);
+	vec2 qs = (sp - 0.5) / 0.36;
+	float fine = clamp(1.4 - fwidth(qs.x) * 10.0, 0.0, 1.0);
+	tone *= 1.0 + (vnoise(qs * 13.0 + v_data.x * 3.1) - 0.5) * 0.35 * fine + (vnoise(qs * 4.0 + v_data.x) - 0.5) * 0.25;
+	float chond_share = mat == 0 ? 0.5 : (mat == 2 ? 0.3 : (mat == 1 ? 0.15 : 0.0));
+	// Хондры плотно и разного размера, под пылевым налётом — без резкого контраста.
+	float chond = max(spots(qs * 4.0 + v_data.x * 5.3, chond_share, 0.34),
+			0.8 * spots(qs * 8.5 + v_data.x * 2.1, chond_share * 0.9, 0.3)) * fine;
+	tone = mix(tone, mix(tone, vec3(0.78, 0.76, 0.64), 0.4) * 1.08, chond * 0.8);
+	vec3 alb0 = dust_coat(material_look(tone, mat, qs, v_data.x), mat);
 	vec3 col = alb0 * star_light * (0.1 + 1.6 * diff);
 	// Реголит матовый, общего блика нет. Блестят только металлические крупинки.
 	vec3 h = normalize(normalize(vec3(light_dir, 0.25)) + vec3(0.0, 0.0, 1.0));
@@ -252,18 +278,17 @@ void fragment() {
 		tq *= min(1.0, 0.33 / max(length(tq), 0.001));
 		vec3 raw = texture(atlas, (cell + 0.5 + tq) * 0.25).rgb;
 		vec3 alb = material_look(raw, mat, q, sd0 * 13.0);
-		// Свежий излом. Камень и металл снаружи темнеют и краснеют от выветривания,
-		// поэтому скол светлее и серее. У углистого наоборот (на Рюгу вскрытое
-		// ударом вещество темнее и краснее). Лёд внутри чистый — скол яркий.
+		// Свежий излом без пылевого налёта: порода темнее и насыщеннее корки,
+		// а кристаллы на нём искрят. Лёд наоборот: внутри чистый, скол яркий.
 		vec3 fresh;
-		if (mat == 2) {
-			fresh = alb * vec3(0.92, 0.8, 0.74);
-		} else if (mat == 3) {
+		if (mat == 3) {
 			fresh = mix(raw, vec3(0.8, 0.88, 0.96), 0.35) * 0.9;
 		} else {
-			fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.35) * 1.3 + 0.02;
+			float l = dot(alb, vec3(0.33));
+			fresh = max(mix(vec3(l), alb, 1.25), vec3(0.0)) * 0.88;
 		}
-		alb = lumpy ? alb : mix(fresh, alb * 0.8, on_crust);
+		vec3 crust = dust_coat(alb, mat);
+		alb = lumpy ? crust : mix(fresh, crust, on_crust);
 		// Та же порода, что у валуна: угловатые вкрапления другого тона,
 		// трещины и поры. На мелком обломке детали гаснут, чтобы не рябить.
 		float fine = clamp(1.4 - fwidth(q.x) * 12.0, 0.0, 1.0);
@@ -280,7 +305,7 @@ void fragment() {
 		scol += metal_glint(q, mat, sd0 * 11.0) * star_light * pow(diff, 3.0) * 0.8;
 		// Мелкие кристаллики на свежем сломе искрят под прямым светом.
 		float gl = step(0.93, vnoise(q * 26.0 + sd0 * 50.0)) * (1.0 - on_crust);
-		scol += star_light * gl * pow(diff, 2.0) * 0.2;
+		scol += star_light * gl * pow(diff, 2.0) * 0.45;
 		// Лёгкое затенение у самого края: обломок не кажется вырезанным из бумаги.
 		scol *= 0.8 + 0.2 * clamp(-sd * 6.0, 0.0, 1.0);
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);

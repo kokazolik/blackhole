@@ -153,8 +153,9 @@ void fragment() {
 			}
 		}
 	}
-	vec3 chondrule = mix(CHONDRULE, base * 1.3, 0.25) * (0.9 + 0.2 * noise(pt * 30.0));
-	vec3 albedo = mix(base, chondrule, chond * (1.0 - 0.85 * boulder));
+	// Под налётом пыли хондры не сияют пятнами: светлее матрицы, но в её тоне.
+	vec3 chondrule = mix(CHONDRULE, base * 1.3, 0.45) * (0.9 + 0.2 * noise(pt * 30.0));
+	vec3 albedo = mix(base, chondrule, chond * 0.75 * (1.0 - 0.85 * boulder));
 
 	// Валун: как глыбы на Рюгу и Бенну и как брекчии-метеориты. Крупные плоские
 	// грани скола, вкрапления угловатых обломков другого тона, трещины,
@@ -222,7 +223,7 @@ void fragment() {
 	// Реголит матовый: общего блика нет, блестит только изморозь.
 	col += star_light * frost * pow(nh, 10.0) * 0.25;
 	// Хондры — стекловатые капли: ловят свет искоркой.
-	col += star_light * chond * pow(nh, 30.0) * 0.4;
+	col += star_light * chond * pow(nh, 30.0) * 0.15;
 	// Пушистый край ледяной гальки подсвечен звездой насквозь.
 	col += vec3(0.6, 0.78, 1.0) * star_light * fluff * smoothstep(edge - 0.2, edge, fr) * (0.25 + 0.6 * diff);
 

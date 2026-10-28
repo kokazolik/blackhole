@@ -1295,9 +1295,10 @@ func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> v
 	_debris(at, dir, impact, material, 3)
 
 
-## Выброс: при ударе камень крошится в тончайшую пыль. Как у DART и в опытах,
-## она вылетает конусом по направлению удара, с лучами-струйками, ярко
-## освещённая звездой, расширяется и за пару секунд рассеивается.
+## Выброс: при ударе камень крошится в тончайшую пыль. Она вылетает конусом по
+## направлению удара, с лучами-струйками, как в опытах. Но мы внутри газового
+## диска, а не в пустоте: микронную пыль газ тормозит за доли секунды, и дальше
+## она уплывает хвостом по ветру (вместе с газом, быстрее крупных тел).
 func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
 	if _puffs.size() >= 24:
 		return
@@ -1312,8 +1313,12 @@ func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
 	for k in rng.randi_range(4, 7):
 		var a := dir.angle() + rng.randf_range(-0.75, 0.75)
 		rays.append(Vector3(a, rng.randf_range(1.6, 3.2), rng.randf_range(0.06, 0.14)))
-	_puffs.append({"pos": at - dust_field.frame_offset, "dir": dir, "t": 0.0,
-		"life": rng.randf_range(1.4, 2.0), "size": size, "col": col, "blobs": blobs, "rays": rays})
+	# Ветер для пыли: газ несёт её туда же, куда сносит тела, но быстрее.
+	var drift := player.drift_velocity
+	var wind := drift.normalized() * maxf(drift.length() * 2.0, player.radius * 0.8) if drift.length() > 0.01 \
+			else Vector2.ZERO
+	_puffs.append({"pos": at - dust_field.frame_offset, "dir": dir, "t": 0.0, "wind": wind,
+		"life": rng.randf_range(1.6, 2.4), "size": size, "col": col, "blobs": blobs, "rays": rays})
 
 
 func _update_puffs(delta: float) -> void:
@@ -1323,33 +1328,39 @@ func _update_puffs(delta: float) -> void:
 		if f.t >= f.life:
 			_puffs.remove_at(i)
 			continue
-		f.pos += f.dir * f.size * 0.6 * (1.0 - f.t / f.life) * delta
 
 
 func _draw_puffs() -> void:
 	var to_star := -player.position.normalized()
 	for f in _puffs:
-		var k: float = f.t / f.life
-		var grow := 1.0 - exp(-3.5 * k)
-		var wp: Vector2 = f.pos + dust_field.frame_offset
+		var t: float = f.t
+		var k: float = t / f.life
+		var stop := 1.0 - exp(-6.0 * t)  # газ гасит разлёт за доли секунды
 		var size: float = f.size
-		var fade := pow(1.0 - k, 1.5) * minf(f.t * 12.0, 1.0)
+		var wind: Vector2 = f.wind
+		var wp: Vector2 = f.pos + dust_field.frame_offset + f.dir * size * 0.35 * stop
+		var fade := pow(1.0 - k, 1.5) * minf(t * 12.0, 1.0)
 		for b: Vector3 in f.blobs:
 			var off := Vector2(b.x, b.y)
-			var c := wp + off * size * (0.3 + 1.6 * grow)
-			var r := size * b.z * (0.4 + 1.2 * grow)
+			# Мельче пыль — сильнее её уносит: облачко вытягивается хвостом.
+			var c := wp + off * size * (0.3 + 1.3 * stop + 0.2 * t) + wind * t * (0.5 + b.z)
+			var r := size * b.z * (0.4 + 1.0 * stop + 0.25 * t)
 			var lit := 0.75 + 0.45 * (off.normalized().dot(to_star) if off.length() > 0.01 else 0.0)
 			var col: Color = f.col
 			_hint.draw_texture_rect(_halo_glow, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), false,
 					Color(col.r * lit, col.g * lit, col.b * lit, 0.42 * fade))
 		# Струйки: тонкие клинья от точки удара, вытягиваются и гаснут к концу.
-		var ray_fade := pow(1.0 - k, 2.0) * minf(f.t * 15.0, 1.0)
+		# Струйки живут недолго: газ их останавливает, и они расплываются по ветру.
+		var ray_fade := pow(maxf(1.0 - t / (f.life * 0.55), 0.0), 2.0) * minf(t * 15.0, 1.0)
+		if ray_fade <= 0.0:
+			continue
+		var reach := 1.0 - exp(-8.0 * t)
 		for ry: Vector3 in f.rays:
 			var u := Vector2.from_angle(ry.x)
 			var lit := 0.85 + 0.5 * maxf(u.dot(to_star), 0.0)
-			var from := wp + u * size * 0.2
-			var tip := wp + u * size * ry.y * (0.25 + 0.9 * grow)
-			var side := u.orthogonal() * size * ry.z * (0.6 + 0.8 * grow)
+			var from := wp + u * size * 0.2 + wind * t * 0.4
+			var tip := wp + u * size * ry.y * (0.25 + 0.9 * reach) + wind * t * 1.2
+			var side := u.orthogonal() * size * ry.z * (0.6 + 0.8 * reach + 0.4 * t)
 			var col: Color = f.col
 			var c0 := Color(col.r * lit, col.g * lit, col.b * lit, 0.5 * ray_fade)
 			var c1 := Color(c0.r, c0.g, c0.b, 0.0)
