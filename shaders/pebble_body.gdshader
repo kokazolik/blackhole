@@ -21,7 +21,7 @@ const float BODY = 0.36;  // радиус тела в долях квадрат�
 const vec3 SILICATE = vec3(0.76, 0.64, 0.47);
 const vec3 METAL = vec3(0.62, 0.64, 0.7);
 const vec3 CARBON = vec3(0.3, 0.22, 0.2);
-const vec3 ICE = vec3(0.8, 0.9, 1.0);
+const vec3 ICE = vec3(0.74, 0.84, 0.94);  // изморозь с примесью пыли, не снег
 const vec3 CHONDRULE = vec3(0.86, 0.87, 0.66);  // светлый оливин
 
 float hash(vec2 p) {
@@ -211,14 +211,15 @@ void fragment() {
 
 	vec3 L = normalize(vec3(light_dir, 0.25));
 	float diff = max(dot(n, L), 0.0);
-	vec3 col = albedo * star_light * (0.22 + 1.45 * diff);
+	// В космосе рассеянного света почти нет: ночную сторону подсвечивает
+	// только пылевой диск, поэтому она тёмная, а освещённая — сочная.
+	vec3 col = albedo * star_light * (0.11 + 1.6 * diff);
 	// Металл — мелкие крупинки, вспыхивают искрами, когда грань ловит свет.
 	vec3 hv = normalize(L + vec3(0.0, 0.0, 1.0));
 	float nh = max(dot(n, hv), 0.0);
 	float speck = smoothstep(0.86 - 0.12 * mix_w.y, 0.95, noise(pt * 26.0 + 3.0)) * (0.15 + 1.6 * mix_w.y);
 	col += star_light * speck * (0.25 * diff + 1.6 * pow(nh, 12.0)) * (1.0 - frost);
-	// Мягкий блик по всему телу и блеск изморози.
-	col += star_light * pow(nh, 20.0) * 0.12;
+	// Реголит матовый: общего блика нет, блестит только изморозь.
 	col += star_light * frost * pow(nh, 10.0) * 0.25;
 	// Хондры — стекловатые капли: ловят свет искоркой.
 	col += star_light * chond * pow(nh, 30.0) * 0.4;

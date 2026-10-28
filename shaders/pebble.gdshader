@@ -152,6 +152,44 @@ float lump_h(vec2 q, float s) {
 	return h;
 }
 
+// Вид вещества поверх атласа, по снимкам Итокавы, Рюгу и ядер комет. Камень
+// серо-бурый, а не золотой (насыщенность оставляем, убираем «металл»).
+// Углистое — почти уголь со светлыми вкраплениями (хондры и CAI, как на Рюгу).
+// Лёд у снеговой линии грязный: перемешан с пылью, голубоватый лишь местами.
+// Россыпь круглых крапинок: в части ячеек сетки по одной точке случайного размера.
+float spots(vec2 x, float share, float rad) {
+	vec2 i = floor(x);
+	vec2 f = fract(x);
+	if (h2(i + 1.7) > share) {
+		return 0.0;
+	}
+	vec2 c = 0.25 + 0.5 * vec2(h2(i + 4.1), h2(i + 8.3));
+	float r = rad * (0.5 + h2(i + 2.9));
+	return 1.0 - smoothstep(r * 0.7, r, length(f - c));
+}
+
+vec3 material_look(vec3 alb, int mat, vec2 q, float s) {
+	float l = dot(alb, vec3(0.33));
+	if (mat == 0) {
+		alb = mix(alb, vec3(l) * vec3(1.06, 0.97, 0.86), 0.3);
+	} else if (mat == 1) {
+		alb = mix(alb, vec3(l) * vec3(0.98, 0.99, 1.04), 0.25);
+	} else if (mat == 2) {
+		float inc = spots(q * 7.0 + s * 3.7, 0.35, 0.16) + 0.7 * spots(q * 15.0 + s * 1.9, 0.3, 0.12);
+		alb = mix(alb * 0.85, vec3(0.64, 0.63, 0.58), clamp(inc, 0.0, 1.0) * 0.6);
+	} else {
+		float dirt = smoothstep(0.3, 0.75, vnoise(q * 3.0 + s * 5.1)) * 0.7 + 0.25 * vnoise(q * 12.0 + s);
+		alb = mix(alb * vec3(0.92, 0.97, 1.0), vec3(0.3, 0.29, 0.28), clamp(dirt, 0.0, 0.85));
+	}
+	return alb;
+}
+
+// Металлические крупинки: у металлических тел их много, у каменных единицы.
+float metal_glint(vec2 q, int mat, float s) {
+	float share = mat == 1 ? 1.0 : (mat == 0 ? 0.25 : 0.0);
+	return step(0.9 - 0.06 * share, vnoise(q * 30.0 + s * 7.0)) * share * 1.4;
+}
+
 void fragment() {
 	vec2 p = UV - 0.5;
 	float a = v_data.y + v_data.z * TIME;
@@ -160,14 +198,16 @@ void fragment() {
 	vec2 sp = vec2(c * p.x - s * p.y, s * p.x + c * p.y) + 0.5;
 	vec2 cell = vec2(mod(v_data.x, 4.0), floor(v_data.x / 4.0));
 	vec4 tex = texture(atlas, (cell + clamp(sp, 0.0, 1.0)) * 0.25);
+	int mat = int(cell.y);  // 0 камень, 1 металл, 2 углерод, 3 лёд
 	// Галька занимает ~72% квадрата: нормаль как у шара этого радиуса.
 	vec2 q = p / 0.36;
 	vec3 n = normalize(vec3(q, sqrt(max(1.0 - dot(q, q), 0.0)) + 0.05));
 	float diff = max(dot(n, normalize(vec3(light_dir, 0.25))), 0.0);
-	vec3 col = tex.rgb * star_light * (0.2 + 1.45 * diff);
-	// Блик на гладкой поверхности.
+	vec3 alb0 = material_look(tex.rgb, mat, (sp - 0.5) / 0.36, v_data.x);
+	vec3 col = alb0 * star_light * (0.1 + 1.6 * diff);
+	// Реголит матовый, общего блика нет. Блестят только металлические крупинки.
 	vec3 h = normalize(normalize(vec3(light_dir, 0.25)) + vec3(0.0, 0.0, 1.0));
-	col += star_light * pow(max(dot(n, h), 0.0), 24.0) * 0.25;
+	col += metal_glint((sp - 0.5) / 0.36, mat, v_data.x) * star_light * pow(max(dot(n, h), 0.0), 8.0) * diff;
 	// Иней у снеговой линии и тление у звезды.
 	float lum = dot(col, vec3(0.3, 0.5, 0.2));
 	col = mix(col, vec3(0.82, 0.92, 1.0) * (lum * 1.2 + 0.05), v_frost * 0.4);
@@ -210,11 +250,20 @@ void fragment() {
 		// Порода: тот же атлас и тот же масштаб зерна, что у гальки.
 		vec2 tq = q * 0.3;
 		tq *= min(1.0, 0.33 / max(length(tq), 0.001));
-		vec3 alb = texture(atlas, (cell + 0.5 + tq) * 0.25).rgb;
-		// Свежий излом заметно светлее и серее: внутри порода не выветрена и не
-		// покрыта пылью. Старая корка темнее. Так обломок читается как разбитый.
-		vec3 fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.5) * 1.25 + 0.02;
-		alb = lumpy ? alb * 0.9 : mix(fresh, alb * 0.72, on_crust);
+		vec3 raw = texture(atlas, (cell + 0.5 + tq) * 0.25).rgb;
+		vec3 alb = material_look(raw, mat, q, sd0 * 13.0);
+		// Свежий излом. Камень и металл снаружи темнеют и краснеют от выветривания,
+		// поэтому скол светлее и серее. У углистого наоборот (на Рюгу вскрытое
+		// ударом вещество темнее и краснее). Лёд внутри чистый — скол яркий.
+		vec3 fresh;
+		if (mat == 2) {
+			fresh = alb * vec3(0.92, 0.8, 0.74);
+		} else if (mat == 3) {
+			fresh = mix(raw, vec3(0.8, 0.88, 0.96), 0.35) * 0.9;
+		} else {
+			fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.35) * 1.3 + 0.02;
+		}
+		alb = lumpy ? alb : mix(fresh, alb * 0.8, on_crust);
 		// Та же порода, что у валуна: угловатые вкрапления другого тона,
 		// трещины и поры. На мелком обломке детали гаснут, чтобы не рябить.
 		float fine = clamp(1.4 - fwidth(q.x) * 12.0, 0.0, 1.0);
@@ -227,7 +276,8 @@ void fragment() {
 		float crack = (1.0 - smoothstep(0.0, 0.05, shard_vor(kq).x)) * smoothstep(0.35, 0.6, vnoise(q * 3.0 + sd0 * 9.0));
 		alb *= 1.0 - 0.65 * crack * fine;
 		alb *= 1.0 - 0.4 * smoothstep(0.8, 0.88, vnoise(q * 14.0 + sd0 * 61.0)) * fine;
-		vec3 scol = alb * star_light * (0.22 + 1.6 * diff);
+		vec3 scol = alb * star_light * (0.1 + 1.75 * diff);
+		scol += metal_glint(q, mat, sd0 * 11.0) * star_light * pow(diff, 3.0) * 0.8;
 		// Мелкие кристаллики на свежем сломе искрят под прямым светом.
 		float gl = step(0.93, vnoise(q * 26.0 + sd0 * 50.0)) * (1.0 - on_crust);
 		scol += star_light * gl * pow(diff, 2.0) * 0.2;

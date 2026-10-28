@@ -1295,9 +1295,9 @@ func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> v
 	_debris(at, dir, impact, material, 3)
 
 
-## Облачко выброса: при ударе камень крошится в тончайшую пыль, она вылетает
-## серым облаком, расширяется и за пару секунд рассеивается. Светлее с той
-## стороны, куда светит звезда.
+## Выброс: при ударе камень крошится в тончайшую пыль. Как у DART и в опытах,
+## она вылетает конусом по направлению удара, с лучами-струйками, ярко
+## освещённая звездой, расширяется и за пару секунд рассеивается.
 func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
 	if _puffs.size() >= 24:
 		return
@@ -1306,10 +1306,14 @@ func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
 	var col := base.lerp(Color(0.62, 0.6, 0.57), 0.65)
 	var blobs: Array[Vector3] = []
 	for k in 6:
-		var o := dir.rotated(rng.randf_range(-1.3, 1.3)) * rng.randf_range(0.0, 1.0)
-		blobs.append(Vector3(o.x, o.y, rng.randf_range(0.5, 1.0)))
+		var o := dir.rotated(rng.randf_range(-0.7, 0.7)) * rng.randf_range(0.1, 1.0)
+		blobs.append(Vector3(o.x, o.y, rng.randf_range(0.45, 0.9)))
+	var rays: Array[Vector3] = []  # направление, длина и ширина струйки
+	for k in rng.randi_range(4, 7):
+		var a := dir.angle() + rng.randf_range(-0.75, 0.75)
+		rays.append(Vector3(a, rng.randf_range(1.6, 3.2), rng.randf_range(0.06, 0.14)))
 	_puffs.append({"pos": at - dust_field.frame_offset, "dir": dir, "t": 0.0,
-		"life": rng.randf_range(1.4, 2.0), "size": size, "col": col, "blobs": blobs})
+		"life": rng.randf_range(1.4, 2.0), "size": size, "col": col, "blobs": blobs, "rays": rays})
 
 
 func _update_puffs(delta: float) -> void:
@@ -1338,6 +1342,19 @@ func _draw_puffs() -> void:
 			var col: Color = f.col
 			_hint.draw_texture_rect(_halo_glow, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), false,
 					Color(col.r * lit, col.g * lit, col.b * lit, 0.42 * fade))
+		# Струйки: тонкие клинья от точки удара, вытягиваются и гаснут к концу.
+		var ray_fade := pow(1.0 - k, 2.0) * minf(f.t * 15.0, 1.0)
+		for ry: Vector3 in f.rays:
+			var u := Vector2.from_angle(ry.x)
+			var lit := 0.85 + 0.5 * maxf(u.dot(to_star), 0.0)
+			var from := wp + u * size * 0.2
+			var tip := wp + u * size * ry.y * (0.25 + 0.9 * grow)
+			var side := u.orthogonal() * size * ry.z * (0.6 + 0.8 * grow)
+			var col: Color = f.col
+			var c0 := Color(col.r * lit, col.g * lit, col.b * lit, 0.5 * ray_fade)
+			var c1 := Color(c0.r, c0.g, c0.b, 0.0)
+			_hint.draw_polygon(PackedVector2Array([from - side * 0.4, from + side * 0.4, tip + side, tip - side]),
+					PackedColorArray([c0, c0, c1, c1]))
 
 
 ## Осколки разлетаются веером от точки удара и становятся обычной пылью.
