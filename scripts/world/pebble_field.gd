@@ -69,10 +69,8 @@ const GIANT_SPLIT_LOSS := Vector2(0.15, 0.3)  # раскол: от сильно�
 const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 0.15                 # вокруг твоего размера тел нет: либо заметно меньше, либо заметно больше
 const CONTACT_K := 0.97  # край тела на картинке чуть внутри радиуса
-const CARVE := 10        # секторов края, в каждом свой откус
-const CARVE_LV := 31     # ступеней глубины откуса
-const BITE_R := 0.7      # радиус откуса в видимых радиусах тела: выемка шире, чем глубже
-const BITE_MAX := 0.5    # глубже откус не врезается
+const SOLO := 32         # сколько сколотых тел и их кусков рисуем по отдельности
+const MAX_PLANES := 48   # граней выемок на тело (столько вмещает шейдер)
 const DISRUPT_V := 1.6    # скорость разрушения тела твоей массы — во столько раз выше предела прочности
 const DAMAGE_K := 0.25    # трещин от удара с энергией Q: DAMAGE_K × Q/Q*
 const DAMAGE_MAX := 0.8
@@ -168,9 +166,18 @@ class Pebble:
 	var drift := Vector2.ZERO  # снос встречным газом: меняется медленно, пересчитывается раз в DRIFT_EVERY
 	var drift_t := 0.0
 	var look := 1.0        # видимый радиус к r: после откола тело не съёживается, в нём остаётся выемка
-	# Выемки от отколотых кусков: глубина откуса (0..CARVE_LV) в каждом из CARVE
-	# секторов края, в системе текстуры тела (крутится вместе с ним).
-	var carve := PackedByteArray()
+	# Выемки от отколотых кусков — ровно их контуры. Каждый кусок — выпуклый
+	# многоугольник; храним его внутренние грани излома как полуплоскости
+	# (x, y — нормаль наружу, z — отступ) в осях текстуры тела, в видимых
+	# радиусах. Внешние дуги не храним: снаружи тела и так пусто.
+	var holes: Array[PackedVector3Array] = []
+	# Кусок, отколотый от тела: его грани в осях текстуры родителя, центр
+	# ячейки там же и видимый радиус родителя. Рисуется той же породой.
+	var frag := PackedVector3Array()
+	var frag_origin := Vector2.ZERO
+	var frag_r := 0.0
+	var frag_ext := 1.0   # насколько ячейка простирается от своего центра
+	var solo_ver := 0     # меняется, когда меняются грани
 	var damage := 0.0      # трещины от прежних ударов (0..DAMAGE_MAX): во столько слабее тело
 
 var player: Player
@@ -181,7 +188,7 @@ var rng := RandomNumberGenerator.new()
 var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
-var _no_carve := PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0])
+var _solo: Array[MeshInstance2D] = []  # сколотые тела и куски: свой материал с гранями
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
 var giant := Giant.new()  # Странник: огромный валун проплывает мимо гальки
 var _halo_glow := _make_glow()  # мягкое свечение облачков гало
@@ -219,12 +226,11 @@ func _ready() -> void:
 	quad.size = Vector2.ONE
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
 	_mm.use_custom_data = true
-	_mm.use_colors = true  # в цвете — откусы от отколов, а не цвет
 	_mm.mesh = quad
 	_mm.instance_count = MAX_PEBBLES + MAX_SINKING
 	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
-	_buf.resize((MAX_PEBBLES + MAX_SINKING) * 16)
+	_buf.resize((MAX_PEBBLES + MAX_SINKING) * 12)
 	var mat := ShaderMaterial.new()
 	mat.shader = SHADER
 	mat.set_shader_parameter("atlas", ATLAS)
@@ -241,6 +247,15 @@ func _ready() -> void:
 	_eddy_fx.visible = false
 	add_child(_eddy_fx)
 	add_child(_mm_node)
+	for k in SOLO:
+		var node := MeshInstance2D.new()
+		node.mesh = quad
+		var m := mat.duplicate() as ShaderMaterial
+		m.set_shader_parameter("solo", true)
+		node.material = m
+		node.visible = false
+		add_child(node)
+		_solo.append(node)
 	giant.pebble_field = self
 	add_child(giant)
 	var ripple_mat := ShaderMaterial.new()
@@ -277,6 +292,10 @@ func _process(delta: float) -> void:
 	var to_star := -player.position.normalized()
 	_mm_node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
 	_mm_node.material.set_shader_parameter("star_light", DustField.STAR_LIGHT * (1.0 + 0.9 * Star.flare))
+	for node in _solo:
+		if node.visible:
+			node.material.set_shader_parameter("light_dir", Vector2(to_star.x, -to_star.y))
+			node.material.set_shader_parameter("star_light", DustField.STAR_LIGHT * (1.0 + 0.9 * Star.flare))
 	_follow_world_scale()
 	_maintain()
 	_update_combo(delta)
@@ -413,7 +432,7 @@ func _collide_pebbles(flow_r: float) -> void:
 			var d := sqrt(d2)
 			var n := to / d
 			# По форме: в выемку соседнее тело заходит глубже, чем в круглый край.
-			var contact := (a.r * a.look + b.r * b.look) * 0.92 if a.carve.is_empty() and b.carve.is_empty() \
+			var contact := (a.r * a.look + b.r * b.look) * 0.92 if a.holes.is_empty() and b.holes.is_empty() \
 					else (_edge(a, n) + _edge(b, -n)) * 0.92
 			if d >= contact:
 				continue
@@ -916,34 +935,55 @@ func _collide(p: Pebble, index: int) -> void:
 
 
 ## Насколько тело выступает от центра в сторону dir: в выемке ближе.
-## Откус — круг радиуса BITE_R (в видимых радиусах), врезанный в край сектора.
 func _reach(p: Pebble, dir: Vector2) -> float:
 	return _edge(p, dir) * CONTACT_K
 
 
-## Видимый край тела в сторону dir (мировые оси), с учётом откусов.
+## Видимый край тела в сторону dir (мировые оси), с учётом выемок: идём от
+## центра наружу, пока не попадём в выемку.
 func _edge(p: Pebble, dir: Vector2) -> float:
-	var reach := 1.0
-	for k in p.carve.size():
-		if p.carve[k] == 0:
+	var big := p.r * p.look
+	if p.holes.is_empty():
+		return big
+	var u := dir.rotated(p.angle)  # в оси текстуры тела
+	var last := 0.15
+	for k in 18:
+		var t := 0.15 + 0.85 * (k + 1) / 18.0
+		if _in_hole(p, u * t):
+			return big * last
+		last = t
+	return big
+
+
+func _in_hole(p: Pebble, q: Vector2) -> bool:
+	for h in p.holes:
+		var inside := true
+		for pl in h:
+			if q.x * pl.x + q.y * pl.y - pl.z > 0.0:
+				inside = false
+				break
+		if inside:
+			return true
+	return false
+
+
+## Внутренние грани выпуклой ячейки (с центром c) как полуплоскости с
+## нормалью наружу. Грани по краю тела (дуги) пропускаем.
+static func _cell_planes(cell: PackedVector2Array) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var c := Vector2.ZERO
+	for v in cell:
+		c += v
+	c /= cell.size()
+	for k in cell.size():
+		var a := cell[k]
+		var b := cell[(k + 1) % cell.size()]
+		if a.distance_squared_to(b) < 1e-6 or ((a + b) * 0.5).length() > 0.95:
 			continue
-		var u := Vector2.from_angle(k * TAU / CARVE).rotated(-p.angle)
-		var c := 1.0 + BITE_R - p.carve[k] * BITE_MAX / CARVE_LV
-		var cosv := dir.dot(u)
-		var disc := BITE_R * BITE_R - c * c * (1.0 - cosv * cosv)
-		if cosv > 0.0 and disc > 0.0:
-			reach = minf(reach, maxf(c * cosv - sqrt(disc), 0.15))
-	return p.r * p.look * reach
-
-
-## Откусы для шейдера: по два сектора (5 + 5 бит) в число. Числа уходят в
-## половинную точность, поэтому каждое не больше 1023.
-func _carve_codes(p: Pebble) -> PackedFloat32Array:
-	if p.carve.is_empty() or p.shard:
-		return _no_carve
-	var out := PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0])
-	for k in CARVE / 2:
-		out[k] = p.carve[k * 2] + p.carve[k * 2 + 1] * 32
+		var nrm := (b - a).orthogonal().normalized()
+		if nrm.dot(c - a) > 0.0:
+			nrm = -nrm
+		out.append(Vector3(nrm.x, nrm.y, nrm.dot(a)))
 	return out
 
 
@@ -1155,9 +1195,9 @@ func _impact_q(p: Pebble, impact: float, brittle: float) -> float:
 func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_other: float, parts := -1,
 		largest := -1.0, keep := SPLIT_KEEP) -> void:
 	pebbles.remove_at(index)
-	var shape := _silhouette()
+	var shape := _circle()
 	var seeds: Array[Vector2] = []
-	var local_hit := (-n).rotated(-p.angle)  # точка удара в осях гальки
+	var local_hit := (-n).rotated(p.angle)  # точка удара в осях текстуры гальки
 	if parts == 2:
 		# Пополам: трещина идёт от места удара через центр.
 		var side := local_hit.orthogonal().rotated(rng.randf_range(-0.2, 0.2))
@@ -1201,8 +1241,8 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 		var share := shares[k] * keep
 		var c := Pebble.new()
 		c.r = p.r * pow(share, 1.0 / 3.0)
-		var centre := _set_shape(c, cell)
-		var out := centre.rotated(p.angle)
+		var centre := _centroid(cell)
+		var out := centre.rotated(-p.angle)
 		c.pos = wp + out * p.r - dust_field.frame_offset
 		var d := (out.normalized() * 0.6 + n * 0.4).normalized()  # разлетаются от центра и от удара
 		c.vel = d * impact * rng.randf_range(0.3, 0.6)
@@ -1212,6 +1252,11 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 		c.spin = rng.randf_range(-1.2, 1.2)
 		c.geode = p.geode and k == 0
 		c.hit_cd = 0.6
+		if p.frag.is_empty():
+			_set_frag(c, cell, centre, p.r * p.look)
+			c.cell = p.cell  # та же порода: рисунок продолжается через изломы
+		else:
+			_set_shape(c, cell)
 		pebbles.append(c)
 		k += 1
 	_debris(wp, n, impact, p.material, clampi(int(p.r * 2.0), 6, 18))
@@ -1225,6 +1270,14 @@ func _silhouette() -> PackedVector2Array:
 	for i in 22:
 		var a := TAU * i / 22.0
 		pts.append(Vector2.from_angle(a) * (1.0 + 0.06 * sin(3.0 * a + ph) + 0.03 * sin(5.0 * a + ph * 2.0)))
+	return pts
+
+
+## Круг радиуса чуть больше края тела: край рисует сама текстура тела.
+func _circle() -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in 32:
+		pts.append(Vector2.from_angle(TAU * i / 32.0) * 1.08)
 	return pts
 
 
@@ -1286,12 +1339,32 @@ func _set_shape(c: Pebble, cell: PackedVector2Array) -> Vector2:
 	return _centroid(cell)
 
 
-## Кусок, сколотый с поверхности тела радиуса 1 в сторону u: срезанная «шапка»,
-## поделённая на parts частей. У каждой части есть дуга прежней поверхности.
-func _cap_pieces(u: Vector2, parts: int) -> Array:
-	var shape := _silhouette()
-	var tilt := u.rotated(rng.randf_range(-0.45, 0.45))
-	var depth := 1.0 - rng.randf_range(0.4, 0.65)
+## Кусок рисуется той же породой, что и тело: ячейка в осях текстуры тела.
+func _set_frag(c: Pebble, cell: PackedVector2Array, centre: Vector2, visual: float) -> void:
+	c.shard = false
+	c.frag = _cell_planes(cell)
+	c.frag_origin = centre
+	c.frag_r = visual
+	var ext := 0.0
+	for v in cell:
+		ext = maxf(ext, v.distance_to(centre))
+	c.frag_ext = minf(ext, 1.2)
+	c.solo_ver += 1
+
+
+func _plane_count(p: Pebble) -> int:
+	var k := 0
+	for h in p.holes:
+		k += h.size()
+	return k
+
+
+## Кусок, сколотый с поверхности тела радиуса 1 в сторону u: срезанная «шапка»
+## высотой height (в радиусах), поделённая на parts частей.
+func _cap_pieces(u: Vector2, parts: int, height := -1.0) -> Array:
+	var shape := _circle()
+	var tilt := u.rotated(rng.randf_range(-0.3, 0.3))
+	var depth := 1.0 - (clampf(height, 0.12, 0.8) if height > 0.0 else rng.randf_range(0.4, 0.65))
 	var cap := _clip_half(shape, tilt * depth, -tilt)
 	var seeds: Array[Vector2] = []
 	var perp := tilt.orthogonal()
@@ -1352,13 +1425,6 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	var visual := p.r * p.look
 	var r_before := p.r
 	var f := clampf(total / m_other, 0.0, 0.6)
-	# Откус там, куда пришёлся удар; повторный удар в то же место врезается глубже.
-	var side_tex := (-n).rotated(p.angle)
-	if p.carve.is_empty():
-		p.carve.resize(CARVE)
-	var sector := int(round(fposmod(side_tex.angle(), TAU) / TAU * CARVE)) % CARVE
-	var add := maxi(int(round(_cap_height(f) * 0.9 / BITE_MAX * CARVE_LV)), 3)
-	p.carve[sector] = mini(p.carve[sector] + add, CARVE_LV)
 	p.r *= pow(maxf(1.0 - f, 0.05), 1.0 / 3.0)
 	p.look = visual / p.r
 	var count := mini(pieces, MAX_PEBBLES - pebbles.size())
@@ -1368,8 +1434,17 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	# Пыль выброса — завесой по обе стороны от тебя, а не сквозь тебя.
 	_puff(at, (-n).rotated(1.1), p.material, 7)
 	_puff(at, (-n).rotated(-1.1), p.material, 7)
-	var res := _cap_pieces((-n).rotated(-p.angle), count)
+	# Шапка той высоты, что отвечает отколотому объёму, со стороны удара
+	# (в осях текстуры тела). Куски — её ячейки; на теле остаются ровно их следы.
+	var res := _cap_pieces((-n).rotated(p.angle), count, _cap_height(f))
 	var cells: Array[PackedVector2Array] = res[0]
+	for cell in cells:
+		var planes := _cell_planes(cell)
+		if not planes.is_empty():
+			p.holes.append(planes)
+	while _plane_count(p) > MAX_PLANES:
+		p.holes.remove_at(0)
+	p.solo_ver += 1
 	# Куски неравные, как в опытах: один крупный, остальные мельче (доли ~ 1/k^1,5).
 	# Вместе они — ровно та масса, что ушла из тела, поэтому размер куска
 	# привязан к выемке и к силе удара.
@@ -1386,8 +1461,9 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		var piece_m := total * weights[ci] / wsum
 		ci += 1
 		c.r = r_before * pow(piece_m / m_other, 1.0 / 3.0)
-		var centre := _set_shape(c, cell)
-		var out := centre.rotated(p.angle)
+		var centre := _centroid(cell)
+		_set_frag(c, cell, centre, visual)
+		var out := centre.rotated(-p.angle)
 		# Кусок появляется у места удара, но снаружи тебя.
 		var cp := wp + out * visual
 		var from_me := cp - player.position
@@ -1575,7 +1651,9 @@ func _shape_tag(p: Pebble) -> float:
 ## должно лежать там же, где коснулось.
 func _start_sinking(p: Pebble, wp: Vector2) -> void:
 	var size_rel := p.r * p.look / player.radius
-	if size_rel < SINK_FROM or _sinking.size() >= MAX_SINKING or player.dead:
+	# Сколотые тела и их куски уходят в тебя сразу: круглым их погружение не нарисовать.
+	if size_rel < SINK_FROM or _sinking.size() >= MAX_SINKING or player.dead \
+			or not p.holes.is_empty() or not p.frag.is_empty():
 		return
 	var to := wp - player.position
 	var k := clampf((size_rel - SINK_FROM) / (EAT_R - SINK_FROM), 0.0, 1.0)
@@ -1585,7 +1663,6 @@ func _start_sinking(p: Pebble, wp: Vector2) -> void:
 		"t": 0.0, "time": lerpf(SINK_TIME.x, SINK_TIME.y, k),
 		"cell": p.cell, "angle": p.angle, "spin": p.spin,
 		"tag": _shape_tag(p),
-		"carve": _carve_codes(p),
 		"quad": QUAD * (SHARD_QUAD if p.shard else 1.0),
 	})
 
@@ -1602,12 +1679,16 @@ func _update_sinking(delta: float) -> void:
 func _write() -> void:
 	var off := dust_field.frame_offset
 	_boulder_look = GameState.is_boulder()
+	var used := 0
 	for k in pebbles.size():
 		var p := pebbles[k]
 		var s := p.r * p.look * QUAD * (SHARD_QUAD if p.shard else 1.0)
-		var b := k * 16
-		var cv := _carve_codes(p)
+		var b := k * 12
 		var pos := p.pos + off
+		if (not p.holes.is_empty() or not p.frag.is_empty()) and used < SOLO:
+			_write_solo(_solo[used], p, pos)
+			used += 1
+			s = 0.0  # это тело рисует свой узел
 		_buf[b] = s
 		_buf[b + 1] = 0.0
 		_buf[b + 2] = 0.0
@@ -1616,14 +1697,12 @@ func _write() -> void:
 		_buf[b + 5] = s
 		_buf[b + 6] = 0.0
 		_buf[b + 7] = pos.y
-		_buf[b + 8] = cv[1]
-		_buf[b + 9] = cv[2]
-		_buf[b + 10] = cv[3]
-		_buf[b + 11] = cv[4]
-		_buf[b + 12] = p.cell
-		_buf[b + 13] = fposmod(p.angle, TAU)  # в половинной точности большой угол дрожит
-		_buf[b + 14] = cv[0]
-		_buf[b + 15] = _shape_tag(p)
+		_buf[b + 8] = p.cell
+		_buf[b + 9] = fposmod(p.angle, TAU)  # в половинной точности большой угол дрожит
+		_buf[b + 10] = 0.0
+		_buf[b + 11] = _shape_tag(p)
+	for k in range(used, SOLO):
+		_solo[k].visible = false
 	# Погружение: тело съезжает к твоему центру под тобой и съёживается, будто
 	# растекается по тебе. Рисуем под игроком, поэтому край тонет в его диске.
 	var n := pebbles.size()
@@ -1634,8 +1713,7 @@ func _write() -> void:
 		var size: float = d.size * player.radius * lerpf(1.0, 0.45, e)
 		var s: float = size * d.quad
 		var pos: Vector2 = player.position + d.dir * dist
-		var b := n * 16
-		var cv: PackedFloat32Array = d.carve
+		var b := n * 12
 		_buf[b] = s
 		_buf[b + 1] = 0.0
 		_buf[b + 2] = 0.0
@@ -1644,17 +1722,44 @@ func _write() -> void:
 		_buf[b + 5] = s
 		_buf[b + 6] = 0.0
 		_buf[b + 7] = pos.y
-		_buf[b + 8] = cv[1]
-		_buf[b + 9] = cv[2]
-		_buf[b + 10] = cv[3]
-		_buf[b + 11] = cv[4]
-		_buf[b + 12] = d.cell
-		_buf[b + 13] = fposmod(d.angle, TAU)
-		_buf[b + 14] = cv[0]
-		_buf[b + 15] = d.tag
+		_buf[b + 8] = d.cell
+		_buf[b + 9] = fposmod(d.angle, TAU)
+		_buf[b + 10] = 0.0
+		_buf[b + 11] = d.tag
 		n += 1
 	_mm.buffer = _buf
 	_mm.visible_instance_count = n
+
+
+## Сколотое тело или кусок: свой узел и материал, грани выемок — в шейдер.
+func _write_solo(node: MeshInstance2D, p: Pebble, pos: Vector2) -> void:
+	var m := node.material as ShaderMaterial
+	node.visible = true
+	node.position = pos
+	var is_frag := not p.frag.is_empty()
+	var t_scale := (p.frag_ext * 2.0 + 0.3) if is_frag else QUAD
+	var size := t_scale * (p.frag_r if is_frag else p.r * p.look)
+	node.scale = Vector2(size, size)
+	m.set_shader_parameter("solo_data", Vector4(p.cell, fposmod(p.angle, TAU), 0.0, _shape_tag(p)))
+	m.set_shader_parameter("t_origin", p.frag_origin if is_frag else Vector2.ZERO)
+	m.set_shader_parameter("t_scale", t_scale)
+	var key := Vector2i(p.get_instance_id(), p.solo_ver)
+	if node.get_meta("key", Vector2i.ZERO) == key:
+		return
+	node.set_meta("key", key)
+	var planes := PackedVector4Array()
+	if is_frag:
+		for pl in p.frag:
+			planes.append(Vector4(pl.x, pl.y, pl.z, 0.0))
+	else:
+		for hi in p.holes.size():
+			for pl in p.holes[hi]:
+				planes.append(Vector4(pl.x, pl.y, pl.z, hi))
+	var count := planes.size()
+	planes.resize(MAX_PLANES)
+	m.set_shader_parameter("planes", planes)
+	m.set_shader_parameter("plane_count", count)
+	m.set_shader_parameter("solo_mode", 2 if is_frag else 1)
 
 
 ## Ветровая тень — едва заметная прохладная полоса за крупным телом.
@@ -1738,7 +1843,7 @@ func _draw_hints() -> void:
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
 		var face := (-to).angle()
 		var mat_col: Color = GameData.MATERIALS[p.material].color
-		if p.carve.is_empty():
+		if p.holes.is_empty():
 			_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), w_face * px, true)
 			# Остаток кольца — цвет материала: нужное вещество видно издалека.
 			_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)

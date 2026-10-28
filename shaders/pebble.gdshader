@@ -2,8 +2,7 @@ shader_type canvas_item;
 // Чужая галька из атласа для MultiMesh: освещена звездой как шар, медленно вращается,
 // у снеговой линии покрывается инеем, у звезды тлеет.
 //
-// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z и цвет экземпляра —
-//                  глубины откусов в 10 секторах края (по два на число, 5 + 5 бит),
+// INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — 0,
 //                  w — 1 у жеоды: сквозь трещины сверкают кристаллы, вокруг золотистый ореол;
 //                  2 + доля — обломок; −(1 + доля) — бугристый валун (форма по доле).
 
@@ -14,15 +13,24 @@ uniform float star_radius = 2000.0;
 uniform float heat_start = 1.75;
 uniform float snow_line = 6800.0;
 uniform float snow_width = 700.0;
+// Отдельно нарисованное сколотое тело или его кусок (не MultiMesh). Данные те
+// же, что в INSTANCE_CUSTOM, плюс грани: выпуклые ячейки как полуплоскости
+// (xy — нормаль наружу, z — отступ, w — номер ячейки) в осях текстуры тела.
+// Режим 1 — тело с выемками на месте ячеек, 2 — кусок, сама ячейка.
+uniform bool solo = false;
+uniform vec4 solo_data = vec4(0.0);
+uniform vec2 t_origin = vec2(0.0);
+uniform float t_scale = 2.8;
+uniform int solo_mode = 0;
+uniform vec4 planes[48];
+uniform int plane_count = 0;
 
 varying vec4 v_data;
-varying vec4 v_carve;  // ещё 8 секторов откусов (цвет экземпляра, а не цвет)
 varying float v_glow;
 varying float v_frost;
 
 void vertex() {
-	v_data = INSTANCE_CUSTOM;
-	v_carve = COLOR;
+	v_data = solo ? solo_data : INSTANCE_CUSTOM;
 	vec2 world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
 	float heat = clamp((heat_start - length(world) / star_radius) / (heat_start - 1.0), 0.0, 1.0);
 	float temp = 300.0 + 2700.0 * pow(heat, 1.3);
@@ -210,6 +218,13 @@ void fragment() {
 	float c = cos(a);
 	float s = sin(a);
 	vec2 sp = vec2(c * p.x - s * p.y, s * p.x + c * p.y) + 0.5;
+	if (solo) {
+		// Квадрат куска может стоять не в центре тела: идём в оси текстуры тела.
+		vec2 qt0 = t_origin + (sp - 0.5) * t_scale;
+		sp = qt0 * 0.36 + 0.5;
+		vec2 d0 = sp - 0.5;
+		p = vec2(c * d0.x + s * d0.y, -s * d0.x + c * d0.y);
+	}
 	vec2 cell = vec2(mod(v_data.x, 4.0), floor(v_data.x / 4.0));
 	vec4 tex = texture(atlas, (cell + clamp(sp, 0.0, 1.0)) * 0.25);
 	int mat = int(cell.y);  // 0 камень, 1 металл, 2 углерод, 3 лёд
@@ -315,75 +330,78 @@ void fragment() {
 		scol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 		outc = vec4(scol, mask);
 	}
-	float carve_any = v_data.z + v_carve.x + v_carve.y + v_carve.z + v_carve.w;
-	if (carve_any > 0.5 && v_data.w < 1.5) {
-		// Выемки от отколотых кусков. Это то же тело, просто без куска: край
-		// выемки — ломаный, из прямых отрезков излома, без размытия. Внутри края
-		// видна стенка выемки — свежий излом той же породы, со своим светом:
-		// со стороны звезды светлее, с другой — в тени. Граница корки и стенки —
-		// резкое ребро.
+	if (solo && plane_count > 0) {
+		// Выемка на месте отколотых кусков и сами куски — одна и та же порода:
+		// тот же тон из атласа, зерно и хондры, но без пыльного налёта. Стенка
+		// излома — склон в глубь выемки со своим светом; к корке она переходит
+		// плавно, ребро — тонкое и неровное, как у настоящего скола.
 		vec2 qt = (sp - 0.5) / 0.36;
-		float aa = fwidth(qt.x);
-		float hole = 10.0;   // расстояние до края выемки (меньше 0 — дыра)
-		vec2 wall_n = vec2(0.0);
-		float codes[5] = float[5](v_data.z, v_carve.x, v_carve.y, v_carve.z, v_carve.w);
-		for (int i = 0; i < 10; i++) {
-			float code = codes[i / 2];
-			float lv = (i % 2 == 0) ? mod(code, 32.0) : floor(code / 32.0);
-			if (lv < 0.5) {
-				continue;
+		float aa = fwidth(qt.x) * 1.2;
+		float best = 1e3;
+		vec2 bn = vec2(1.0, 0.0);
+		float cur = -1e3;
+		vec2 cn = vec2(1.0, 0.0);
+		float cid = planes[0].w;
+		for (int i = 0; i < 48; i++) {
+			if (i >= plane_count) {
+				break;
 			}
-			float fi = float(i);
-			float bang = fi / 10.0 * 6.2832;
-			float depth = lv / 31.0 * 0.5;
-			vec2 bc = vec2(cos(bang), sin(bang)) * (1.0 + 0.7 - depth);
-			// Выемка — неправильный выпуклый многоугольник из плоскостей излома:
-			// расстояние до него — наибольшее из расстояний до его граней.
-			vec2 rel = qt - bc;
-			float d = -10.0;
-			vec2 fnb = vec2(1.0, 0.0);
-			for (int k = 0; k < 6; k++) {
-				float fk = float(k);
-				float h = rnd(fk * 3.7 + fi * 11.0 + v_data.x * 1.3);
-				float fa = (fk + 0.5 * h) * 6.2832 / 6.0 + fi * 1.3 + v_data.x;
-				vec2 nk = vec2(cos(fa), sin(fa));
-				float dk = dot(rel, nk) - 0.7 * (0.82 + 0.25 * rnd(h * 9.1 + fk));
-				if (dk > d) {
-					d = dk;
-					fnb = nk;
+			vec4 pl = planes[i];
+			if (pl.w != cid) {
+				if (cur < best) {
+					best = cur;
+					bn = cn;
 				}
+				cur = -1e3;
+				cid = pl.w;
 			}
-			// Мелкие зазубрины на ребре: тонкие, без размытия.
-			d += (vnoise(qt * 28.0 + fi * 3.0) - 0.5) * 0.02;
-			float dh = d;  // >0 — тело снаружи выемки
-			if (dh < hole) {
-				hole = dh;
-				wall_n = -fnb;
+			float dk = dot(qt, pl.xy) - pl.z;
+			if (dk > cur) {
+				cur = dk;
+				cn = pl.xy;
 			}
 		}
-		float keep = smoothstep(-aa, aa, hole);
-		// Стенка — узкая полоса у края; её ширина зависит от наклона к нам.
-		const float WALL = 0.07;
-		float in_wall = 1.0 - smoothstep(WALL - aa, WALL + aa, hole);
-		if (in_wall > 0.0) {
-			vec3 wn = normalize(vec3(wall_n * 0.75, 0.55));
+		if (cur < best) {
+			best = cur;
+			bn = cn;
+		}
+		// Рваный край: излом не по линейке.
+		// Мелкие детали гасим, когда тело мелкое на экране: иначе рябят пиксели.
+		float fine_c = clamp(1.4 - fwidth(qt.x) * 14.0, 0.0, 1.0);
+		float jag = (vnoise(qt * 9.0 + v_data.x * 2.3) - 0.5) * 0.05 + (vnoise(qt * 26.0 + v_data.x) - 0.5) * 0.018 * fine_c;
+		float sd = best + jag;
+		// dist — глубина внутрь оставшейся породы от линии излома.
+		float dist = solo_mode == 1 ? sd : -sd;
+		vec2 face = solo_mode == 1 ? -bn : bn;  // куда смотрит стенка излома
+		float keep = smoothstep(-aa, aa, dist);
+		float wide = 0.07 + 0.06 * vnoise(qt * 3.0 + v_data.x * 7.0);
+		float k_wall = 1.0 - smoothstep(wide * 0.55, wide, dist);
+		if (k_wall > 0.0) {
+			// Склон стенки: у ребра круче, к дну выемки положе; поверх — рябь
+			// раковистого излома и зерно породы как нормаль.
+			float tilt = mix(1.3, 0.5, clamp(dist / wide, 0.0, 1.0));
+			float e = 0.02;
+			float g0 = vnoise(qt * 14.0 + v_data.x * 3.3);
+			float gx = vnoise((qt + vec2(e, 0.0)) * 14.0 + v_data.x * 3.3) - g0;
+			float gy = vnoise((qt + vec2(0.0, e)) * 14.0 + v_data.x * 3.3) - g0;
+			float rip = sin(dist * 90.0 + vnoise(qt * 5.0) * 6.0) * 0.08 * fine_c;
+			vec3 wn = normalize(vec3(face * (tilt + rip), 1.0) - vec3(gx, gy, 0.0) / e * 0.08 * fine_c);
 			vec3 ws = vec3(c * wn.x + s * wn.y, -s * wn.x + c * wn.y, wn.z);
 			float wdiff = max(dot(ws, normalize(vec3(light_dir, 0.25))), 0.0);
-			vec4 ft = textureLod(atlas, (cell + clamp(sp, 0.0, 1.0)) * 0.25, 3.0);
-			vec3 fraw = ft.rgb / max(ft.a, 0.05);
-			fraw *= 1.0 + (vnoise(qt * 30.0 + v_data.x * 3.1) - 0.5) * 0.5;
-			vec3 falb = material_look(fraw, mat, qt, v_data.x);
+			// Та же порода, что под коркой: тон и хондры тела, без налёта.
+			vec3 fresh = material_look(tone, mat, qs, v_data.x);
 			if (mat == 3) {
-				falb = mix(fraw, vec3(0.8, 0.88, 0.96), 0.35) * 0.9;
+				fresh = mix(fresh, vec3(0.8, 0.88, 0.96), 0.3);
 			} else {
-				float fl = dot(falb, vec3(0.33));
-				falb = max(mix(vec3(fl), falb, 1.2), vec3(0.0)) * 0.7;
+				float fl = dot(fresh, vec3(0.33));
+				fresh = max(mix(vec3(fl), fresh, 1.2), vec3(0.0)) * 0.8;
 			}
-			vec3 wcol = falb * star_light * (0.08 + 1.6 * wdiff);
-			wcol += star_light * step(0.94, vnoise(qt * 40.0 + v_data.x * 5.0)) * pow(wdiff, 2.0) * 0.4;
+			vec3 wcol = fresh * star_light * (0.1 + 1.6 * wdiff);
+			wcol += star_light * step(0.93, vnoise(qt * 34.0 + v_data.x * 5.0)) * pow(wdiff, 2.0) * 0.35 * fine_c;
+			wcol += metal_glint(qt, mat, v_data.x * 11.0) * star_light * pow(wdiff, 3.0) * 0.6;
 			wcol = mix(wcol, vec3(0.82, 0.92, 1.0) * (dot(wcol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
 			wcol += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * wdiff);
-			outc.rgb = mix(outc.rgb, wcol, in_wall);
+			outc.rgb = mix(outc.rgb, wcol, k_wall);
 		}
 		outc.a *= keep;
 	}
