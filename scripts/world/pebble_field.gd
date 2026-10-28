@@ -851,6 +851,7 @@ func _collide(p: Pebble, index: int) -> void:
 	# их собственного предела, без твоих навыков. Иначе на полной прокачке с
 	# разгону ничего не раскалывалось — тела отскакивали, как мячики.
 	var brittle := stick / maxf(Skills.stat("stick"), 1.0)
+	var spent := 0.0  # доля энергии удара, ушедшая на раскол: столько не вернётся в отскок
 	if impact > minf(stick, brittle) and p.hit_cd <= 0.0:
 		p.hit_cd = HIT_PAUSE
 		impact_shake.emit(clampf(impact / stick - 0.6, 0.2, 1.0) * clampf(p.r / player.radius, 0.3, 1.0))
@@ -872,6 +873,7 @@ func _collide(p: Pebble, index: int) -> void:
 			# небольшой разброс.
 			var q := _impact_q(p, impact, brittle) * rng.randf_range(0.85, 1.15)
 			p.damage = minf(p.damage + DAMAGE_K * q, DAMAGE_MAX)
+			spent = minf(q, 1.0)
 			if q >= 1.0:
 				# Разрушение: крупнейший обломок — половина тела на пороге и
 				# меньше при более сильном ударе (линейный закон Лейнхардта и Стюарта).
@@ -881,7 +883,7 @@ func _collide(p: Pebble, index: int) -> void:
 				var largest := clampf(1.0 - 0.5 * q, 0.12, 0.5)
 				var parts := clampi(2 + int(round(3.0 * (q - 1.0))), 2, 6)
 				_split(p, index, wp, n, impact, m_other, parts, largest, clampf(0.9 - 0.2 * (q - 1.0), 0.5, 0.9))
-				_bounce(n, impact, p, 0.4)
+				_bounce(n, impact, p, 0.0)  # энергия ушла на разрушение: удар неупругий
 				return
 			# Скол: объём выбитого и число кусков растут с энергией.
 			if not p.shard and q > CHIP_Q:
@@ -890,7 +892,7 @@ func _collide(p: Pebble, index: int) -> void:
 			if p.look > LOOK_END:
 				# Тело обгрызено со всех сторон: остаток разваливается на последние куски.
 				_split(p, index, wp, n, impact, GameData.pebble_mass(p.r, GameState.mass))
-				_bounce(n, impact, p, 0.4)
+				_bounce(n, impact, p, 0.0)  # энергия ушла на разрушение: удар неупругий
 				return
 		if loss > 0.0:  # удар медленнее твоего предела тебя не крошит и серию не рвёт
 			if chain > 0:
@@ -902,9 +904,9 @@ func _collide(p: Pebble, index: int) -> void:
 			# Чужая галька разлетается целиком: её вещество становится пылью.
 			_debris(wp, n, impact, p.material, clampi(int(p.r * 2.5), 6, 22))
 			pebbles.remove_at(index)
-			_bounce(n, impact, p, 0.3)
+			_bounce(n, impact, p, 0.0)
 			return
-	_bounce(n, maxf(impact, 0.0), p, 1.0)
+	_bounce(n, maxf(impact, 0.0), p, RESTITUTION * (1.0 - spent))
 	# Расталкиваем целиком, лёгкое сдвигается больше: тела не входят друг в друга.
 	var push := contact - dist + 0.5
 	var m_p := GameData.pebble_mass(p.r, GameState.mass)
@@ -1422,12 +1424,15 @@ static func _cap_height(f: float) -> float:
 
 
 ## Отскок: у кого меньше масса, того отбрасывает сильнее.
-func _bounce(n: Vector2, impact: float, p: Pebble, k: float) -> void:
+func _bounce(n: Vector2, impact: float, p: Pebble, restitution: float) -> void:
+	# Импульс сохраняется и делится по массам; упругость удара (restitution)
+	# решает, сколько энергии вернётся в отскок. Раскол её съедает, и тогда
+	# ты теряешь скорость, как при неупругом ударе.
 	var m_player := GameState.mass
 	var m_other := GameData.pebble_mass(p.r, GameState.mass)
 	var share := m_other / (m_player + m_other)
-	player.velocity -= n * impact * (1.0 + RESTITUTION) * share * k
-	p.vel += n * impact * (1.0 + RESTITUTION) * (1.0 - share) * k
+	player.velocity -= n * impact * (1.0 + restitution) * share
+	p.vel += n * impact * (1.0 + restitution) * (1.0 - share)
 
 
 func _main_material() -> String:
