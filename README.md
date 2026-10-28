@@ -2,4 +2,4 @@
 
 Последняя версия (всегда по этой ссылке): [dust-to-blackhole.apk](dust-to-blackhole.apk)
 
-Версия 0.89: [dust-to-blackhole-0.89.apk](dust-to-blackhole-0.89.apk)
+Версия 0.90: [dust-to-blackhole-0.90.apk](dust-to-blackhole-0.90.apk)
