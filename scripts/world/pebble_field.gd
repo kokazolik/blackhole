@@ -146,6 +146,7 @@ class Pebble:
 	var hit_cd := 0.0      # пауза после удара, чтобы одно касание не било много раз
 	var shard := false     # угловатый обломок (шейдер рисует гранёный камень вместо окатанной гальки)
 	var shard_seed := 0.0  # форма обломка
+	var lump_seed := randf()  # форма бугристого валуна
 	var own := false       # кусок, отколотый от тебя самого («Куча щебня» тянет его обратно)
 	var life := 0.0        # >0 — обломок облака столкновения: рассыпется через столько секунд
 	var crash := false     # валун, летящий на столкновение (газ его не тормозит)
@@ -191,6 +192,8 @@ var _moon_angle := 0.0
 var _pulse_timer := 4.0
 var pulse_t := -1.0  # сколько идёт текущая волна импульса; <0 — волны нет
 var _sinking: Array[Dictionary] = []  # съеденные тела, что ещё уходят в тебя
+var _boulder_look := false  # этап «Валун»: крупные тела рисуем глыбами
+var _puffs: Array[Dictionary] = []  # облачка пыли от ударов
 
 
 func _ready() -> void:
@@ -351,6 +354,7 @@ func _process(delta: float) -> void:
 		i -= 1
 	_collide_pebbles(pull_r if pull > 0.0 else 0.0)
 	_update_sinking(delta)
+	_update_puffs(delta)
 	_write()
 	_hint.queue_redraw()
 
@@ -1291,13 +1295,72 @@ func spray_from(at: Vector2, dir: Vector2, impact: float, material: String) -> v
 	_debris(at, dir, impact, material, 3)
 
 
+## Облачко выброса: при ударе камень крошится в тончайшую пыль, она вылетает
+## серым облаком, расширяется и за пару секунд рассеивается. Светлее с той
+## стороны, куда светит звезда.
+func _puff(at: Vector2, dir: Vector2, material: String, count: int) -> void:
+	if _puffs.size() >= 24:
+		return
+	var size := player.radius * clampf(0.25 + 0.06 * count, 0.35, 1.4)
+	var base: Color = GameData.MATERIALS[material].color
+	var col := base.lerp(Color(0.62, 0.6, 0.57), 0.65)
+	var blobs: Array[Vector3] = []
+	for k in 6:
+		var o := dir.rotated(rng.randf_range(-1.3, 1.3)) * rng.randf_range(0.0, 1.0)
+		blobs.append(Vector3(o.x, o.y, rng.randf_range(0.5, 1.0)))
+	_puffs.append({"pos": at - dust_field.frame_offset, "dir": dir, "t": 0.0,
+		"life": rng.randf_range(1.4, 2.0), "size": size, "col": col, "blobs": blobs})
+
+
+func _update_puffs(delta: float) -> void:
+	for i in range(_puffs.size() - 1, -1, -1):
+		var f: Dictionary = _puffs[i]
+		f.t += delta
+		if f.t >= f.life:
+			_puffs.remove_at(i)
+			continue
+		f.pos += f.dir * f.size * 0.6 * (1.0 - f.t / f.life) * delta
+
+
+func _draw_puffs() -> void:
+	var to_star := -player.position.normalized()
+	for f in _puffs:
+		var k: float = f.t / f.life
+		var grow := 1.0 - exp(-3.5 * k)
+		var wp: Vector2 = f.pos + dust_field.frame_offset
+		var size: float = f.size
+		var fade := pow(1.0 - k, 1.5) * minf(f.t * 12.0, 1.0)
+		for b: Vector3 in f.blobs:
+			var off := Vector2(b.x, b.y)
+			var c := wp + off * size * (0.3 + 1.6 * grow)
+			var r := size * b.z * (0.4 + 1.2 * grow)
+			var lit := 0.75 + 0.45 * (off.normalized().dot(to_star) if off.length() > 0.01 else 0.0)
+			var col: Color = f.col
+			_hint.draw_texture_rect(_halo_glow, Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0), false,
+					Color(col.r * lit, col.g * lit, col.b * lit, 0.42 * fade))
+
+
 ## Осколки разлетаются веером от точки удара и становятся обычной пылью.
 func _debris(at: Vector2, dir: Vector2, impact: float, material: String, count: int) -> void:
+	_puff(at, dir, material, count)
 	for k in count:
 		var d := dir.rotated(rng.randf_range(-1.3, 1.3))
 		var speed := impact * rng.randf_range(0.5, 1.3) + 20.0 * GameData.world_k
 		var level := 1 + int(rng.randf() < 0.45) + int(rng.randf() < 0.15)
 		dust_field.add_debris(at + d * rng.randf_range(0.5, 2.5), d * speed, mini(level, Skills.max_dust_level()), material)
+
+
+## Как рисовать тело: 1 — жеода, 2 + доля — обломок с формой по этой доле,
+## −(1 + доля) — бугристый валун. Метровые тела этапа «Валун» не окатаны газом,
+## как сантиметровые гальки, поэтому они глыбы, а не шары. Мелочь остаётся галькой.
+func _shape_tag(p: Pebble) -> float:
+	if p.shard:
+		return 2.0 + p.shard_seed
+	if p.geode:
+		return 1.0
+	if p.crash or (_boulder_look and not p.food):
+		return -1.0 - p.lump_seed * 0.99
+	return 0.0
 
 
 ## Тело запоминаем в твоих радиусах: ты растёшь и масштаб мира меняется, а оно
@@ -1313,7 +1376,7 @@ func _start_sinking(p: Pebble, wp: Vector2) -> void:
 		"from": to.length() / player.radius, "size": size_rel,
 		"t": 0.0, "time": lerpf(SINK_TIME.x, SINK_TIME.y, k),
 		"cell": p.cell, "angle": p.angle, "spin": p.spin,
-		"tag": 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0),
+		"tag": _shape_tag(p),
 		"quad": QUAD * (SHARD_QUAD if p.shard else 1.0),
 	})
 
@@ -1329,6 +1392,7 @@ func _update_sinking(delta: float) -> void:
 
 func _write() -> void:
 	var off := dust_field.frame_offset
+	_boulder_look = GameState.is_boulder()
 	for k in pebbles.size():
 		var p := pebbles[k]
 		var s := p.r * QUAD * (SHARD_QUAD if p.shard else 1.0)
@@ -1345,8 +1409,7 @@ func _write() -> void:
 		_buf[b + 8] = p.cell
 		_buf[b + 9] = p.angle
 		_buf[b + 10] = 0.0
-		# 1 — жеода, 2 + доля — обломок с формой по этой доле.
-		_buf[b + 11] = 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0)
+		_buf[b + 11] = _shape_tag(p)
 	# Погружение: тело съезжает к твоему центру под тобой и съёживается, будто
 	# растекается по тебе. Рисуем под игроком, поэтому край тонет в его диске.
 	var n := pebbles.size()
@@ -1414,6 +1477,7 @@ func _draw_hints() -> void:
 	var px := 1.0 / camera.zoom.x
 	_draw_shadows()
 	_draw_clump()
+	_draw_puffs()
 	_draw_abilities()
 	var stick := player.stick_speed()
 	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон

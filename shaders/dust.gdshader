@@ -81,10 +81,13 @@ void fragment() {
 		col.a *= alpha < 0.9 ? 0.45 : 1.0;
 		COLOR = col;
 	} else if (simple) {
+		// Крапинка рядом с крупным телом: серая крошка породы с лёгким оттенком
+		// вещества, без цветного ореола (это не угольки, ничего не раскалено).
 		vec3 base = level > 1.5 ? mix(v_color.rgb, level_tint(level).rgb, 0.5) : v_color.rgb;
-		float core = exp(-d * d * 3.0);
-		float g = 1.0 - smoothstep(0.0, GLOW, d);
-		vec4 col = vec4(base * star_light * 1.2, max(core, g * g * 0.35) * alpha);
+		base = mix(base, vec3(dot(base, vec3(0.33))) + 0.12, 0.8);
+		float core = exp(-d * d * 5.0);
+		float g = 1.0 - smoothstep(0.0, GLOW * 0.6, d);
+		vec4 col = vec4(base * star_light * 0.95, max(core, g * g * 0.08) * alpha);
 		col.rgb = mix(col.rgb, ember(v_glow), v_glow * 0.7);
 		COLOR = col;
 	} else {

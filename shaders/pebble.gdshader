@@ -3,7 +3,8 @@ shader_type canvas_item;
 // у снеговой линии покрывается инеем, у звезды тлеет.
 //
 // INSTANCE_CUSTOM: x — клетка атласа, y — угол поворота, z — скорость вращения,
-//                  w — 1 у жеоды: сквозь трещины сверкают кристаллы, вокруг золотистый ореол.
+//                  w — 1 у жеоды: сквозь трещины сверкают кристаллы, вокруг золотистый ореол;
+//                  2 + доля — обломок; −(1 + доля) — бугристый валун (форма по доле).
 
 uniform sampler2D atlas : filter_linear_mipmap;
 uniform vec2 light_dir = vec2(-1.0, 0.0);
@@ -124,6 +125,33 @@ float shard_h(vec2 q, float s, out float crust) {
 	return h;
 }
 
+// Валун метрового размера: не шар, а бугристая глыба. Контур — сумма нескольких
+// гармоник по углу, рельеф — купол, срезанный пологими гранями, с буграми.
+float lump_sd(vec2 q, float s) {
+	float ang = atan(q.y, q.x);
+	float rr = 0.88 + 0.07 * sin(2.0 * ang + s * 6.3) + 0.045 * sin(3.0 * ang + s * 11.1)
+			+ 0.025 * sin(5.0 * ang + s * 17.7) + 0.012 * sin(9.0 * ang + s * 29.3);
+	float sd = length(q) - rr;
+	sd += (vnoise(q * 6.0 + s * 31.0) - 0.5) * 0.05 + (vnoise(q * 15.0 + s * 13.0) - 0.5) * 0.02;
+	return sd;
+}
+
+float lump_h(vec2 q, float s) {
+	float d = -lump_sd(q, s);
+	float dome = sqrt(max(d, 0.0) * 1.6);
+	float top = 10.0;
+	for (int j = 0; j < 4; j++) {
+		float fj = float(j);
+		float a = 6.2832 * rnd(s * 29.0 + fj * 3.3);
+		float g = 0.15 + 0.25 * rnd(s * 41.0 + fj * 5.1);
+		top = min(top, 0.85 + 0.15 * rnd(s * 53.0 + fj) - dot(q, vec2(cos(a), sin(a)) * g));
+	}
+	float h = min(dome, top);
+	h += (vnoise(q * 2.6 + s * 9.0) - 0.5) * 0.18 + (vnoise(q * 9.0 + s * 7.0) - 0.5) * 0.035
+			+ (vnoise(q * 24.0 + s * 3.0) - 0.5) * 0.014;
+	return h;
+}
+
 void fragment() {
 	vec2 p = UV - 0.5;
 	float a = v_data.y + v_data.z * TIME;
@@ -145,21 +173,33 @@ void fragment() {
 	col = mix(col, vec3(0.82, 0.92, 1.0) * (lum * 1.2 + 0.05), v_frost * 0.4);
 	col += mix(vec3(0.5, 0.05, 0.0), vec3(1.0, 0.45, 0.08), v_glow) * v_glow * (0.5 + 0.6 * diff);
 	vec4 outc = vec4(col, tex.a);
-	if (v_data.w > 1.5) {
+	if (v_data.w > 1.5 || v_data.w < -0.5) {
+		bool lumpy = v_data.w < -0.5;
 		// Обломок после удара. Как в опытах по разрушению и как валуны на Итокаве
 		// и Рюгу: угловатый, вытянутый, с плоскими гранями излома, рваным краем
 		// и той же зернистой породой, что у тела, от которого он откололся.
 		// Рисуем рельеф высотой: крыша из нескольких плоскостей излома, крутые
 		// боковые сколы, мелкая зернистость; нормаль берём из рельефа.
-		float sd0 = fract(v_data.w);
+		float sd0 = fract(abs(v_data.w));
 		vec2 q = (sp - 0.5) / 0.36;
 		float e = 0.025;
-		float on_crust = 0.0;
-		float hc = shard_h(q, sd0, on_crust);
+		float on_crust = 1.0;
 		float tmp;
-		float hx = shard_h(q + vec2(e, 0.0), sd0, tmp) - hc;
-		float hy = shard_h(q + vec2(0.0, e), sd0, tmp) - hc;
-		float sd = shard_sd(q, sd0, tmp);
+		float hc;
+		float hx;
+		float hy;
+		float sd;
+		if (lumpy) {
+			hc = lump_h(q, sd0);
+			hx = lump_h(q + vec2(e, 0.0), sd0) - hc;
+			hy = lump_h(q + vec2(0.0, e), sd0) - hc;
+			sd = lump_sd(q, sd0);
+		} else {
+			hc = shard_h(q, sd0, on_crust);
+			hx = shard_h(q + vec2(e, 0.0), sd0, tmp) - hc;
+			hy = shard_h(q + vec2(0.0, e), sd0, tmp) - hc;
+			sd = shard_sd(q, sd0, tmp);
+		}
 		float aa = fwidth(q.y) * 1.2;
 		float mask = 1.0 - smoothstep(-aa, aa, sd);
 		vec3 nl = normalize(vec3(-hx / e, -hy / e, 1.0));
@@ -171,9 +211,10 @@ void fragment() {
 		vec2 tq = q * 0.3;
 		tq *= min(1.0, 0.33 / max(length(tq), 0.001));
 		vec3 alb = texture(atlas, (cell + 0.5 + tq) * 0.25).rgb;
-		// Свежий излом чуть светлее и серее, старая корка темнее (выветривание).
-		vec3 fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.3) * 1.12;
-		alb = mix(fresh, alb * 0.72, on_crust);
+		// Свежий излом заметно светлее и серее: внутри порода не выветрена и не
+		// покрыта пылью. Старая корка темнее. Так обломок читается как разбитый.
+		vec3 fresh = mix(alb, vec3(dot(alb, vec3(0.33))), 0.5) * 1.25 + 0.02;
+		alb = lumpy ? alb * 0.9 : mix(fresh, alb * 0.72, on_crust);
 		// Та же порода, что у валуна: угловатые вкрапления другого тона,
 		// трещины и поры. На мелком обломке детали гаснут, чтобы не рябить.
 		float fine = clamp(1.4 - fwidth(q.x) * 12.0, 0.0, 1.0);
@@ -189,7 +230,7 @@ void fragment() {
 		vec3 scol = alb * star_light * (0.22 + 1.6 * diff);
 		// Мелкие кристаллики на свежем сломе искрят под прямым светом.
 		float gl = step(0.93, vnoise(q * 26.0 + sd0 * 50.0)) * (1.0 - on_crust);
-		scol += star_light * gl * pow(diff, 2.0) * 0.35;
+		scol += star_light * gl * pow(diff, 2.0) * 0.2;
 		// Лёгкое затенение у самого края: обломок не кажется вырезанным из бумаги.
 		scol *= 0.8 + 0.2 * clamp(-sd * 6.0, 0.0, 1.0);
 		scol = mix(scol, vec3(0.82, 0.92, 1.0) * (dot(scol, vec3(0.3, 0.5, 0.2)) * 1.2 + 0.05), v_frost * 0.4);
