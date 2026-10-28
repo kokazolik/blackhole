@@ -948,7 +948,7 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 	var m := GameData.bite_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
 	if p.chunk_mass > 0.0:
 		m = p.chunk_mass
-	m *= ACCRETION * Skills.stat("accretion") * GameData.boulder_gain(GameState.mass)
+	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * GameData.boulder_gain(GameState.mass)
 	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 		chain += 1
 		_chain_timer = GameData.COMBO_WINDOW

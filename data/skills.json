@@ -815,6 +815,28 @@
 			"path": "metal"
 		},
 		{
+			"id": "mass_metal",
+			"title": "Железное сердце",
+			"desc": "Тяжёлый металл тонет к твоему центру: каждая металлическая галька даёт +15% массы за уровень.",
+			"cost": 40000,
+			"cost_growth": 2.0,
+			"max_level": 3,
+			"pos": [
+				-8.8,
+				6
+			],
+			"requires": [
+				"glue_metal"
+			],
+			"requires_stage": 1,
+			"effects": {
+				"mass_metal": 0.15
+			},
+			"icon": "mat_metal",
+			"requires_level": 2,
+			"path": "metal"
+		},
+		{
 			"id": "aff_ice",
 			"title": "Ледяная шуба",
 			"desc": "Ледяные гальки липнут к тебе охотнее: их вокруг +50% за уровень (только за снеговой линией). Выбор пути: другие три вещества закроются до конца забега.",
@@ -856,6 +878,28 @@
 			},
 			"icon": "mat_ice",
 			"requires_level": 3,
+			"path": "ice"
+		},
+		{
+			"id": "mass_ice",
+			"title": "Ледяная мантия",
+			"desc": "Лёд намерзает на тебя толстым слоем: каждая ледяная галька даёт +15% массы за уровень.",
+			"cost": 40000,
+			"cost_growth": 2.0,
+			"max_level": 3,
+			"pos": [
+				-7.6,
+				6
+			],
+			"requires": [
+				"glue_ice"
+			],
+			"requires_stage": 1,
+			"effects": {
+				"mass_ice": 0.15
+			},
+			"icon": "mat_ice",
+			"requires_level": 2,
 			"path": "ice"
 		},
 		{
@@ -903,6 +947,28 @@
 			"path": "silicate"
 		},
 		{
+			"id": "mass_silicate",
+			"title": "Плотная кладка",
+			"desc": "Каменные зёрна ложатся плотно, без пустот: каждая каменная галька даёт +15% массы за уровень.",
+			"cost": 40000,
+			"cost_growth": 2.0,
+			"max_level": 3,
+			"pos": [
+				-6.4,
+				6
+			],
+			"requires": [
+				"glue_silicate"
+			],
+			"requires_stage": 1,
+			"effects": {
+				"mass_silicate": 0.15
+			},
+			"icon": "mat_silicate",
+			"requires_level": 2,
+			"path": "silicate"
+		},
+		{
 			"id": "aff_carbon",
 			"title": "Органика",
 			"desc": "Сложная органика копится в углистых гальках: их вокруг +50% за уровень. Выбор пути: другие три вещества закроются до конца забега.",
@@ -944,6 +1010,28 @@
 			},
 			"icon": "mat_carbon",
 			"requires_level": 3,
+			"path": "carbon"
+		},
+		{
+			"id": "mass_carbon",
+			"title": "Смоляная пропитка",
+			"desc": "Органика затекает в поры и тянет за собой пыль: каждая углистая галька даёт +15% массы за уровень.",
+			"cost": 40000,
+			"cost_growth": 2.0,
+			"max_level": 3,
+			"pos": [
+				-5.2,
+				6
+			],
+			"requires": [
+				"glue_carbon"
+			],
+			"requires_stage": 1,
+			"effects": {
+				"mass_carbon": 0.15
+			},
+			"icon": "mat_carbon",
+			"requires_level": 2,
 			"path": "carbon"
 		},
 		{
