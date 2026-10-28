@@ -30,6 +30,7 @@ const RIPPLE_SHADER := preload("res://shaders/pulse_ripple.gdshader")
 const EDDY_SHADER := preload("res://shaders/eddy.gdshader")
 const EDDY_EXTENT := 1.3  # половина стороны квадрата вихря в его радиусах (как EXTENT в шейдере)
 const MAX_PEBBLES := 140
+const MAX_SINKING := 16       # сколько съеденных тел одновременно погружаются в тебя
 # Ветровая тень на валуне: за крупным телом (по ветру) газ почти стоит.
 const SHADOW_LEN := 7.0     # длина тени в радиусах тела
 const SHADOW_WIDTH := 1.25  # полуширина у самого тела, в радиусах
@@ -119,6 +120,10 @@ const PULSE_GROW := 0.6    # за столько волна доходит до 
 const PULSE_REACH := 0.85  # доля радиуса притяжения, докуда бьёт волна
 const DRIFT_EVERY := 0.2   # снос гальки пересчитываем несколько раз в секунду, а не каждый кадр
 const PULLED_SPEED := 1.4  # притянутое летит к тебе с такой долей твоей скорости
+# Погружение: крупная съеденная галька не пропадает от касания, а втягивается в тебя.
+const SINK_FROM := 0.25    # с такого размера (в твоих радиусах) тело погружается видимо
+const SINK_TIME := Vector2(0.18, 0.55)  # секунд: для SINK_FROM и для тела с тебя размером
+const SINK_DEPTH := 0.35   # центр тела уходит до этой доли твоего радиуса
 # Хондры, вторая валюта: застывшие капли расплава внутри галек.
 const CHONDRULE_CHANCE := 0.06  # с настоящего слипания (мелочь не в счёт)
 const CHONDRULE_DEBRIS := 0.2   # с обломка столкновения или мелочи сгустка
@@ -183,6 +188,7 @@ var _clump_r0 := 0.0
 var _moon_angle := 0.0
 var _pulse_timer := 4.0
 var pulse_t := -1.0  # сколько идёт текущая волна импульса; <0 — волны нет
+var _sinking: Array[Dictionary] = []  # съеденные тела, что ещё уходят в тебя
 
 
 func _ready() -> void:
@@ -192,10 +198,10 @@ func _ready() -> void:
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
 	_mm.use_custom_data = true
 	_mm.mesh = quad
-	_mm.instance_count = MAX_PEBBLES
+	_mm.instance_count = MAX_PEBBLES + MAX_SINKING
 	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
-	_buf.resize(MAX_PEBBLES * 12)
+	_buf.resize((MAX_PEBBLES + MAX_SINKING) * 12)
 	var mat := ShaderMaterial.new()
 	mat.shader = SHADER
 	mat.set_shader_parameter("atlas", ATLAS)
@@ -325,6 +331,7 @@ func _process(delta: float) -> void:
 				_collide(p, i)
 		i -= 1
 	_collide_pebbles(pull_r if pull > 0.0 else 0.0)
+	_update_sinking(delta)
 	_write()
 	_hint.queue_redraw()
 
@@ -969,6 +976,7 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		geode_found.emit(wp, value)
 	GameState.absorb_mass(m, value, p.material, at)
 	pebble_absorbed.emit(wp)
+	_start_sinking(p, wp)
 	var found := 0
 	if p.geode:
 		found = CHONDRULE_GEODE
@@ -1246,6 +1254,33 @@ func _debris(at: Vector2, dir: Vector2, impact: float, material: String, count: 
 		dust_field.add_debris(at + d * rng.randf_range(0.5, 2.5), d * speed, mini(level, Skills.max_dust_level()), material)
 
 
+## Тело запоминаем в твоих радиусах: ты растёшь и масштаб мира меняется, а оно
+## должно лежать там же, где коснулось.
+func _start_sinking(p: Pebble, wp: Vector2) -> void:
+	var size_rel := p.r / player.radius
+	if size_rel < SINK_FROM or _sinking.size() >= MAX_SINKING or player.dead:
+		return
+	var to := wp - player.position
+	var k := clampf((size_rel - SINK_FROM) / (EAT_R - SINK_FROM), 0.0, 1.0)
+	_sinking.append({
+		"dir": to.normalized() if to.length() > 0.001 else Vector2.RIGHT,
+		"from": to.length() / player.radius, "size": size_rel,
+		"t": 0.0, "time": lerpf(SINK_TIME.x, SINK_TIME.y, k),
+		"cell": p.cell, "angle": p.angle, "spin": p.spin,
+		"tag": 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0),
+		"quad": QUAD * (SHARD_QUAD if p.shard else 1.0),
+	})
+
+
+func _update_sinking(delta: float) -> void:
+	for i in range(_sinking.size() - 1, -1, -1):
+		var d: Dictionary = _sinking[i]
+		d.t += delta
+		d.angle += d.spin * delta
+		if d.t >= d.time or player.dead:
+			_sinking.remove_at(i)
+
+
 func _write() -> void:
 	var off := dust_field.frame_offset
 	for k in pebbles.size():
@@ -1266,8 +1301,32 @@ func _write() -> void:
 		_buf[b + 10] = 0.0
 		# 1 — жеода, 2 + доля — обломок с формой по этой доле.
 		_buf[b + 11] = 2.0 + p.shard_seed if p.shard else (1.0 if p.geode else 0.0)
+	# Погружение: тело съезжает к твоему центру под тобой и съёживается, будто
+	# растекается по тебе. Рисуем под игроком, поэтому край тонет в его диске.
+	var n := pebbles.size()
+	for d in _sinking:
+		var u := clampf(d.t / d.time, 0.0, 1.0)
+		var e := u * u * (3.0 - 2.0 * u)
+		var dist: float = lerpf(d.from, SINK_DEPTH, e) * player.radius
+		var size: float = d.size * player.radius * lerpf(1.0, 0.45, e)
+		var s: float = size * d.quad
+		var pos: Vector2 = player.position + d.dir * dist
+		var b := n * 12
+		_buf[b] = s
+		_buf[b + 1] = 0.0
+		_buf[b + 2] = 0.0
+		_buf[b + 3] = pos.x
+		_buf[b + 4] = 0.0
+		_buf[b + 5] = s
+		_buf[b + 6] = 0.0
+		_buf[b + 7] = pos.y
+		_buf[b + 8] = d.cell
+		_buf[b + 9] = d.angle
+		_buf[b + 10] = 0.0
+		_buf[b + 11] = d.tag
+		n += 1
 	_mm.buffer = _buf
-	_mm.visible_instance_count = pebbles.size()
+	_mm.visible_instance_count = n
 
 
 ## Ветровая тень — едва заметная прохладная полоса за крупным телом.
