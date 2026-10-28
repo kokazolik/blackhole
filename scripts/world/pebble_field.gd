@@ -71,6 +71,11 @@ const GIANT_SPLIT_LOSS := Vector2(0.15, 0.3)  # раскол: от сильно�
 const SELF_SPLIT_LOSS := 0.1 # сколько своей массы теряешь, треснув (куски можно подобрать)  # размер куска в долях твоего радиуса (рисуется крупнее, масса своя)
 const SIZE_GAP := 0.15                 # вокруг твоего размера тел нет: либо заметно меньше, либо заметно больше
 const CONTACT_K := 0.97  # край тела на картинке чуть внутри радиуса
+const CARVE := 10        # секторов края, в каждом свой откус
+const CARVE_LV := 31     # ступеней глубины откуса
+const BITE_R := 0.5      # радиус откуса в видимых радиусах тела
+const BITE_MAX := 0.75   # глубже откус не врезается
+const LOOK_END := 1.55   # осталось около четверти тела: остаток разваливается
 const HIT_PAUSE := 0.45  # после удара тело не глотается сразу, сперва отлетает
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
 const DRAG := 0.5                     # доля собственной скорости, остающаяся через секунду
@@ -159,10 +164,10 @@ class Pebble:
 	var grow_to := 0.0     # >0 — тело ещё набирает размер (валун из сгустка)
 	var drift := Vector2.ZERO  # снос встречным газом: меняется медленно, пересчитывается раз в DRIFT_EVERY
 	var drift_t := 0.0
-	var look := 1.0        # видимый радиус к r: после откола тело не съёживается, на нём остаётся срез
-	var scar_dir := Vector2.ZERO  # сторона среза в системе текстуры тела (крутится вместе с ним)
-	var scar_g := 0.0      # >0 — срез: до него от центра столько видимых радиусов
-	var scar_f := 0.0      # доля объёма, ушедшая в срез
+	var look := 1.0        # видимый радиус к r: после откола тело не съёживается, в нём остаётся выемка
+	# Выемки от отколотых кусков: глубина откуса (0..CARVE_LV) в каждом из CARVE
+	# секторов края, в системе текстуры тела (крутится вместе с ним).
+	var carve := PackedByteArray()
 
 var player: Player
 var dust_field: DustField
@@ -172,6 +177,7 @@ var rng := RandomNumberGenerator.new()
 var _mm := MultiMesh.new()
 var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
+var _no_carve := PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0])
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
 var giant := Giant.new()  # Странник: огромный валун проплывает мимо гальки
 var _halo_glow := _make_glow()  # мягкое свечение облачков гало
@@ -209,11 +215,12 @@ func _ready() -> void:
 	quad.size = Vector2.ONE
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
 	_mm.use_custom_data = true
+	_mm.use_colors = true  # в цвете — откусы от отколов, а не цвет
 	_mm.mesh = quad
 	_mm.instance_count = MAX_PEBBLES + MAX_SINKING
 	_mm.custom_aabb = AABB(Vector3(-1e6, -1e6, -1.0), Vector3(2e6, 2e6, 2.0))
 	_mm.visible_instance_count = 0
-	_buf.resize((MAX_PEBBLES + MAX_SINKING) * 12)
+	_buf.resize((MAX_PEBBLES + MAX_SINKING) * 16)
 	var mat := ShaderMaterial.new()
 	mat.shader = SHADER
 	mat.set_shader_parameter("atlas", ATLAS)
@@ -847,7 +854,9 @@ func _collide(p: Pebble, index: int) -> void:
 			# Ты тоже можешь треснуть, но ты крепче: шанс в разы меньше, чем у гальки.
 			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K:
 				_self_split(at, n, impact)
-			if rng.randf() < split_chance(p, excess_other):
+			# Целиком колется только нетронутое тело. Уже обгрызенное дальше крошится
+			# там, куда бьёшь, пока от него не останется мало.
+			if p.carve.is_empty() and rng.randf() < split_chance(p, excess_other):
 				if loss > 0.0:
 					GameState.chip(loss, at)
 					_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
@@ -857,6 +866,11 @@ func _collide(p: Pebble, index: int) -> void:
 			# Не раскололась — от неё отлетают куски, тем больше, чем сильнее удар.
 			var chunk_loss := GameData.CHIP_K * m_other * (excess_other * excess_other - 1.0) * CHUNK_SHARE
 			_break_chunks(p, wp, n, impact, minf(chunk_loss, m_other * CHUNK_MAX), m_other)
+			if p.look > LOOK_END:
+				# Тело обгрызено со всех сторон: остаток разваливается на последние куски.
+				_split(p, index, wp, n, impact, GameData.pebble_mass(p.r, GameState.mass))
+				_bounce(n, impact, p, 0.4)
+				return
 		if loss > 0.0:  # удар медленнее твоего предела тебя не крошит и серию не рвёт
 			if chain > 0:
 				chain = 0
@@ -878,21 +892,31 @@ func _collide(p: Pebble, index: int) -> void:
 	p.pos += n * push * (1.0 - share)
 
 
-## Насколько тело выступает от центра в сторону dir: у сколотого по срезу ближе.
+## Насколько тело выступает от центра в сторону dir: в выемке ближе.
+## Откус — круг радиуса BITE_R (в видимых радиусах), врезанный в край сектора.
 func _reach(p: Pebble, dir: Vector2) -> float:
-	var big := p.r * p.look * CONTACT_K
-	if p.scar_g <= 0.0:
-		return big
-	var cosv := dir.dot(p.scar_dir.rotated(-p.angle))
-	return big * p.scar_g / cosv if cosv > p.scar_g else big
+	var reach := 1.0
+	for k in p.carve.size():
+		if p.carve[k] == 0:
+			continue
+		var u := Vector2.from_angle(k * TAU / CARVE).rotated(-p.angle)
+		var c := 1.0 + BITE_R - p.carve[k] * BITE_MAX / CARVE_LV
+		var cosv := dir.dot(u)
+		var disc := BITE_R * BITE_R - c * c * (1.0 - cosv * cosv)
+		if cosv > 0.0 and disc > 0.0:
+			reach = minf(reach, maxf(c * cosv - sqrt(disc), 0.15))
+	return p.r * p.look * CONTACT_K * reach
 
 
-## Срез для шейдера одним числом: сторона (256 шагов) + глубина в дробной части.
-func _scar_code(p: Pebble) -> float:
-	if p.scar_g <= 0.0:
-		return 0.0
-	var k := int(round(fposmod(p.scar_dir.angle(), TAU) / TAU * 256.0)) % 256
-	return k + clampf(1.0 - p.scar_g, 0.02, 0.9)
+## Откусы для шейдера: по два сектора (5 + 5 бит) в число. Числа уходят в
+## половинную точность, поэтому каждое не больше 1023.
+func _carve_codes(p: Pebble) -> PackedFloat32Array:
+	if p.carve.is_empty() or p.shard:
+		return _no_carve
+	var out := PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0])
+	for k in CARVE / 2:
+		out[k] = p.carve[k * 2] + p.carve[k * 2 + 1] * 32
+	return out
 
 
 
@@ -1261,14 +1285,13 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	# срезана шапка того объёма, что откололся. Масса считается по r, как прежде.
 	var visual := p.r * p.look
 	var f := clampf(total / m_other, 0.0, 0.6)
+	# Откус там, куда пришёлся удар; повторный удар в то же место врезается глубже.
 	var side_tex := (-n).rotated(p.angle)
-	if p.scar_g > 0.0 and p.scar_dir.dot(side_tex) > 0.7:
-		p.scar_f = minf(p.scar_f + f * (1.0 - p.scar_f), 0.6)  # тот же бок: срез глубже
-	else:
-		p.scar_f = f
-		p.scar_dir = side_tex
-	# Срез наклонён к нам, и сверху грань кажется больше шапки: рисуем мельче.
-	p.scar_g = 1.0 - minf(_cap_height(p.scar_f) * 0.7, 0.45)
+	if p.carve.is_empty():
+		p.carve.resize(CARVE)
+	var sector := int(round(fposmod(side_tex.angle(), TAU) / TAU * CARVE)) % CARVE
+	var add := maxi(int(round(_cap_height(f) * 0.9 / BITE_MAX * CARVE_LV)), 3)
+	p.carve[sector] = mini(p.carve[sector] + add, CARVE_LV)
 	p.r *= pow(maxf(1.0 - f, 0.05), 1.0 / 3.0)
 	p.look = visual / p.r
 	var avg_r := player.radius * (CHUNK_R.x + CHUNK_R.y) * 0.5
@@ -1482,7 +1505,7 @@ func _start_sinking(p: Pebble, wp: Vector2) -> void:
 		"t": 0.0, "time": lerpf(SINK_TIME.x, SINK_TIME.y, k),
 		"cell": p.cell, "angle": p.angle, "spin": p.spin,
 		"tag": _shape_tag(p),
-		"scar": 0.0 if p.shard else _scar_code(p),
+		"carve": _carve_codes(p),
 		"quad": QUAD * (SHARD_QUAD if p.shard else 1.0),
 	})
 
@@ -1502,7 +1525,8 @@ func _write() -> void:
 	for k in pebbles.size():
 		var p := pebbles[k]
 		var s := p.r * p.look * QUAD * (SHARD_QUAD if p.shard else 1.0)
-		var b := k * 12
+		var b := k * 16
+		var cv := _carve_codes(p)
 		var pos := p.pos + off
 		_buf[b] = s
 		_buf[b + 1] = 0.0
@@ -1512,10 +1536,14 @@ func _write() -> void:
 		_buf[b + 5] = s
 		_buf[b + 6] = 0.0
 		_buf[b + 7] = pos.y
-		_buf[b + 8] = p.cell
-		_buf[b + 9] = p.angle
-		_buf[b + 10] = 0.0 if p.shard else _scar_code(p)
-		_buf[b + 11] = _shape_tag(p)
+		_buf[b + 8] = cv[1]
+		_buf[b + 9] = cv[2]
+		_buf[b + 10] = cv[3]
+		_buf[b + 11] = cv[4]
+		_buf[b + 12] = p.cell
+		_buf[b + 13] = fposmod(p.angle, TAU)  # в половинной точности большой угол дрожит
+		_buf[b + 14] = cv[0]
+		_buf[b + 15] = _shape_tag(p)
 	# Погружение: тело съезжает к твоему центру под тобой и съёживается, будто
 	# растекается по тебе. Рисуем под игроком, поэтому край тонет в его диске.
 	var n := pebbles.size()
@@ -1526,7 +1554,8 @@ func _write() -> void:
 		var size: float = d.size * player.radius * lerpf(1.0, 0.45, e)
 		var s: float = size * d.quad
 		var pos: Vector2 = player.position + d.dir * dist
-		var b := n * 12
+		var b := n * 16
+		var cv: PackedFloat32Array = d.carve
 		_buf[b] = s
 		_buf[b + 1] = 0.0
 		_buf[b + 2] = 0.0
@@ -1535,10 +1564,14 @@ func _write() -> void:
 		_buf[b + 5] = s
 		_buf[b + 6] = 0.0
 		_buf[b + 7] = pos.y
-		_buf[b + 8] = d.cell
-		_buf[b + 9] = d.angle
-		_buf[b + 10] = d.scar
-		_buf[b + 11] = d.tag
+		_buf[b + 8] = cv[1]
+		_buf[b + 9] = cv[2]
+		_buf[b + 10] = cv[3]
+		_buf[b + 11] = cv[4]
+		_buf[b + 12] = d.cell
+		_buf[b + 13] = fposmod(d.angle, TAU)
+		_buf[b + 14] = cv[0]
+		_buf[b + 15] = d.tag
 		n += 1
 	_mm.buffer = _buf
 	_mm.visible_instance_count = n
