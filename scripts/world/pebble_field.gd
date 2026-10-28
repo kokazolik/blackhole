@@ -56,7 +56,11 @@ const SHARD_QUAD := 1.2    # квадрат обломка крупнее: ос�
 const SPLIT_FROM := 1.2      # удар быстрее предела слипания во столько раз — может расколоть
 const SPLIT_RANGE := 1.0     # ещё на столько быстрее — шанс максимальный
 const SPLIT_MAX := 0.6       # максимальный шанс расколоть гальку одного размера с тобой
-const SPLIT_KEEP := 0.85     # доля вещества, что остаётся в частях (остальное — пыль)
+const RAM_FROM := 1.5        # таран: удар быстрее предела во столько раз...
+const RAM_RANGE := 1.5       # ...и ещё на столько — колет и крупные тела
+const RAM_MAX := 0.95
+const RAM_SIZE := 1.0        # насколько таран не смотрит на размер
+const SPLIT_KEEP := 0.6      # доля вещества, что остаётся в частях (остальное — пыль)
 const SELF_SPLIT_K := 0.2    # во сколько раз реже трескаешься ты сам
 const GIANT_CHIP_FROM := 0.35   # удар о Странника быстрее этой доли предела слипания — сыплется крошка
 const GIANT_SPLIT_FROM := 1.3   # а быстрее этого — раскалываешься
@@ -754,9 +758,14 @@ func _collide(p: Pebble, index: int) -> void:
 		_eat(p, index, at, easy)
 		_chain_from(p, wp)
 		return
-	if impact > stick and p.hit_cd <= 0.0:
+	# Навыки липкости делают крепче тебя, но не чужие тела: их колет удар быстрее
+	# их собственного предела, без твоих навыков. Иначе на полной прокачке с
+	# разгону ничего не раскалывалось — тела отскакивали, как мячики.
+	var brittle := stick / maxf(Skills.stat("stick"), 1.0)
+	if impact > minf(stick, brittle) and p.hit_cd <= 0.0:
 		p.hit_cd = 0.3
-		var excess := impact / stick
+		var excess := maxf(impact / stick, 1.0)
+		var excess_other := impact / brittle
 		var m_other := GameData.pebble_mass(p.r, GameState.mass)
 		var cap := GameData.CHIP_MAX if absorbable(p) else GameData.CHIP_MAX_BIG
 		var raw_loss := minf(GameData.CHIP_K * m_other * (excess * excess - 1.0), GameState.mass * cap)
@@ -765,20 +774,23 @@ func _collide(p: Pebble, index: int) -> void:
 			# Ты тоже можешь треснуть, но ты крепче: шанс в разы меньше, чем у гальки.
 			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K:
 				_self_split(at, n, impact)
-			if rng.randf() < split_chance(p, excess):
-				GameState.chip(loss, at)
-				_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
+			if rng.randf() < split_chance(p, excess_other):
+				if loss > 0.0:
+					GameState.chip(loss, at)
+					_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
 				_split(p, index, wp, n, impact, m_other)
 				_bounce(n, impact, p, 0.4)
 				return
-			_break_chunks(p, wp, n, impact, minf(raw_loss * CHUNK_SHARE, m_other * CHUNK_MAX), m_other)
-		var player_mat := _main_material()
-		if chain > 0:
-			chain = 0
-			combo_changed.emit(0, 1.0)
-		GameState.chip(loss, at)
-		_debris(at, n * -1.0, impact, player_mat, clampi(int(loss * 6.0), 3, 14))
-		if absorbable(p) and excess > GameData.SHATTER_FACTOR:
+			# Не раскололась — от неё отлетают куски, тем больше, чем сильнее удар.
+			var chunk_loss := GameData.CHIP_K * m_other * (excess_other * excess_other - 1.0) * CHUNK_SHARE
+			_break_chunks(p, wp, n, impact, minf(chunk_loss, m_other * CHUNK_MAX), m_other)
+		if loss > 0.0:  # удар медленнее твоего предела тебя не крошит и серию не рвёт
+			if chain > 0:
+				chain = 0
+				combo_changed.emit(0, 1.0)
+			GameState.chip(loss, at)
+			_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
+		if absorbable(p) and excess_other > GameData.SHATTER_FACTOR:
 			# Чужая галька разлетается целиком: её вещество становится пылью.
 			_debris(wp, n, impact, p.material, clampi(int(p.r * 2.5), 6, 22))
 			pebbles.remove_at(index)
@@ -975,10 +987,12 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 
 ## Шанс расколоть крупную гальку целиком: нужен удар куда быстрее предела
 ## слипания, и чем галька крупнее тебя, тем она крепче.
+## Таран в разы быстрее предела колет почти любое тело, даже крупнее тебя.
 func split_chance(p: Pebble, excess: float) -> float:
 	var hard := clampf((excess - SPLIT_FROM) / SPLIT_RANGE, 0.0, 1.0)
 	var size_k := clampf(1.6 - p.r / player.radius, 0.15, 1.0)
-	return hard * SPLIT_MAX * size_k
+	var ram := clampf((excess - RAM_FROM) / RAM_RANGE, 0.0, 1.0) * RAM_SIZE
+	return hard * lerpf(SPLIT_MAX, RAM_MAX, ram) * lerpf(size_k, 1.0, ram)
 
 
 ## Галька раскалывается на несколько частей разбиением Вороного: мелкие можно
