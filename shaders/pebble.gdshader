@@ -367,7 +367,7 @@ void fragment() {
 		}
 		// Рваный край: излом не по линейке.
 		// Мелкие детали гасим, когда тело мелкое на экране: иначе рябят пиксели.
-		float fine_c = clamp(1.4 - fwidth(qt.x) * 14.0, 0.0, 1.0);
+		float fine_c = clamp(1.2 - fwidth(qt.x) * 40.0, 0.0, 1.0);
 		float jag = (vnoise(qt * 9.0 + v_data.x * 2.3) - 0.5) * 0.05 + (vnoise(qt * 26.0 + v_data.x) - 0.5) * 0.018 * fine_c;
 		float sd = best + jag;
 		// dist — глубина внутрь оставшейся породы от линии излома.
