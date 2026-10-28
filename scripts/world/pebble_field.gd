@@ -51,9 +51,7 @@ const EAT_R := 1.0
 const EASY_MAX := 0.95       # навыки «Хватки» не поднимают порог «без дуги» выше этого
 # Удар о крупную гальку откалывает от неё куски. Ты теряешь своё, а куски — мелочь,
 # их можно доесть. Без навыков от сколов это всё же убыток.
-const CHUNK_SHARE := 0.9     # масса отбитых кусков в долях твоей потери (до навыков)
-const CHUNK_MAX := 0.25      # больше этой доли галька за удар не теряет
-const CHUNK_R := Vector2(0.22, 0.3)
+const CHUNK_MAX := 0.3       # больше этой доли тело за удар не теряет
 const SHARD_QUAD := 1.2    # квадрат обломка крупнее: острые углы выступают за круг
 const SPLIT_FROM := 1.2      # удар быстрее предела слипания во столько раз — может расколоть
 const SPLIT_RANGE := 1.0     # ещё на столько быстрее — шанс максимальный
@@ -75,6 +73,11 @@ const CARVE := 10        # секторов края, в каждом свой �
 const CARVE_LV := 31     # ступеней глубины откуса
 const BITE_R := 0.5      # радиус откуса в видимых радиусах тела
 const BITE_MAX := 0.75   # глубже откус не врезается
+const DISRUPT_V := 1.6    # скорость разрушения тела твоей массы — во столько раз выше предела прочности
+const DAMAGE_K := 0.25    # трещин от удара с энергией Q: DAMAGE_K × Q/Q*
+const DAMAGE_MAX := 0.8
+const CRATER_K := 0.3     # скол уносит CRATER_K × Q/Q* массы тела
+const CHIP_Q := 0.05      # слабее этого удар только отбрасывает
 const LOOK_END := 1.55   # осталось около четверти тела: остаток разваливается
 const HIT_PAUSE := 0.45  # после удара тело не глотается сразу, сперва отлетает
 const QUAD := 2.8                     # сторона квадрата в радиусах гальки
@@ -168,6 +171,7 @@ class Pebble:
 	# Выемки от отколотых кусков: глубина откуса (0..CARVE_LV) в каждом из CARVE
 	# секторов края, в системе текстуры тела (крутится вместе с ним).
 	var carve := PackedByteArray()
+	var damage := 0.0      # трещины от прежних ударов (0..DAMAGE_MAX): во столько слабее тело
 
 var player: Player
 var dust_field: DustField
@@ -359,7 +363,7 @@ func _process(delta: float) -> void:
 		if wp.length() < evap:
 			evaporated.emit(wp, p.r)
 			pebbles.remove_at(i)
-		elif not player.dead and wp.distance_squared_to(player.position) < pow(_touch_r + p.r, 2):
+		elif not player.dead and wp.distance_squared_to(player.position) < pow(_touch_r + p.r * p.look, 2):
 			# Дальние гальки не трогают ни тебя, ни гало: им и проверки не нужны.
 			if _moon_catch(p, wp):
 				_eat(p, i, player.position + (wp - player.position).limit_length(player.radius), true)
@@ -389,7 +393,7 @@ func _collide_pebbles(flow_r: float) -> void:
 		if flow_r > 0.0 and p.pos.distance_squared_to(me) < flow_r * flow_r and absorbable(p):
 			continue
 		list.append(p)
-		max_r = maxf(max_r, p.r)
+		max_r = maxf(max_r, p.r * p.look)
 	if list.size() < 2:
 		return
 	# Сортировка по x: соседей ищем только в полосе ширины двух радиусов.
@@ -397,18 +401,22 @@ func _collide_pebbles(flow_r: float) -> void:
 	var stick := player.stick_speed()
 	for ia in list.size() - 1:
 		var a := list[ia]
-		var reach := (a.r + max_r) * 0.92
+		var reach := (a.r * a.look + max_r) * 0.92
 		for ib in range(ia + 1, list.size()):
 			var b := list[ib]
 			if b.pos.x - a.pos.x > reach:
 				break
 			var to := b.pos - a.pos
-			var contact := (a.r + b.r) * 0.92
 			var d2 := to.length_squared()
-			if d2 >= contact * contact or d2 < 0.000001:
+			if d2 >= reach * reach or d2 < 0.000001:
 				continue
 			var d := sqrt(d2)
 			var n := to / d
+			# По форме: в выемку соседнее тело заходит глубже, чем в круглый край.
+			var contact := (a.r * a.look + b.r * b.look) * 0.92 if a.carve.is_empty() and b.carve.is_empty() \
+					else (_edge(a, n) + _edge(b, -n)) * 0.92
+			if d >= contact:
+				continue
 			var ma := a.r * a.r * a.r
 			var mb := b.r * b.r * b.r
 			var wa := mb / (ma + mb)  # доля сдвига лёгкому — больше
@@ -636,7 +644,9 @@ func absorbable(p: Pebble) -> bool:
 
 ## Мелочь, которая прилипает на любой скорости: еда валуна, отбитые куски и крошечные гальки.
 func is_easy(p: Pebble) -> bool:
-	return p.food or p.pulled or p.chunk_mass > 0.0 or p.r < player.radius * easy_r()
+	# Отбитые куски едятся по обычным правилам массы и размера. Всегда липнут
+	# только свои куски и облако обломков от столкновения валунов (его собирают).
+	return p.food or p.pulled or p.own or p.life > 0.0 or p.r < player.radius * easy_r()
 
 
 ## Доля твоего радиуса, мельче которой тела прилипают на любой скорости.
@@ -854,18 +864,29 @@ func _collide(p: Pebble, index: int) -> void:
 			# Ты тоже можешь треснуть, но ты крепче: шанс в разы меньше, чем у гальки.
 			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K:
 				_self_split(at, n, impact)
-			# Целиком колется только нетронутое тело. Уже обгрызенное дальше крошится
-			# там, куда бьёшь, пока от него не останется мало.
-			if p.carve.is_empty() and rng.randf() < split_chance(p, excess_other):
+			# Чем кончится удар, считаем по энергии, как в моделях разрушения
+			# астероидов: удельная энергия удара Q (скорость вдоль линии удара
+			# и массы обоих тел) против прочности тела Q*. Удар вскользь несёт
+			# меньше энергии сам собой: в расчёт идёт только скорость вдоль нормали.
+			# Трещины от прежних ударов снижают прочность. Неоднородность породы —
+			# небольшой разброс.
+			var q := _impact_q(p, impact, brittle) * rng.randf_range(0.85, 1.15)
+			p.damage = minf(p.damage + DAMAGE_K * q, DAMAGE_MAX)
+			if q >= 1.0:
+				# Разрушение: крупнейший обломок — половина тела на пороге и
+				# меньше при более сильном ударе (линейный закон Лейнхардта и Стюарта).
 				if loss > 0.0:
 					GameState.chip(loss, at)
 					_debris(at, n * -1.0, impact, _main_material(), clampi(int(loss * 6.0), 3, 14))
-				_split(p, index, wp, n, impact, m_other)
+				var largest := clampf(1.0 - 0.5 * q, 0.12, 0.5)
+				var parts := clampi(2 + int(round(3.0 * (q - 1.0))), 2, 6)
+				_split(p, index, wp, n, impact, m_other, parts, largest, clampf(0.9 - 0.2 * (q - 1.0), 0.5, 0.9))
 				_bounce(n, impact, p, 0.4)
 				return
-			# Не раскололась — от неё отлетают куски, тем больше, чем сильнее удар.
-			var chunk_loss := GameData.CHIP_K * m_other * (excess_other * excess_other - 1.0) * CHUNK_SHARE
-			_break_chunks(p, wp, n, impact, minf(chunk_loss, m_other * CHUNK_MAX), m_other)
+			# Скол: объём выбитого и число кусков растут с энергией.
+			if not p.shard and q > CHIP_Q:
+				var pieces := clampi(1 + int(round(4.0 * q)), 1, 5)
+				_break_chunks(p, wp, n, impact, m_other * minf(CRATER_K * q, CHUNK_MAX), m_other, pieces)
 			if p.look > LOOK_END:
 				# Тело обгрызено со всех сторон: остаток разваливается на последние куски.
 				_split(p, index, wp, n, impact, GameData.pebble_mass(p.r, GameState.mass))
@@ -895,6 +916,11 @@ func _collide(p: Pebble, index: int) -> void:
 ## Насколько тело выступает от центра в сторону dir: в выемке ближе.
 ## Откус — круг радиуса BITE_R (в видимых радиусах), врезанный в край сектора.
 func _reach(p: Pebble, dir: Vector2) -> float:
+	return _edge(p, dir) * CONTACT_K
+
+
+## Видимый край тела в сторону dir (мировые оси), с учётом откусов.
+func _edge(p: Pebble, dir: Vector2) -> float:
 	var reach := 1.0
 	for k in p.carve.size():
 		if p.carve[k] == 0:
@@ -905,7 +931,7 @@ func _reach(p: Pebble, dir: Vector2) -> float:
 		var disc := BITE_R * BITE_R - c * c * (1.0 - cosv * cosv)
 		if cosv > 0.0 and disc > 0.0:
 			reach = minf(reach, maxf(c * cosv - sqrt(disc), 0.15))
-	return p.r * p.look * CONTACT_K * reach
+	return p.r * p.look * reach
 
 
 ## Откусы для шейдера: по два сектора (5 + 5 бит) в число. Числа уходят в
@@ -958,7 +984,7 @@ func _cache_moons() -> void:
 func _moon_catch(p: Pebble, wp: Vector2) -> bool:
 	if _moon_pts.is_empty() or p.pulled or (p.chunk_mass > 0.0 and p.hit_cd > 0.0):
 		return false
-	if not (p.food or p.chunk_mass > 0.0 or p.r < _easy_r):
+	if not (p.food or p.own or p.life > 0.0 or p.r < _easy_r):
 		return false
 	for m in _moon_pts:
 		var reach := _moon_r + p.r
@@ -1112,27 +1138,65 @@ func split_chance(p: Pebble, excess: float) -> float:
 	return hard * lerpf(SPLIT_MAX, RAM_MAX, ram) * lerpf(size_k, 1.0, ram)
 
 
+## Удельная энергия удара в долях прочности тела Q/Q*. Q = ½·μ·v²/M, где μ —
+## приведённая масса: лёгкое тело разносит, тяжёлое ты только поцарапаешь.
+## Q* соответствует скорости DISRUPT_V пределов при равных массах; трещины её снижают.
+func _impact_q(p: Pebble, impact: float, brittle: float) -> float:
+	var m_t := GameData.pebble_mass(p.r, GameState.mass)
+	var m_p := GameState.mass
+	var v_crit := brittle * DISRUPT_V * sqrt(1.0 - p.damage)
+	return pow(impact / v_crit, 2.0) * 2.0 * m_p / (m_p + m_t)
+
+
 ## Галька раскалывается на несколько частей разбиением Вороного: мелкие можно
 ## доесть, крупные остаются крупными. Часть вещества уходит пылью.
-func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_other: float) -> void:
+func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_other: float, parts := -1,
+		largest := -1.0, keep := SPLIT_KEEP) -> void:
 	pebbles.remove_at(index)
 	var shape := _silhouette()
 	var seeds: Array[Vector2] = []
 	var local_hit := (-n).rotated(-p.angle)  # точка удара в осях гальки
-	for k in rng.randi_range(3, 5):
-		# Зёрна гуще у места удара: там осколки мельче.
-		var q := Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.85
-		seeds.append(q.lerp(local_hit * 0.7, 0.3 if k < 2 else 0.0))
+	if parts == 2:
+		# Пополам: трещина идёт от места удара через центр.
+		var side := local_hit.orthogonal().rotated(rng.randf_range(-0.2, 0.2))
+		seeds.append(side * 0.45)
+		seeds.append(-side * 0.45)
+	else:
+		for k in (parts if parts > 0 else rng.randi_range(3, 5)):
+			# Зёрна гуще у места удара: там осколки мельче.
+			var q := Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.85
+			seeds.append(q.lerp(local_hit * 0.7, 0.3 if k < 2 else 0.0))
 	var cells := _voronoi(shape, seeds)
 	var total_area := 0.0
 	for cell in cells:
 		total_area += absf(_area(cell))
 	var mat_cell := GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+	# Доли частей: по площади ячеек или, если задан крупнейший обломок, он
+	# достаётся самой большой ячейке, а остальное делится по степенному закону.
+	var shares: Array[float] = []
+	for cell in cells:
+		shares.append(absf(_area(cell)) / total_area)
+	if largest > 0.0 and cells.size() > 1:
+		var big := 0
+		for i in shares.size():
+			if shares[i] > shares[big]:
+				big = i
+		var rest := 0.0
+		var w: Array[float] = []
+		var rank := 1
+		for i in shares.size():
+			var wi := 0.0 if i == big else pow(rank + 1.0, -1.5) * rng.randf_range(0.8, 1.2)
+			if i != big:
+				rank += 1
+			w.append(wi)
+			rest += wi
+		for i in shares.size():
+			shares[i] = largest if i == big else (1.0 - largest) * w[i] / rest
 	var k := 0
 	for cell in cells:
 		if pebbles.size() >= MAX_PEBBLES:
 			break
-		var share := absf(_area(cell)) / total_area * SPLIT_KEEP
+		var share := shares[k] * keep
 		var c := Pebble.new()
 		c.r = p.r * pow(share, 1.0 / 3.0)
 		var centre := _set_shape(c, cell)
@@ -1278,12 +1342,13 @@ func chunk_center() -> Vector2:
 
 ## От крупной гальки откалывается край у места удара и разваливается на куски:
 ## она худеет, а куски можно доесть.
-func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: float, m_other: float) -> void:
+func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: float, m_other: float, pieces := 3) -> void:
 	if total <= 0.0:
 		return
 	# Тело не съёживается шаром: его видимый край остаётся, а со стороны удара
 	# срезана шапка того объёма, что откололся. Масса считается по r, как прежде.
 	var visual := p.r * p.look
+	var r_before := p.r
 	var f := clampf(total / m_other, 0.0, 0.6)
 	# Откус там, куда пришёлся удар; повторный удар в то же место врезается глубже.
 	var side_tex := (-n).rotated(p.angle)
@@ -1294,10 +1359,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	p.carve[sector] = mini(p.carve[sector] + add, CARVE_LV)
 	p.r *= pow(maxf(1.0 - f, 0.05), 1.0 / 3.0)
 	p.look = visual / p.r
-	var avg_r := player.radius * (CHUNK_R.x + CHUNK_R.y) * 0.5
-	var avg_m := GameData.pebble_mass(avg_r, GameState.mass)
-	var count := clampi(int(round(total / maxf(avg_m, 0.0001))), 2, 5)
-	count = mini(count, MAX_PEBBLES - pebbles.size())
+	var count := mini(pieces, MAX_PEBBLES - pebbles.size())
 	if count <= 0:
 		return
 	var at := wp - n * _reach(p, -n)  # точка удара на поверхности гальки
@@ -1306,9 +1368,22 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	_puff(at, (-n).rotated(-1.1), p.material, 7)
 	var res := _cap_pieces((-n).rotated(-p.angle), count)
 	var cells: Array[PackedVector2Array] = res[0]
+	# Куски неравные, как в опытах: один крупный, остальные мельче (доли ~ 1/k^1,5).
+	# Вместе они — ровно та масса, что ушла из тела, поэтому размер куска
+	# привязан к выемке и к силе удара.
+	var weights: Array[float] = []
+	var wsum := 0.0
+	for k in cells.size():
+		var w := pow(k + 1.0, -1.5) * rng.randf_range(0.75, 1.25)
+		weights.append(w)
+		wsum += w
+	weights.shuffle()
+	var ci := 0
 	for cell in cells:
 		var c := Pebble.new()
-		c.r = player.radius * rng.randf_range(CHUNK_R.x, CHUNK_R.y)
+		var piece_m := total * weights[ci] / wsum
+		ci += 1
+		c.r = r_before * pow(piece_m / m_other, 1.0 / 3.0)
 		var centre := _set_shape(c, cell)
 		var out := centre.rotated(p.angle)
 		# Кусок появляется у места удара, но снаружи тебя.
@@ -1318,7 +1393,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		if from_me.length() < need:
 			cp = player.position + from_me.normalized() * need if from_me.length() > 0.001 else cp + n * need
 		c.pos = cp - dust_field.frame_offset
-		c.chunk_mass = total / cells.size()
+		c.chunk_mass = piece_m
 		c.material = p.material
 		c.cell = p.cell
 		c.angle = p.angle
@@ -1642,11 +1717,14 @@ func _draw_hints() -> void:
 			if p.shard:
 				continue  # круг вокруг угловатого обломка смотрится чужим: его видно и так
 			# Мелкий пунктир вплотную к гальке: заметно, но не спорит с самой галькой.
+			# Пунктир идёт по краю тела: у сколотого — и по выемкам.
 			var dash_col := Color(0.8, 0.85, 1.0, 0.3 * fade)
+			var gap := p.r * p.look * 0.1
 			for k in 24:
-				var a0 := k * TAU / 24.0
-				dash_pts.append(wp + Vector2.from_angle(a0) * p.r * 1.1)
-				dash_pts.append(wp + Vector2.from_angle(a0 + TAU / 72.0) * p.r * 1.1)
+				var u0 := Vector2.from_angle(k * TAU / 24.0)
+				var u1 := Vector2.from_angle(k * TAU / 24.0 + TAU / 72.0)
+				dash_pts.append(wp + u0 * (_edge(p, u0) + gap))
+				dash_pts.append(wp + u1 * (_edge(p, u1) + gap))
 				dash_cols.append(dash_col)
 			continue
 		var n := to / maxf(dist, 0.001)
@@ -1654,12 +1732,27 @@ func _draw_hints() -> void:
 		var ok := approach <= stick * Skills.stat("glue_" + p.material)
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
 		var face := (-to).angle()
-		_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), w_face * px, true)
-		# Остаток кольца — цвет материала: нужное вещество видно издалека.
 		var mat_col: Color = GameData.MATERIALS[p.material].color
-		_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
+		if p.carve.is_empty():
+			_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), w_face * px, true)
+			# Остаток кольца — цвет материала: нужное вещество видно издалека.
+			_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
+		else:
+			# У сколотого кольцо повторяет край с выемками.
+			var pad := rr - p.r * p.look
+			_hint.draw_polyline(_edge_arc(p, wp, face - 1.1, face + 1.1, 20, pad), Color(col, 0.85 * fade), w_face * px, true)
+			_hint.draw_polyline(_edge_arc(p, wp, face + 1.1, face + TAU - 1.1, 28, pad), Color(mat_col, 0.55 * fade), w_mat * px, true)
 	if not dash_pts.is_empty():
 		_hint.draw_multiline_colors(dash_pts, dash_cols, -1.0)
+
+
+## Дуга по краю тела (с выемками) от угла a0 до a1, с отступом pad.
+func _edge_arc(p: Pebble, wp: Vector2, a0: float, a1: float, steps: int, pad: float) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for k in steps + 1:
+		var u := Vector2.from_angle(lerpf(a0, a1, float(k) / steps))
+		pts.append(wp + u * (_edge(p, u) + pad))
+	return pts
 
 
 ## Столкновение валунов: вдали два крупных тела летят друг в друга и
