@@ -18,6 +18,7 @@ const MIX_SMOOTH_TIME := 1.5
 const GRAIN_SCALE := 3.7   # зерно на текстуре занимает ~70% её ширины; видимый размер как у пыли (~2.7 радиуса)
 const PEBBLE_SCALE := 2.78  # тело гальки — 0.36 ширины спрайта: видимый радиус ровно radius
 const SPIN_SPEED := 0.15   # медленное вращение комка, рад/с
+const PLANET_BAKE_MASS := 1.0e6  # с этой массы валуна загодя печём рельеф планетезимали
 const TRAIL_POINTS := 20
 const TRAIL_STEP := 0.035  # секунд между точками следа
 const BURN_RATE := 0.9     # скорость испарения при максимальном нагреве (с площади поверхности)
@@ -30,6 +31,7 @@ var frame_velocity := Vector2.ZERO  # орбитальное движение в
 var drift_velocity := Vector2.ZERO  # снос встречным ветром газа (только у гальки)
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var boulder_k := 0.0                # 0 — галька, 1 — валун
+var planet_k := 0.0                 # 0 — валун, 1 — планетезималь
 var shadow := 0.0                   # 0..1: насколько ты в ветровой тени крупного тела
 var pebble_field: PebbleField       # для ветровой тени; ставит main
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
@@ -43,6 +45,8 @@ var _trail_count := 0  # сколько точек следа уже было: �
 var _glow_tex := _make_glow()
 var _grain := Sprite2D.new()  # сам комок: отдельный спрайт, чтобы его освещала звезда
 var _pebble := Sprite2D.new()  # процедурная галька, проступает при переходе
+var _planet := Sprite2D.new()  # планетезималь: объёмный шар по запечённому рельефу
+var _planet_bake: PlanetBake   # печётся заранее, ещё на позднем валуне
 var _mix := Vector4(0.25, 0.25, 0.25, 0.25)  # сглаженные доли состава для шейдера
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
@@ -72,9 +76,18 @@ func _ready() -> void:
 	blank.fill(Color.WHITE)
 	_pebble.texture = ImageTexture.create_from_image(blank)
 	add_child(_pebble)
+	var planet := ShaderMaterial.new()
+	planet.shader = preload("res://shaders/planetesimal.gdshader")
+	planet.set_shader_parameter("seed", randf())
+	planet.set_shader_parameter("tilt", randf_range(0.3, 0.7))
+	_planet.material = planet
+	_planet.texture = _pebble.texture
+	_planet.visible = false
+	add_child(_planet)
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	boulder_k = 1.0 if GameState.is_boulder() else 0.0
+	planet_k = 1.0 if GameState.stage >= GameData.PLANETESIMAL_STAGE else 0.0
 	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
 	GameState.stage_reached.connect(_on_stage_reached)
 
@@ -84,6 +97,22 @@ func _on_stage_reached(index: int) -> void:
 		create_tween().tween_property(self, "pebble_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
 	elif index == GameData.BOULDER_STAGE:
 		create_tween().tween_property(self, "boulder_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
+	elif index == GameData.PLANETESIMAL_STAGE:
+		_start_planet_bake()
+		create_tween().tween_property(self, "planet_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
+
+
+## Рельеф планетезимали печётся полосами за десяток кадров. Начинаем загодя,
+## на полпути к ней, чтобы к превращению текстура была готова.
+func _start_planet_bake() -> void:
+	if _planet_bake:
+		return
+	_planet_bake = PlanetBake.new((_planet.material as ShaderMaterial).get_shader_parameter("seed"))
+	add_child(_planet_bake)
+	_planet_bake.start()
+	var mat := _planet.material as ShaderMaterial
+	mat.set_shader_parameter("surf", _planet_bake.get_texture())
+	mat.set_shader_parameter("normal_map", _planet_bake.normals.get_texture())
 
 
 ## Мягкое свечение одной текстурой вместо стопки полупрозрачных кругов.
@@ -175,6 +204,8 @@ func _process(delta: float) -> void:
 
 	radius = lerpf(radius, target_radius(), 1.0 - exp(-4.0 * delta))
 	_spin += (SPIN_SPEED + velocity.length() / maxf(radius, 1.0) * 0.05) * delta
+	if not _planet_bake and (planet_k > 0.0 or (GameState.is_boulder() and GameState.mass > PLANET_BAKE_MASS)):
+		_start_planet_bake()
 	_update_trail(delta)
 	_pulse = maxf(0.0, _pulse - delta * 4.0)
 	GameState.player_position = position
@@ -211,6 +242,7 @@ func die() -> void:
 	GameState.burned_up = true
 	_grain.visible = false
 	_pebble.visible = false
+	_planet.visible = false
 	queue_redraw()
 	burned_up.emit()
 
@@ -306,14 +338,30 @@ func _update_grain(r: float) -> void:
 	# Галька темнее и плотнее рыхлой пылинки: цвет состава почти без осветления.
 	_grain.modulate = Color(body_color.lightened(0.5 + 0.3 * _pulse), 1.0 - pebble_k)
 	_grain.visible = pebble_k < 1.0
-	_pebble.visible = pebble_k > 0.0
+	_mix = _mix.lerp(_target_mix(), 1.0 - exp(-get_process_delta_time() / MIX_SMOOTH_TIME))
+	_pebble.visible = pebble_k > 0.0 and _planet_shown() < 1.0
 	if _pebble.visible:
-		_mix = _mix.lerp(_target_mix(), 1.0 - exp(-get_process_delta_time() / MIX_SMOOTH_TIME))
 		var body := _pebble.material as ShaderMaterial
 		body.set_shader_parameter("mix_w", _mix)
 		body.set_shader_parameter("growth", clampf(log(maxf(GameState.mass, 30.0) / 30.0) / log(100.0), 0.0, 1.0))
 		body.set_shader_parameter("boulder", boulder_k * clampf(0.75 + 0.25 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
-		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.12 * _pulse), pebble_k)
+		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.12 * _pulse), pebble_k * (1.0 - _planet_shown()))
+	_planet.visible = _planet_shown() > 0.0
+	if _planet.visible:
+		# Шар поворачивается в шейдере вокруг своей наклонной оси, а свет — с экрана.
+		var mat := _planet.material as ShaderMaterial
+		_planet.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
+		mat.set_shader_parameter("light_dir", (-position).normalized())
+		mat.set_shader_parameter("spin", _spin)
+		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
+		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
+		mat.set_shader_parameter("mix_w", _mix)
+		_planet.modulate = Color(Color.WHITE * (1.05 + 0.1 * _pulse), _planet_shown())
+
+
+## Насколько видна планетезималь: пока рельеф не испечён, остаётся валун.
+func _planet_shown() -> float:
+	return planet_k if _planet_bake and _planet_bake.done else 0.0
 
 
 ## Доли веществ для шейдера гальки. Пока состав не сложился — поровну.
