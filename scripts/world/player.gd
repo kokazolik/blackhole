@@ -1,6 +1,6 @@
 class_name Player
 extends Node2D
-## Пылинка игрока: инерционное движение от стика/клавиатуры, рост от массы, поле притяжения.
+## Пылинка игрока: движение от стика/клавиатуры, рост от массы, поле притяжения.
 ## У звезды нагревается, светится и испаряется; коснувшись поверхности — гибнет.
 ##
 ## Став галькой, тело отстаёт от газа: встречный ветер сносит его к звезде
@@ -10,11 +10,6 @@ signal burned_up
 
 const ACCEL_FACTOR := 3.0
 const PEBBLE_ACCEL_FACTOR := 1.4  # галька тяжелее: тяга разгоняет её дольше
-# Движение инерционное: стик — это тяга, а не скорость. Отпустил — тело летит
-# дальше и лишь понемногу вязнет в газе (доля скорости, что гаснет за секунду).
-const COAST_DRAG := 1.1           # пылинка: газ держит её крепко
-const PEBBLE_COAST_DRAG := 0.42   # галька: катится по инерции пару секунд
-const OVERSPEED_DRAG := 2.5       # быстрее предела (после удара, рывка) гасится быстрее
 const PEBBLE_SPEED := 66.0         # предельная скорость свежей гальки (без навыков), ед./с
 const PEBBLE_SPEED_EXP := 0.6      # как растёт скорость гальки с радиусом
 const GRAIN_TEX := preload("res://assets/player/player_grain.png")
@@ -161,20 +156,7 @@ func _process(delta: float) -> void:
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
 	var accel := lerpf(ACCEL_FACTOR, PEBBLE_ACCEL_FACTOR * Skills.stat("thrust"), pebble_k)
-	# Стик толкает тело: тяга добавляет скорость, а не задаёт её. Поворот не гасит
-	# прежний разгон — тело описывает дугу, пока тяга не перетянет.
-	var push := dir.length()
-	if push < 0.05:
-		velocity *= exp(-lerpf(COAST_DRAG, PEBBLE_COAST_DRAG, pebble_k) * delta)
-	else:
-		var before := velocity.length()
-		velocity += dir * top * accel * delta
-		var speed := velocity.length()
-		# Тяга не разгоняет выше предела, а то, что сверху (после удара), гаснет плавно.
-		# Слабый наклон стика толкает слабее, но не тормозит.
-		var limit := top + maxf(before - top, 0.0) * exp(-OVERSPEED_DRAG * delta)
-		if speed > limit:
-			velocity *= limit / speed
+	velocity = velocity.move_toward(dir * top, top * accel * delta)
 	# Игрок вместе со всей пылью вокруг летит по орбите, стик добавляет своё движение.
 	frame_velocity = GameData.orbit_velocity(position)
 	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.
