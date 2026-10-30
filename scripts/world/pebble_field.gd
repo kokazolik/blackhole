@@ -43,6 +43,7 @@ const RING_BOOST := 2.5               # в кольце-ловушке гале�
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
 const R_RANGE := Vector2(0.17, 1.25)
 const R_SKEW := 2.2
+const PLANET_R := Vector2(0.08, 0.5)  # рой мелочи вокруг планетезимали: заметно мельче соседей
 const BOULDER_SKEW := 1.5
 const BOULDER_COUNT := 1.5  # на валуне тел вокруг больше
 # Съесть можно всё, что меньше тебя (до EAT_R твоего радиуса). Что меньше в
@@ -663,6 +664,10 @@ func _spawn(at: Vector2) -> void:
 	# заметно крупнее самой большой съедобной, а не «такой же».
 	# Тел почти с тебя ростом не бывает: съедобное должно быть видно меньше тебя,
 	# несъедобное — видно крупнее.
+	if GameState.is_planet():
+		# У планетезимали вокруг только рой мелочи: всё, что с тебя ростом и крупнее, —
+		# это соседи-планетезимали (Rivals), с именем и размером над ними.
+		p.r = player.radius * lerpf(PLANET_R.x, PLANET_R.y, pow(rng.randf(), BOULDER_SKEW))
 	var rel := p.r / player.radius
 	if absf(rel - EAT_R) < SIZE_GAP:
 		p.r = player.radius * (EAT_R - SIZE_GAP if rel < EAT_R else EAT_R + SIZE_GAP)
@@ -911,7 +916,9 @@ func _collide(p: Pebble, index: int) -> void:
 		return
 	var rel := player.motion() - (p.vel + p.drift)
 	var impact := rel.dot(n)  # скорость сближения вдоль линии удара
-	var stick := player.stick_speed() * Skills.stat("glue_" + p.material)
+	# Планетезималь держит всё медленнее второй космической: липкость вещества
+	# больше не решает (как и на дуге-подсказке).
+	var stick := player.stick_speed() * (1.0 if _planet else Skills.stat("glue_" + p.material))
 	var at := player.position + n * player.radius
 	if p.chunk_mass > 0.0 and p.hit_cd > 0.0:
 		# Только что отбитый кусок ещё разлетается: не липнет, но и не проходит сквозь тебя.
@@ -1911,7 +1918,9 @@ func _draw_hints() -> void:
 				dash_cols.append(dash_col)
 			continue
 		var n := to / maxf(dist, 0.001)
-		var approach := (player.motion() - p.drift).dot(n)
+		# Скорость сближения — как при настоящем ударе: у планетезимали мелочь роя
+		# сама носится (раскачка) и падает на тебя, это тоже входит в удар.
+		var approach := (player.motion() - p.drift - (p.vel if _planet else Vector2.ZERO)).dot(n)
 		var limit := stick if _planet else stick * Skills.stat("glue_" + p.material)
 		var ok := approach <= limit
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)

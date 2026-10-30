@@ -22,15 +22,18 @@ const SHADER := preload("res://shaders/planetesimal.gdshader")
 const PEBBLE_SCALE := 2.78   # как у тела игрока: видимый радиус — ровно r
 const NAMES := ["Ида", "Матильда", "Гаспра", "Лютеция", "Эрос", "Паллада", "Юнона", "Гигия", "Психея", "Веста",
 	"Аррокот", "Итокава", "Рюгу", "Бенну", "Церера", "Фебa", "Дактиль", "Клото", "Сильвия", "Европа"]
-const SPAWN_MIN := 30.0       # пауза между новыми соседями, с
-const SPAWN_MAX := 45.0
-const REL_MIN := 0.12         # масса соседа в долях твоей
-const REL_MAX := 0.35
+const SPAWN_MIN := 60.0       # пауза между новыми соседями, с
+const SPAWN_MAX := 90.0
+const REL_MIN := 0.3         # масса соседа в долях твоей
+const REL_MAX := 0.7
 const BIG_CHANCE := 0.15      # доля соседей крупнее тебя
 const STIR := 0.03           # как сильно сосед твоей массы раскачивает рой вблизи
 const SHEAR_AGE := 60.0      # через сколько секунд сосед уплывает по своей орбите
 const GROWTH := 0.0015       # соседи растут сами (едят свой рой), доля массы в секунду
 const WANDER := 0.25         # их собственная скорость, в твоих предельных скоростях
+const SHEAR_SPAN := 0.4      # на какой разнице орбит (в радиусах экрана) сосед плывёт со скоростью WANDER
+const PULL := 0.3            # притяжение к тебе, в долях WANDER
+const FLOW_GRIP := 0.8       # как быстро гаснет толчок от удара
 const MERGE_KEEP := 0.8      # доля массы соседа, что остаётся в тебе при слиянии
 const MERGE_KEEP_BIG := 0.6  # если сосед крупнее: больше вещества разлетается
 const CRATER_LOSS := 0.08    # скол при ударе на пороге раскола, в долях массы
@@ -48,7 +51,6 @@ class Rival:
 	var spin := 0.0
 	var spin_rate := 0.1
 	var hit_cd := 0.0
-	var wander_t := 0.0
 	var kicked := false
 	var age := 0.0
 
@@ -199,15 +201,19 @@ func _maintain(delta: float) -> void:
 	_spawn_t -= delta
 	if count < _target_count() and _spawn_t <= 0.0:
 		_spawn_t = rng.randf_range(SPAWN_MIN, SPAWN_MAX)
-		var dir := Vector2.from_angle(rng.randf() * TAU)
-		var at := player.position + dir * view_r * rng.randf_range(1.1, 1.5)
+		# Сосед на соседней орбите: кто ближе к звезде, догоняет тебя сзади,
+		# кто дальше — ты сам нагоняешь его. Поэтому он выплывает из-за края
+		# экрана вдоль орбиты, а не сбоку.
+		var axes := _orbit_axes()
+		var dr := rng.randf_range(0.15, 0.6) * (1.0 if rng.randf() < 0.5 else -1.0)
+		var at: Vector2 = player.position + (axes[0] * dr + axes[1] * signf(dr) * 1.2) * view_r
 		if at.length() > GameData.sublimation_distance() * 1.3:
 			# Убегающий рост: почти все соседи заметно мельче тебя, изредка — крупнее.
 			var rel := exp(rng.randf_range(log(REL_MIN), log(REL_MAX)))
 			if rng.randf() < BIG_CHANCE:
 				rel = rng.randf_range(1.1, 2.0)
 			var rv := _add("rival", at, GameState.mass * rel)
-			rv.vel = -dir.rotated(rng.randf_range(-1.0, 1.0)) * player.max_speed() * WANDER
+			rv.vel = _orbit_flow(rv)
 
 
 func _add(kind: String, at: Vector2, mass: float) -> Rival:
@@ -220,7 +226,6 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	_name_i += 1
 	rv.spin = rng.randf() * TAU
 	rv.spin_rate = rng.randf_range(0.05, 0.2)
-	rv.wander_t = rng.randf_range(3.0, 8.0)
 	var sprite := Sprite2D.new()
 	sprite.texture = _blank
 	var mat := ShaderMaterial.new()
@@ -242,6 +247,36 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	return rv
 
 
+## Оси орбиты в точке игрока: [от звезды, вдоль орбиты].
+func _orbit_axes() -> Array[Vector2]:
+	var out := player.position.normalized()
+	return [out, GameData.orbit_velocity(player.position).normalized()]
+
+
+## Как сосед движется относительно тебя. Кеплеров сдвиг: тело ближе к звезде
+## летит быстрее и обгоняет, дальше — отстаёт; чем больше разница орбит,
+## тем быстрее. Пока сосед молод, твоё притяжение подтягивает его к тебе,
+## потом сдвиг орбит уносит его прочь — и вместо него приходит новый.
+func _orbit_flow(rv: Rival) -> Vector2:
+	var axes := _orbit_axes()
+	var d := world_pos(rv) - player.position
+	var dr := d.dot(axes[0])
+	var span := SHEAR_SPAN * dust_field.view_radius()
+	var speed := player.max_speed() * WANDER
+	var flow := axes[1] * -clampf(dr / span, -1.5, 1.5) * speed
+	var dist := d.length()
+	if dist < 0.001:
+		return flow
+	if Skills.stat("oligarch") > 0.0 or rv.age > SHEAR_AGE:
+		# «Своя полоса» / сдвиг орбит: сосед расходится с тобой по радиусу.
+		flow += axes[0] * signf(dr if absf(dr) > 0.001 else 1.0) * speed * PULL
+	else:
+		# Притяжение растёт вблизи: издали сосед плывёт вдоль орбиты, а у тебя
+		# его траектория загибается к тебе.
+		flow -= d / dist * speed * PULL * clampf(span / dist, 0.25, 2.0)
+	return flow
+
+
 func _remove(rv: Rival) -> void:
 	rv.sprite.queue_free()
 	rivals.erase(rv)
@@ -254,18 +289,8 @@ func _move(rv: Rival, delta: float) -> void:
 	if rv.kind == "rival":
 		# Соседи растут сами: едят свой рой. Крупный растёт быстрее.
 		rv.mass *= exp(GROWTH * pow(rv.mass / GameState.mass, 0.33) * delta)
-		rv.wander_t -= delta
-		if rv.wander_t <= 0.0:
-			rv.wander_t = rng.randf_range(4.0, 9.0)
-			var target := Vector2.from_angle(rng.randf() * TAU) * player.max_speed() * WANDER
-			# «Своя полоса»: соседи держатся подальше от тебя.
-			if Skills.stat("oligarch") > 0.0:
-				target = (world_pos(rv) - player.position).normalized() * player.max_speed() * WANDER
-			# Сдвиг орбит: соседа на чуть другой орбите со временем уносит прочь,
-			# и вместо него приходит новый.
-			if rv.age > SHEAR_AGE:
-				target = (world_pos(rv) - player.position).normalized() * player.max_speed() * WANDER * 1.5
-			rv.vel = target
+		# Скорость сходится к орбитальному течению; толчки от ударов гаснут.
+		rv.vel = rv.vel.lerp(_orbit_flow(rv), 1.0 - exp(-FLOW_GRIP * delta))
 	rv.r = screen_r(rv.mass)
 	rv.pos += rv.vel * delta
 	if rv.kind == "oligarch":
@@ -419,9 +444,12 @@ func _events(delta: float) -> void:
 	_twin_t -= delta
 	if km < 100.0 and _twin_t <= 0.0:
 		_twin_t = rng.randf_range(130.0, 180.0)
-		var dir := (player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)).rotated(rng.randf_range(-0.5, 0.5))
+		# Почти на твоей орбите: подплывает спереди или сзади, чуть сбоку.
+		var axes := _orbit_axes()
+		var ahead := 1.0 if rng.randf() < 0.5 else -1.0
+		var dir: Vector2 = (axes[1] * ahead + axes[0] * rng.randf_range(-0.15, 0.15)).normalized()
 		var at := player.position + dir * view_r * 1.1
-		var rv := _add("twin", at, GameState.mass * rng.randf_range(0.4, 0.6))
+		var rv := _add("twin", at, GameState.mass * rng.randf_range(0.75, 0.9))
 		rv.vel = -dir * player.escape_speed() * 0.5
 		event_started.emit("twin", at)
 	# Пролёт олигарха: тело в десять раз крупнее проходит мимо, его притяжение
@@ -429,8 +457,10 @@ func _events(delta: float) -> void:
 	_olig_t -= delta
 	if km >= 10.0 and _olig_t <= 0.0:
 		_olig_t = rng.randf_range(180.0, 240.0)
-		var dir := Vector2.from_angle(rng.randf() * TAU)
-		var side := dir.orthogonal() * (1.0 if rng.randf() < 0.5 else -1.0)
+		# Он на соседней орбите: ближе к звезде — обгоняет, дальше — ты его нагоняешь.
+		var axes := _orbit_axes()
+		var side: Vector2 = axes[0] * (1.0 if rng.randf() < 0.5 else -1.0)
+		var dir: Vector2 = axes[1] * -signf(side.dot(axes[0]))
 		var mass := GameState.mass * 10.0
 		var r := screen_r(mass)
 		var at := player.position + side * (r + player.radius * rng.randf_range(3.0, 6.0)) - dir * (view_r + r * 1.2)
@@ -490,6 +520,38 @@ func _draw_sprites() -> void:
 		mat.set_shader_parameter("star_light", light)
 
 
+## Чем кончится удар на текущей скорости — по тому же правилу, что и сам удар:
+## зелёная дуга — слияние, жёлтая — скол, красная — раскол (твой или соседа).
+func outcome(rv: Rival) -> String:
+	var to := world_pos(rv) - player.position
+	var n := to.normalized()
+	var impact := maxf((player.motion() + player.kick - rv.vel).dot(n), 0.0)
+	var esc := GameData.escape_game(maxf(GameState.mass, rv.mass))
+	if rv.kind != "oligarch" and impact <= esc:
+		return "merge"
+	var small := minf(GameState.mass, rv.mass)
+	var mu := GameState.mass * rv.mass / pow(GameState.mass + rv.mass, 2.0)
+	var q := mu / 0.25 * pow(impact / (GameData.disrupt_ratio(small) * esc), 2.0)
+	var player_small := GameState.mass <= rv.mass or rv.kind == "oligarch"
+	if player_small:
+		q /= Skills.stat("qstar")
+	if q < 1.0:
+		return "crater"
+	return "break" if player_small else "shatter"
+
+
+func _draw_outcome(rv: Rival, c: Vector2, px: float) -> void:
+	var to := c - player.position
+	var reach := (player.radius + rv.r) * 4.0
+	if to.length() > reach:
+		return
+	var fade := clampf((reach - to.length()) / (reach * 0.4), 0.0, 1.0)
+	var col: Color = {"merge": Color(0.5, 1.0, 0.55), "crater": Color(1.0, 0.82, 0.3),
+		"shatter": Color(1.0, 0.55, 0.3), "break": Color(1.0, 0.32, 0.25)}[outcome(rv)]
+	var face := (-to).angle()
+	draw_arc(c, rv.r * 1.12 + 2.0 * px, face - 1.1, face + 1.1, 24, Color(col, 0.85 * fade), 2.5 * px, true)
+
+
 func _draw() -> void:
 	if not active():
 		return
@@ -516,6 +578,7 @@ func _draw() -> void:
 		draw_set_transform(c + Vector2(-w * 0.5 * px, -rv.r - 10.0 * px), 0.0, Vector2(px, px))
 		draw_string(font, Vector2.ZERO, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
 		draw_set_transform(Vector2.ZERO)
+		_draw_outcome(rv, c, px)
 		# Удар на подлёте: пунктир его пути до тебя.
 		if rv.kind == "impactor" and rv.hit_cd > -4.0:
 			var dir := rv.vel.normalized()

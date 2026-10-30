@@ -458,7 +458,7 @@ const HILL_PER_AU := 170.0
 const HILL_SCREEN := 0.035
 # Рост: каждая добыча прибавляет долю массы, как на валуне, но планетезималь
 # собирает мелочь гравитацией и растёт быстрее.
-const PLANET_GAIN := 1.1
+const PLANET_GAIN := 1.3
 const PLANET_GAIN_FADE := 0.06
 const PLANET_VALUE := 3.0
 # Кормовая полоса: кольцо диска шириной ZONE_BIN. Всё вещество в ней рано или поздно

@@ -349,7 +349,7 @@ func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void
 	elif GameState.core_too_cold():
 		lines.append("Недра остыли: ты хондрит · хондры ×2")
 	else:
-		lines.append("Недра: %d K · плавятся при %d K" % [roundi(GameState.core_temp()), roundi(GameData.MELT_T)])
+		lines.append("Недра: %d K (греет алюминий) · плавятся при %d K" % [roundi(GameState.core_temp()), roundi(GameData.MELT_T)])
 	var text := "\n".join(lines)
 	if _planet_label.text != text:
 		_planet_label.text = text
@@ -375,7 +375,7 @@ func set_temperature(temp: float) -> void:
 		state = "испарение! улетай от звезды"
 	elif temp >= GameData.GLOW_TEMP:
 		state = "раскаляется"
-	_heat_label.text = "%d K · %s" % [roundi(temp / 10.0) * 10, state]
+	_heat_label.text = "Поверхность: %d K (греет звезда) · %s" % [roundi(temp / 10.0) * 10, state]
 	var col := GameData.thermal_color(temp)
 	# Тёмно-красный цвет каления на тёмном фоне не читается: подсветляем.
 	var base := Color(col.r, col.g, col.b).lerp(Color(1.0, 0.8, 0.6), 0.45) if col.a > 0.0 else Color(1.0, 0.75, 0.5)
