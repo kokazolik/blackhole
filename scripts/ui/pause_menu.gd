@@ -220,8 +220,28 @@ func _jump(mass: float, stage: int) -> void:
 	GameState.zone_eaten = {}
 	GameState.embryo_path = ""
 	GameState.tips_seen = []
+	if stage >= 3:
+		_max_tree_before(stage)
 	GameState.save_game()
 	Fader.go(Fader.GAME)
+
+
+## Прокачать всё древо прошлых стадий, как у игрока, дошедшего сюда.
+## Путь вещества — по главному материалу тела.
+func _max_tree_before(stage: int) -> void:
+	var top := "silicate"
+	for key in GameState.materials:
+		if float(GameState.materials[key]) > float(GameState.materials.get(top, 0.0)):
+			top = key
+	for id in Skills.order:
+		var node: Dictionary = Skills.nodes[id]
+		if int(node.get("requires_stage", 0)) >= stage or node.get("requires_melt", false):
+			continue
+		var path: String = node.get("path", "")
+		if path != "" and path != top:
+			continue
+		GameState.skill_levels[id] = Skills.max_level(id)
+	Skills.recompute()
 
 
 func _clear() -> void:
