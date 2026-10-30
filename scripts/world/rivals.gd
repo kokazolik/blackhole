@@ -40,6 +40,7 @@ const PULL := 0.3            # притяжение к тебе, в долях W
 const FLOW_GRIP := 0.8       # как быстро гаснет толчок от удара
 const MERGE_KEEP := 0.8      # доля массы соседа, что остаётся в тебе при слиянии
 const MERGE_KEEP_BIG := 0.6  # если сосед крупнее: больше вещества разлетается
+const EMBRYO_KEEP := 0.5     # у зародышей без навыков: удар расплёскивает почти половину
 const CRATER_LOSS := 0.08    # скол при ударе на пороге раскола, в долях массы
 const KICK := 0.55           # праща олигарха, в твоих предельных скоростях
 const YORP_RAMP := 14.0
@@ -223,7 +224,7 @@ func _maintain(delta: float) -> void:
 			# Эпоха гигантских ударов: у звезды гальки мало, зато зародышей тесно —
 			# там растут слияниями. За снеговой линией их реже, там кормит галька.
 			var inner := player.position.length() < GameData.SNOW_LINE
-			_spawn_t = (rng.randf_range(40.0, 55.0) if inner else rng.randf_range(60.0, 80.0)) / Skills.stat("rival_rate")
+			_spawn_t = (rng.randf_range(60.0, 75.0) if inner else rng.randf_range(90.0, 120.0)) / Skills.stat("rival_rate")
 		# Сосед на соседней орбите: кто ближе к звезде, догоняет тебя сзади,
 		# кто дальше — ты сам нагоняешь его. Поэтому он выплывает из-за края
 		# экрана вдоль орбиты, а не сбоку.
@@ -448,6 +449,10 @@ func _rival_mix(rv: Rival) -> Dictionary:
 
 func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 	var keep := MERGE_KEEP if rv.mass <= GameState.mass else MERGE_KEEP_BIG
+	if GameState.is_embryo():
+		# Гигантский удар зародышей расплёскивает почти половину вещества: удержать его
+		# учит ветка зародыша («Сращение»).
+		keep = minf(keep, EMBRYO_KEEP)
 	keep = minf(keep + Skills.stat("merge_keep"), 1.0)
 	var rel_m := rv.mass / GameState.mass
 	var rel := clampf(rv.r / player.radius, 0.2, 2.0)
@@ -577,7 +582,7 @@ func _events(delta: float) -> void:
 		_flow_t = rng.randf_range(100.0, 130.0)
 		if GameState.is_embryo():
 			# Галечная аккреция: за снеговой линией гальки втрое больше, и зародыш живёт ею.
-			_flow_t = rng.randf_range(35.0, 50.0) if player.position.length() > GameData.SNOW_LINE else rng.randf_range(80.0, 100.0)
+			_flow_t = rng.randf_range(22.0, 32.0) if player.position.length() > GameData.SNOW_LINE else rng.randf_range(80.0, 100.0)
 		pebble_field.start_flow()
 		event_started.emit("flow", player.position + player.position.normalized() * view_r)
 

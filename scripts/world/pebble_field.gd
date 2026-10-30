@@ -152,6 +152,12 @@ const HEAT_COOL := 0.035     # остывание в секунду (при на
 const HEAT_JITTER := 1.4     # случайные скорости тел при полном нагреве, в скоростях убегания
 const FLOW_TIME := 26.0      # поток гальки идёт столько секунд
 const FLOW_COUNT := 34
+# Галечный танец зародыша за снеговой линией.
+const SPIRAL_W := 0.9        # рад/с на краю сферы Хилла; ближе к тебе — быстрее (как у орбит)
+const SPIRAL_IN := 0.32      # доля радиуса, на которую виток стягивается за секунду
+const TRAIL_POINTS := 12
+const RING_GLINTS := 160     # крупинок в кольце гальки за щелью
+const COLLAPSE_TIME := 3.2   # сколько длится финальный обвал кольца
 const FLOW_CATCH := 0.5      # доля потока, что застревает в сфере Хилла без навыков
 
 class Pebble:
@@ -196,6 +202,10 @@ class Pebble:
 	var damage := 0.0      # трещины от прежних ударов (0..DAMAGE_MAX): во столько слабее тело
 	var jit := Vector2.from_angle(randf() * TAU)  # куда несёт тело случайная скорость роя
 	var flow := false      # из галечного потока: летит к звезде, сфера Хилла может поймать
+	var spiral := 0.0      # >0 — галька кружит вокруг зародыша по спирали на таком расстоянии
+	var sp_a := 0.0        # её угол вокруг тебя
+	var trail := PackedVector2Array()  # шлейф спирали: точки относительно тебя
+	var trail_t := 0.0
 
 var player: Player
 var dust_field: DustField
@@ -207,6 +217,9 @@ var _mm_node := MultiMeshInstance2D.new()
 var _buf := PackedFloat32Array()
 var _solo: Array[MeshInstance2D] = []  # сколотые тела и куски: свой материал с гранями
 var _hint := Node2D.new()  # кольца-подсказки поверх галек
+var _dance := Node2D.new()  # галечный танец зародыша: шлейфы спиралей и кольцо, под гальками
+var _dance_t := 0.0
+var collapse_k := -1.0      # финал: лавина газа, кольцо гальки обрушивается в тебя (0..1)
 var giant := Giant.new()  # Странник: огромный валун проплывает мимо гальки
 var _halo_glow := _make_glow()  # мягкое свечение облачков гало
 var _ripple := ColorRect.new()  # рябь волны импульса (шейдер по картинке экрана)
@@ -287,6 +300,12 @@ func _ready() -> void:
 	add_child(_ripple)
 	_hint.draw.connect(_draw_hints)
 	add_child(_hint)
+	_dance.draw.connect(_draw_dance)
+	var glow_mat := CanvasItemMaterial.new()
+	glow_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD  # шлейфы и кольцо светятся
+	_dance.material = glow_mat
+	add_child(_dance)
+	move_child(_dance, 0)  # первым из детей: под гальками
 
 
 static func _make_glow() -> GradientTexture2D:
@@ -378,8 +397,16 @@ func _process(delta: float) -> void:
 		if p.flow and hill_r > 0.0 and wp.distance_squared_to(player.position) < hill_r * hill_r:
 			# Сфера Хилла: газ тормозит гальку внутри неё, и та падает на тебя.
 			p.flow = false
+			var dance := dance_k()
 			if rng.randf() < clampf(FLOW_CATCH * Skills.stat("flow_catch"), 0.0, 0.95):
-				p.pulled = true
+				if dance > 0.0:
+					# Тяжёлое ядро за снеговой линией: газ его оболочки закручивает гальку,
+					# она не падает прямо, а наворачивает витки — галечный танец.
+					var off := wp - player.position
+					p.spiral = off.length()
+					p.sp_a = off.angle()
+				else:
+					p.pulled = true
 			else:
 				p.vel *= 0.6
 		if p.life > 0.0:
@@ -431,7 +458,10 @@ func _process(delta: float) -> void:
 			# Валуны на столкновение газ не сносит: иначе разные по размеру разминутся.
 			p.drift = Vector2.ZERO if p.crash or p.flow else GameData.gas_drift(wp, p.r)
 			p.drift_t = DRIFT_EVERY * rng.randf_range(0.8, 1.2)  # вразброс, чтобы не все в один кадр
-		p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
+		if p.spiral > 0.0:
+			_spiral(p, delta, hill_r)
+		else:
+			p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
 		p.angle += p.spin * delta
 		p.hit_cd -= delta
 		if wp.length() < evap:
@@ -449,6 +479,10 @@ func _process(delta: float) -> void:
 	_update_puffs(delta)
 	_write()
 	_hint.queue_redraw()
+	_dance_t += delta
+	if collapse_k >= 0.0:
+		collapse_k = minf(collapse_k + delta / COLLAPSE_TIME, 1.0)
+	_dance.queue_redraw()
 
 
 ## Тела сталкиваются друг с другом: рыхлые комки отскакивают слабо, тяжёлое
@@ -1284,7 +1318,13 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 			# Рой планетезималей почти выеден: зародыш растёт галечной аккрецией и ударами.
 			gain *= GameData.EMBRYO_FLOW if p.flow else GameData.EMBRYO_SWARM
 			# «Галечная аккреция» и «Магматический океан»: жидкая поверхность глотает всё.
-			gain *= Skills.stat("embryo_feed") * (1.0 + Skills.stat("magma_feed") * player.magma)
+			# За снеговой линией галька — главная пища: и её масса, и навыки гальки сильнее.
+			var feed := Skills.stat("embryo_feed")
+			if player.position.length() > GameData.SNOW_LINE:
+				feed = 1.0 + (feed - 1.0) * 2.0
+				if p.flow:
+					gain *= GameData.EMBRYO_FLOW_OUTER
+			gain *= feed * (1.0 + Skills.stat("magma_feed") * player.magma)
 	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * gain
 	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 		chain += 1
@@ -1303,8 +1343,12 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		value *= GameData.boulder_value(GameState.mass)
 	if _planet:
 		value *= GameData.PLANET_VALUE
+	if GameState.is_embryo() and p.flow:
+		# Галечный поток — главная пища зародыша за снеговой линией: и масса, и пыль.
+		value *= GameData.EMBRYO_FLOW_VALUE
 	if p.geode:
-		value *= Skills.stat("geode_value")
+		# Жеода — находка гальки: у зародыша в тысячи км она лишь крупинка.
+		value *= Skills.stat("geode_value") if not GameState.is_embryo() else 1.5
 		geode_found.emit(wp, value)
 	GameState.absorb_mass(m, value, p.material, at)
 	pebble_absorbed.emit(wp)
@@ -2326,15 +2370,28 @@ func start_flow() -> void:
 	var out := player.position.normalized()
 	var across := out.orthogonal()
 	var speed := player.max_speed() * 0.55
-	var count := mini(FLOW_COUNT, MAX_PEBBLES - pebbles.size())
+	# У тяжёлого зародыша за снеговой линией поток гуще и идёт извилистыми лентами:
+	# газ закручивает гальку в струи.
+	var dance := dance_k()
+	var count := mini(int(FLOW_COUNT * (1.0 + 1.2 * dance)), MAX_PEBBLES - pebbles.size())
+	var ribbons := 2 + int(round(2.0 * dance))
+	var per := ceili(float(count) / ribbons)
+	var phase := rng.randf() * TAU
 	for k in count:
 		var p := Pebble.new()
 		var at := player.position + out * view_r * rng.randf_range(1.1, 2.2) + across * rng.randf_range(-0.7, 0.7) * view_r
+		if dance > 0.0:
+			var j := k / per
+			var t := float(k % per) / per
+			var lane := (float(j) - (ribbons - 1) * 0.5) * 0.42
+			var wave := sin(t * TAU * 1.5 + phase + j * 1.9) * 0.16
+			at = player.position + out * view_r * (1.1 + 1.3 * t) + across * (lane + wave) * view_r
 		p.pos = at - dust_field.frame_offset
-		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y) * 0.8
+		# Галек в лентах больше, но каждая мельче: танец красив, а масса потока та же.
+		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y) * 0.8 / sqrt(1.0 + 1.2 * dance)
 		p.food = true
 		p.flow = true
-		p.vel = -out * speed * rng.randf_range(0.8, 1.2)
+		p.vel = -out * speed * (rng.randf_range(0.8, 1.2) if dance <= 0.0 else rng.randf_range(0.97, 1.03))
 		p.material = _pick_material(at.length())
 		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
 		p.angle = rng.randf() * TAU
@@ -2381,3 +2438,89 @@ func shed_equator(share: float) -> void:
 	var axis := Vector2.from_angle(rng.randf() * TAU)
 	for side in [-1.0, 1.0]:
 		spawn_fragments(player.position + axis * side * player.radius, axis * side, 5, lost * 0.4, _main_material(), 0.18, true)
+
+
+# --- Галечный танец зародыша ---
+
+## 0..1: насколько густ танец. Только у зародыша за снеговой линией, пока есть газ:
+## от ~0.05 массы Земли едва заметен, к 10 — во всю силу.
+func dance_k() -> float:
+	if not GameState.is_embryo() or GameState.gas_left <= 0.0 or not _planet:
+		return 0.0
+	if player.position.length() < GameData.SNOW_LINE and collapse_k < 0.0:
+		return 0.0
+	var e := maxf(GameState.earth_masses(), 0.001)
+	return clampf(log(e / 0.05) / log(200.0), 0.0, 1.0) if collapse_k < 0.0 else 1.0
+
+
+## Виток спирали: угловая скорость растёт к центру, радиус тает. Галька
+## держится за тобой, куда бы ты ни летел, и оставляет светлый шлейф.
+func _spiral(p: Pebble, delta: float, hill_r: float) -> void:
+	var w := minf(SPIRAL_W * pow(maxf(hill_r, 1.0) / maxf(p.spiral, player.radius), 1.5), 7.0)
+	p.sp_a += w * delta
+	var shrink := SPIRAL_IN * (1.0 + 2.5 * maxf(collapse_k, 0.0))
+	p.spiral = maxf(p.spiral - p.spiral * shrink * delta - player.radius * 0.05 * delta, player.radius * 0.95)
+	var off := Vector2.from_angle(p.sp_a) * p.spiral
+	p.trail_t -= delta
+	if p.trail_t <= 0.0:
+		p.trail_t = 0.04
+		p.trail.insert(0, off)
+		if p.trail.size() > TRAIL_POINTS:
+			p.trail.resize(TRAIL_POINTS)
+	p.vel = Vector2.ZERO
+	p.pos = player.position + off - dust_field.frame_offset
+
+
+## Финал гонки: ядро в 10 масс Земли втягивает газ лавиной. Всё, что кружит
+## рядом, разом закручивается в тебя.
+func start_collapse() -> void:
+	collapse_k = 0.0
+	for p in pebbles:
+		if p.spiral > 0.0 or p.chunk_mass > 0.0 or p.crash:
+			continue
+		var off := world_pos(p) - player.position
+		if off.length() < dust_field.view_radius() * 1.2:
+			p.flow = false
+			p.food = true
+			p.spiral = off.length()
+			p.sp_a = off.angle()
+
+
+func _draw_dance() -> void:
+	var k := dance_k()
+	if k <= 0.0 and collapse_k < 0.0:
+		return
+	var c := player.position
+	var px := 1.0 / camera.zoom.x
+	# Шлейфы спиралей: тонкие светлые дуги, гаснут к хвосту.
+	for p in pebbles:
+		if p.spiral <= 0.0 or p.trail.size() < 2:
+			continue
+		var col: Color = GameData.MATERIALS[p.material].color.lightened(0.55)
+		var pts := PackedVector2Array()
+		var cols := PackedColorArray()
+		for j in p.trail.size():
+			pts.append(c + p.trail[j])
+			cols.append(Color(col, 0.5 * pow(1.0 - float(j) / p.trail.size(), 1.5)))
+		_dance.draw_polyline_colors(pts, cols, clampf(p.r * 0.25, 1.2 * px, 5.0 * px), true)
+	# Кольцо гальки у края щели: тяжёлое ядро раздвигает газ, и дрейфующая галька
+	# копится на горбе давления. С массой оно ярче; в финале обрушивается в тебя.
+	var ring_k := clampf((k - 0.45) / 0.55, 0.0, 1.0)
+	if collapse_k >= 0.0:
+		ring_k = 1.0
+	if ring_k <= 0.0:
+		return
+	var hill := player.hill_radius()
+	var fall := maxf(collapse_k, 0.0)
+	var ring_r := lerpf(hill * 1.25, player.radius * 1.1, fall * fall)
+	var spin := _dance_t * (0.25 + 2.5 * fall * fall)
+	var glow := Color(0.85, 0.92, 1.0)
+	_dance.draw_arc(c, ring_r, 0.0, TAU, 128, Color(glow, 0.06 * ring_k + 0.25 * fall), ring_r * 0.16, true)
+	_dance.draw_arc(c, ring_r, 0.0, TAU, 128, Color(glow, 0.12 * ring_k + 0.3 * fall), maxf(ring_r * 0.035, 1.5 * px), true)
+	for j in RING_GLINTS:
+		var h := float(j) * 0.618034
+		var a := (h - floorf(h)) * TAU + spin * (0.8 + 0.4 * fmod(h * 7.0, 1.0))
+		var rr := ring_r * (1.0 + 0.09 * sin(j * 12.9898) * (1.0 - fall))
+		var tw := 0.55 + 0.45 * sin(_dance_t * 2.0 + j * 1.7)
+		var sz := maxf(ring_r * 0.012 * (0.6 + fmod(h * 13.0, 1.0)), 1.0 * px)
+		_dance.draw_circle(c + Vector2.from_angle(a) * rr, sz, Color(glow.lerp(Color(1.0, 0.85, 0.6), fmod(h * 3.0, 1.0)), (0.35 + 0.5 * tw) * ring_k))

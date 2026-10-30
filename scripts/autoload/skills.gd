@@ -83,6 +83,7 @@ var _body := ""  # тип тела, чей бонус валуну учтён в
 var _body_check := 0.0
 var _melt_seen := false
 var _planet_seen := false
+var _embryo_seen := false
 
 
 func _ready() -> void:
@@ -99,7 +100,7 @@ func _process(delta: float) -> void:
 	if _body_check > 0.0:
 		return
 	_body_check = 0.5
-	if _current_body() != _body or (GameState.is_melted and not _melt_seen) or GameState.is_planet() != _planet_seen:
+	if _current_body() != _body or (GameState.is_melted and not _melt_seen) or GameState.is_planet() != _planet_seen or GameState.is_embryo() != _embryo_seen:
 		recompute()
 
 
@@ -112,7 +113,7 @@ func _current_body() -> String:
 ## Бонус вещества этому этапу: валуну свой, планетезимали свой.
 func _body_bonus() -> Dictionary:
 	if GameState.is_planet():
-		return GameData.PLANET_MATERIAL[GameData.planet_type(_current_body())]
+		return GameData.stage_material(_current_body(), GameState.is_embryo())
 	return GameData.BOULDER_MATERIAL.get(_current_body(), {})
 
 
@@ -239,6 +240,7 @@ func recompute() -> void:
 	_body = _current_body()
 	_melt_seen = GameState.is_melted
 	_planet_seen = GameState.is_planet()
+	_embryo_seen = GameState.is_embryo()
 	stats = compute(GameState.skill_levels)
 	stats_changed.emit()
 

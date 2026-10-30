@@ -691,7 +691,7 @@ func _refresh() -> void:
 		_body_label.add_theme_color_override("font_color", body_col)
 	_body_desc.text = "· " + body.desc
 	if GameState.is_planet():
-		_body_desc.text = "· планетезимали: " + GameData.PLANET_MATERIAL[GameData.planet_type(type)].text
+		_body_desc.text = ("· зародышу: " if GameState.is_embryo() else "· планетезимали: ") + GameData.stage_material(type, GameState.is_embryo()).text
 	elif GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
 		_body_desc.text = "· валуну: " + GameData.BOULDER_MATERIAL[type].text
 	_comp_bar.queue_redraw()
