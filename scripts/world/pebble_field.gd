@@ -1010,6 +1010,8 @@ func _reach(p: Pebble, dir: Vector2) -> float:
 ## центра наружу, пока не попадём в выемку.
 func _edge(p: Pebble, dir: Vector2) -> float:
 	var big := p.r * p.look
+	if not p.frag.is_empty():
+		return _frag_edge(p, dir)
 	if p.holes.is_empty():
 		return big
 	var u := dir.rotated(p.angle)  # в оси текстуры тела
@@ -1020,6 +1022,27 @@ func _edge(p: Pebble, dir: Vector2) -> float:
 			return big * last
 		last = t
 	return big
+
+
+## Край куска: он — ячейка исходного тела (в его радиусах frag_r), центр куска
+## в frag_origin. Идём от центра наружу, пока не выйдем из ячейки или из тела.
+func _frag_edge(p: Pebble, dir: Vector2) -> float:
+	var u := dir.rotated(p.angle)
+	var last := 0.0
+	for k in 24:
+		var t := p.frag_ext * (k + 1) / 24.0
+		var q := p.frag_origin + u * t
+		if q.length() > 1.0:
+			break
+		var inside := true
+		for pl in p.frag:
+			if q.x * pl.x + q.y * pl.y - pl.z > 0.0:
+				inside = false
+				break
+		if not inside:
+			break
+		last = t
+	return maxf(last, p.frag_ext * 0.15) * p.frag_r
 
 
 func _in_hole(p: Pebble, q: Vector2) -> bool:
@@ -1928,13 +1951,13 @@ func _draw_hints() -> void:
 			col = Color(1.0, 0.82, 0.3)  # быстрее убегания: скол и обломки, но не раскол
 		var face := (-to).angle()
 		var mat_col: Color = GameData.MATERIALS[p.material].color
-		if p.holes.is_empty():
+		if p.holes.is_empty() and p.frag.is_empty():
 			_hint.draw_arc(wp, rr, face - 1.1, face + 1.1, 20, Color(col, 0.85 * fade), w_face * px, true)
 			# Остаток кольца — цвет материала: нужное вещество видно издалека.
 			_hint.draw_arc(wp, rr, face + 1.1, face + TAU - 1.1, 28, Color(mat_col, 0.55 * fade), w_mat * px, true)
 		else:
-			# У сколотого кольцо повторяет край с выемками.
-			var pad := rr - p.r * p.look
+			# У сколотого и у куска кольцо повторяет край с выемками и гранями.
+			var pad := rr - (p.r if not p.frag.is_empty() else p.r * p.look)
 			_hint.draw_polyline(_edge_arc(p, wp, face - 1.1, face + 1.1, 20, pad), Color(col, 0.85 * fade), w_face * px, true)
 			_hint.draw_polyline(_edge_arc(p, wp, face + 1.1, face + TAU - 1.1, 28, pad), Color(mat_col, 0.55 * fade), w_mat * px, true)
 	if not dash_pts.is_empty():
