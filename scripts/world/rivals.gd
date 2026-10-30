@@ -17,6 +17,7 @@ signal shattered(world_position: Vector2)     # ты расколол сосед
 signal broken(world_position: Vector2)        # тебя раскололо
 signal grazed(world_position: Vector2)        # удар быстрее убегания: скол
 signal event_started(kind: String, world_position: Vector2)
+signal giant_captured(world_position: Vector2)  # суперземля нырнула в молодого гиганта
 
 const SHADER := preload("res://shaders/planetesimal.gdshader")
 const PEBBLE_SCALE := 2.78   # как у тела игрока: видимый радиус — ровно r
@@ -45,7 +46,7 @@ class Rival:
 	var vel: Vector2
 	var mass: float
 	var r := 1.0
-	var kind := "rival"  # rival, twin, oligarch, impactor
+	var kind := "rival"  # rival, twin, oligarch, impactor, giant
 	var name := ""
 	var sprite: Sprite2D
 	var spin := 0.0
@@ -70,6 +71,8 @@ var _impact_t := 150.0
 var _yorp_t := 90.0
 var _flow_t := 60.0
 var _name_i := 0
+var giant: Rival  # молодой гигант второго шанса
+var _moon_a := 0.0
 
 
 func _ready() -> void:
@@ -137,7 +140,7 @@ func _process(delta: float) -> void:
 	while i >= 0:
 		var rv := rivals[i]
 		_move(rv, delta)
-		if eat_now and rv.kind != "impactor":
+		if eat_now and rv.kind != "impactor" and rv.kind != "giant":
 			_rival_eat(rv)
 		if rivals.has(rv):
 			_check_player(rv)
@@ -152,6 +155,8 @@ func _process(delta: float) -> void:
 func _stir(delta: float) -> void:
 	var view_r := dust_field.view_radius()
 	for rv in rivals:
+		if rv.kind == "giant":
+			continue
 		var d := world_pos(rv).distance_to(player.position)
 		if d < view_r:
 			var near := 1.0 - d / view_r
@@ -191,7 +196,9 @@ func _maintain(delta: float) -> void:
 	while i >= 0:
 		var rv := rivals[i]
 		var far := world_pos(rv).distance_to(player.position)
-		if far > view_r * (3.2 if rv.kind == "rival" else 2.4) or (rv.kind == "impactor" and rv.hit_cd < -12.0):
+		if rv.kind == "giant":
+			pass
+		elif far > view_r * (3.2 if rv.kind == "rival" else 2.4) or (rv.kind == "impactor" and rv.hit_cd < -12.0):
 			_remove(rv)
 		i -= 1
 	var count := 0
@@ -291,6 +298,10 @@ func _move(rv: Rival, delta: float) -> void:
 		rv.mass *= exp(GROWTH * pow(rv.mass / GameState.mass, 0.33) * delta)
 		# Скорость сходится к орбитальному течению; толчки от ударов гаснут.
 		rv.vel = rv.vel.lerp(_orbit_flow(rv), 1.0 - exp(-FLOW_GRIP * delta))
+	elif rv.kind == "giant":
+		# Гигант на соседней орбите медленно сходится с тобой: нырнуть в него — твоя забота.
+		var to := player.position - world_pos(rv)
+		rv.vel = rv.vel.lerp(to.normalized() * player.max_speed() * WANDER * 0.5 * clampf(to.length() / (rv.r * 4.0), 0.0, 1.0), 1.0 - exp(-0.5 * delta))
 	rv.r = screen_r(rv.mass)
 	rv.pos += rv.vel * delta
 	if rv.kind == "oligarch":
@@ -339,8 +350,18 @@ func _check_player(rv: Rival) -> void:
 	var m2 := rv.mass
 	var esc := GameData.escape_game(maxf(m1, m2))
 	var at := player.position + n * player.radius
+	var rel_v := player.motion() + player.kick - rv.vel
+	var slant := 0.0 if rel_v.length() < 0.001 else absf(rel_v.normalized().cross(n))
+	if rv.kind == "giant":
+		# В гиганта не разбиться: медленно — он затягивает тебя в себя, быстро — отскок.
+		if impact <= esc * 2.0:
+			giant_captured.emit(at)
+		else:
+			rv.hit_cd = 1.0
+			player.velocity -= n * impact * 1.3
+		return
 	if rv.kind != "oligarch" and impact <= esc:
-		_merge(rv, at)
+		_merge(rv, at, slant)
 		return
 	# Удельная энергия удара против прочности меньшего тела: Q = ½·μ·v²/M.
 	# На пороге (Q = Q*) равные тела разносит при скорости disrupt_ratio убеганий.
@@ -374,8 +395,9 @@ func _rival_mix(rv: Rival) -> Dictionary:
 	return w
 
 
-func _merge(rv: Rival, at: Vector2) -> void:
+func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 	var keep := MERGE_KEEP if rv.mass <= GameState.mass else MERGE_KEEP_BIG
+	var rel_m := rv.mass / GameState.mass
 	var rel := clampf(rv.r / player.radius, 0.2, 2.0)
 	var value := PebbleField.VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, PebbleField.VALUE_MASS_EXP) \
 		* pow(rel / 0.2, 1.5) * GameData.boulder_value(GameState.mass) * GameData.PLANET_VALUE
@@ -383,6 +405,12 @@ func _merge(rv: Rival, at: Vector2) -> void:
 	pebble_field.heat = minf(pebble_field.heat + 0.25, 1.0)
 	if rv.kind == "twin":
 		GameState.add_chondrules(3, at)
+	# Гигантский удар зародыша: косой выбрасывает диск обломков, он летит рядом,
+	# а из его части собирается луна.
+	if GameState.is_embryo() and rel_m >= GameData.IMPACT_REL:
+		if slant >= GameData.MOON_SLANT:
+			pebble_field.spawn_fragments(at, (at - player.position).normalized().orthogonal(), 10, rv.mass * (1.0 - keep), "", 0.25, true)
+		GameState.giant_impact(rel_m, slant, at)
 	merged.emit(at, rv.kind)
 	_remove(rv)
 
@@ -473,7 +501,7 @@ func _events(delta: float) -> void:
 	# Гигантский удар: сосед почти твоего размера идёт прямо на тебя.
 	_impact_t -= delta
 	if km >= 100.0 and _impact_t <= 0.0:
-		_impact_t = rng.randf_range(200.0, 260.0)
+		_impact_t = rng.randf_range(120.0, 160.0) if GameState.is_embryo() else rng.randf_range(200.0, 260.0)
 		var dir := Vector2.from_angle(rng.randf() * TAU)
 		var at := player.position + dir * view_r * 1.15
 		var rv := _add("impactor", at, GameState.mass * rng.randf_range(0.5, 1.1))
@@ -481,8 +509,12 @@ func _events(delta: float) -> void:
 		event_started.emit("impactor", at)
 	# Поток гальки из внешнего диска: у тел в сотни км его ловит сфера Хилла.
 	_flow_t -= delta
-	if km >= 100.0 and _flow_t <= 0.0:
+	var flow_ok := not GameState.is_embryo() or GameState.gas_left > 0.0  # без газа галька не дрейфует
+	if km >= 100.0 and _flow_t <= 0.0 and flow_ok:
 		_flow_t = rng.randf_range(100.0, 130.0)
+		if GameState.is_embryo():
+			# Галечная аккреция: за снеговой линией гальки втрое больше, и зародыш живёт ею.
+			_flow_t = rng.randf_range(35.0, 50.0) if player.position.length() > GameData.SNOW_LINE else rng.randf_range(80.0, 100.0)
 		pebble_field.start_flow()
 		event_started.emit("flow", player.position + player.position.normalized() * view_r)
 
@@ -504,6 +536,29 @@ func _sling(rv: Rival, delta: float) -> void:
 		event_started.emit("sling_out" if side > 0.0 else "sling_in", player.position)
 
 
+## Второй шанс суперземли: рядом проходит молодой гигант. Нырни в него медленно —
+## станешь его ядром.
+func spawn_giant() -> Vector2:
+	if is_instance_valid(giant) and rivals.has(giant):
+		return world_pos(giant)
+	var axes := _orbit_axes()
+	var ahead := 1.0 if rng.randf() < 0.5 else -1.0
+	var mass := GameData.mass_for_earths(30.0)
+	var r := screen_r(mass)
+	var at: Vector2 = player.position + axes[1] * ahead * (dust_field.view_radius() + r) + axes[0] * r * 0.3
+	giant = _add("giant", at, mass)
+	giant.name = "Молодой гигант"
+	giant.vel = Vector2.ZERO
+	giant.sprite.visible = false
+	return at
+
+
+func remove_giant() -> void:
+	if is_instance_valid(giant) and rivals.has(giant):
+		_remove(giant)
+	giant = null
+
+
 # --- Рисование ---
 
 func _draw_sprites() -> void:
@@ -512,14 +567,15 @@ func _draw_sprites() -> void:
 	for rv in rivals:
 		var c := world_pos(rv)
 		var on := c.distance_to(player.position) < view_r + rv.r
-		rv.sprite.visible = on
-		if not on:
+		rv.sprite.visible = on and rv.kind != "giant"
+		if not on or rv.kind == "giant":
 			continue
 		rv.sprite.position = c
 		rv.sprite.scale = Vector2.ONE * rv.r * PEBBLE_SCALE / _blank.get_width()
 		var mat := rv.sprite.material as ShaderMaterial
 		mat.set_shader_parameter("light_dir", (-c).normalized())
 		mat.set_shader_parameter("spin", rv.spin)
+		mat.set_shader_parameter("round_k", GameData.roundness(rv.mass))
 		mat.set_shader_parameter("star_light", light)
 
 
@@ -530,6 +586,8 @@ func outcome(rv: Rival) -> String:
 	var n := to.normalized()
 	var impact := maxf((player.motion() + player.kick - rv.vel).dot(n), 0.0)
 	var esc := GameData.escape_game(maxf(GameState.mass, rv.mass))
+	if rv.kind == "giant":
+		return "merge" if impact <= esc * 2.0 else "crater"
 	if rv.kind != "oligarch" and impact <= esc:
 		return "merge"
 	var small := minf(GameState.mass, rv.mass)
@@ -560,12 +618,20 @@ func _draw() -> void:
 		return
 	var px := 1.0 / camera.zoom.x
 	var font := ThemeDB.fallback_font
+	_draw_moon(px)
+	_draw_giant_arrow(px)
 	for rv in rivals:
-		if not rv.sprite.visible:
+		if rv.kind == "giant":
+			if world_pos(rv).distance_to(player.position) > dust_field.view_radius() * 1.4 + rv.r:
+				continue
+			_draw_giant(rv, px)
+		elif not rv.sprite.visible:
 			continue
 		var c := world_pos(rv)
 		var km := GameData.planet_km(rv.mass)
 		var title := "%s · %s км" % [rv.name, str(roundi(km)) if km >= 10.0 else String.num(km, 1)]
+		if GameState.is_embryo():
+			title = "%s · %s" % [rv.name, GameData.format_earths(rv.mass)]
 		var col := Color(0.85, 0.88, 1.0, 0.75)
 		match rv.kind:
 			"twin":
@@ -577,6 +643,9 @@ func _draw() -> void:
 			"impactor":
 				title = "Удар! · " + title
 				col = Color(1.0, 0.45, 0.35, 0.95)
+			"giant":
+				title = rv.name + " · нырни медленно"
+				col = Color(1.0, 0.85, 0.55, 0.95)
 		var w := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 		draw_set_transform(c + Vector2(-w * 0.5 * px, -rv.r - 10.0 * px), 0.0, Vector2(px, px))
 		draw_string(font, Vector2.ZERO, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
@@ -588,3 +657,69 @@ func _draw() -> void:
 			for k in 10:
 				var a := c + dir * (rv.r + k * 2.0 * rv.r * 0.4)
 				draw_line(a, a + dir * rv.r * 0.4, Color(1.0, 0.45, 0.35, 0.5), 1.5 * px)
+
+
+## Молодой гигант: полосатый газовый шар с дымкой атмосферы.
+func _draw_giant(rv: Rival, px: float) -> void:
+	var c := world_pos(rv)
+	if c.distance_to(player.position) > dust_field.view_radius() * 1.4 + rv.r:
+		return
+	var r := rv.r
+	var light := (-c).normalized()
+	for k in 5:
+		draw_circle(c, r * (1.0 + 0.06 * (5 - k)), Color(0.95, 0.75, 0.5, 0.05))
+	draw_circle(c, r, Color(0.62, 0.45, 0.3))
+	var bands := [Color(0.85, 0.7, 0.5), Color(0.55, 0.36, 0.24), Color(0.92, 0.82, 0.64), Color(0.7, 0.5, 0.34), Color(0.88, 0.76, 0.58)]
+	for i in bands.size():
+		var y0 := -1.0 + (i + 0.15) * 2.0 / bands.size()
+		var y1 := y0 + 0.75 * 2.0 / bands.size()
+		var pts := PackedVector2Array()
+		for j in 9:
+			var y := lerpf(y0, y1, j / 8.0)
+			pts.append(c + Vector2(sqrt(maxf(1.0 - y * y, 0.0)), y) * r)
+		for j in 9:
+			var y := lerpf(y1, y0, j / 8.0)
+			pts.append(c + Vector2(-sqrt(maxf(1.0 - y * y, 0.0)), y) * r)
+		draw_colored_polygon(pts, Color(bands[i], 0.8))
+	# Ночная сторона: тень от звезды.
+	for k in 6:
+		var f := k / 6.0
+		draw_circle(c - light * r * (0.25 + 0.5 * f), r * (0.95 - 0.5 * f), Color(0.02, 0.01, 0.03, 0.09))
+	draw_arc(c, r, 0.0, TAU, 64, Color(1.0, 0.9, 0.7, 0.5), 2.0 * px, true)
+
+
+## Гигант за краем экрана: стрелка у края показывает, куда нырять.
+func _draw_giant_arrow(px: float) -> void:
+	if not is_instance_valid(giant) or not rivals.has(giant):
+		return
+	var to := world_pos(giant) - player.position
+	var view := get_viewport_rect().size * 0.5 * px
+	if absf(to.x) < view.x + giant.r * 0.5 and absf(to.y) < view.y + giant.r * 0.5:
+		return
+	var dir := to.normalized()
+	var edge := minf((view.x - 60.0 * px) / maxf(absf(dir.x), 0.001), (view.y - 60.0 * px) / maxf(absf(dir.y), 0.001))
+	var p := player.position + dir * edge
+	var s := 22.0 * px
+	var col := Color(1.0, 0.85, 0.55, 0.6 + 0.3 * sin(Time.get_ticks_msec() * 0.006))
+	draw_colored_polygon(PackedVector2Array([p + dir * s, p - dir * s * 0.6 + dir.orthogonal() * s * 0.7, p - dir * s * 0.6 - dir.orthogonal() * s * 0.7]), col)
+	var font := ThemeDB.fallback_font
+	var label := "гигант"
+	var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	draw_set_transform(p - dir * s * 1.8 + Vector2(-w * 0.5, 6.0) * px, 0.0, Vector2(px, px))
+	draw_string(font, Vector2.ZERO, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, col)
+	draw_set_transform(Vector2.ZERO)
+
+
+## Луна после косого удара: кружит вокруг тебя.
+func _draw_moon(px: float) -> void:
+	if not GameState.has_moon or not GameState.is_embryo():
+		return
+	_moon_a += get_process_delta_time() * TAU / 24.0
+	var c := player.position + Vector2.from_angle(_moon_a) * player.radius * 3.4
+	var r := player.radius * 0.27
+	var light := (-c).normalized()
+	draw_arc(player.position, player.radius * 3.4, 0.0, TAU, 96, Color(1, 1, 1, 0.06), 1.0 * px, true)
+	draw_circle(c, r, Color(0.62, 0.6, 0.58))
+	draw_circle(c + light * r * 0.2, r * 0.8, Color(0.78, 0.76, 0.73))
+	draw_circle(c - light * r * 0.45, r * 0.7, Color(0.1, 0.1, 0.12, 0.55))
+	draw_circle(c + Vector2(0.2, -0.1) * r, r * 0.18, Color(0.5, 0.48, 0.47))

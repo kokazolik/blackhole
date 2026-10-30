@@ -42,6 +42,7 @@ var _geode_pos := Vector2.ZERO
 var _chondrule_time := -10.0
 var _chondrule_pos := Vector2.ZERO
 var _swarm_pos := Vector2.ZERO
+var _chance_t := -1.0  # второй шанс суперземли: секунд, чтобы нырнуть в гиганта
 
 
 func _ready() -> void:
@@ -196,6 +197,10 @@ func _ready() -> void:
 		_start_finale(2.5)
 	elif GameState.is_pebble() and not GameState.pebble_intro_done:
 		_start_pebble_intro(2.5)
+	if GameState.ending != "":
+		_show_ending.call_deferred(GameState.ending, 0)
+	elif GameState.is_embryo() and GameState.gas_left < 0.0:
+		GameState.gas_left = GameData.GAS_TIME  # старое сохранение: гонка начинается сейчас
 
 
 ## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
@@ -258,8 +263,17 @@ func _connect_planet() -> void:
 	GameState.melted.connect(func() -> void:
 		var info: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(GameState.body_type())]
 		_shake = maxf(_shake, 0.7)
-		if "melt" in GameState.tips_seen:
+		if GameState.is_embryo():
+			_show_caption("Магматический океан", "гигантские удары расплавили тело: железо ушло в ядро, состав застыл")
+		elif "melt" in GameState.tips_seen:
 			_show_caption("Тело расплавилось", "алюминий-26 нагрел недра: железо ушло в ядро, %s" % info["melt"]))
+	GameState.moon_formed.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.6), "Луна!", Color(0.85, 0.88, 0.95), 28)
+		_show_caption("Луна из обломков", "косой удар выбросил диск обломков, из него собралась луна: добыча ценнее на 10%"))
+	GameState.gas_gone.connect(func() -> void: _shake = maxf(_shake, 0.3))
+	rivals.giant_captured.connect(func(_at: Vector2) -> void:
+		if GameState.ending == "":
+			_finish("giant_core"))
 
 
 func _on_planet_event(kind: String, _at: Vector2) -> void:
@@ -280,17 +294,22 @@ func _on_planet_event(kind: String, _at: Vector2) -> void:
 		"impactor":
 			_show_caption("Гигантский удар", "сосед почти твоего размера идёт прямо на тебя: уйди с пути или встреть медленно")
 		"flow":
-			_show_caption("Поток гальки", "из внешнего диска дрейфует галька: сфера Хилла ловит её почти без потерь")
+			if GameState.is_embryo():
+				_show_caption("Галечная аккреция", "газ несёт гальку из внешнего диска: за снеговой линией её втрое больше")
+			else:
+				_show_caption("Поток гальки", "из внешнего диска дрейфует галька: сфера Хилла ловит её почти без потерь")
 
 
 ## Тело выросло до тысячи километров: путь дальше решает состав и место в диске.
+## Начинается гонка с газом диска.
 func _reach_embryo() -> void:
 	if GameState.embryo_path == "":
 		var type := GameState.melt_type if GameState.is_melted and GameState.melt_type != "" else GameState.body_type()
 		GameState.embryo_path = GameData.embryo_path(type, player.position.length())
-		GameState.save_game()
-	var path: Dictionary = GameData.EMBRYO_PATHS.get(GameState.embryo_path, GameData.EMBRYO_PATHS["silicate"])
-	_show_caption("Зародыш планеты: %s" % path["name"], path["desc"])
+	if GameState.gas_left < 0.0:
+		GameState.gas_left = GameData.GAS_TIME
+	GameState.save_game()
+	_show_caption("Зародыш планеты", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
 	if not "embryo" in GameState.tips_seen:
 		for c in $UI.get_children():
 			if c is Tutorial:
@@ -462,7 +481,55 @@ func _process(delta: float) -> void:
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
 	hud.set_planet(GameState.is_planet() and player.planet_k > 0.5, pebble_field.heat, player.capture_k(), GameState.zone_depletion(player.position.length()))
 	joystick.escape_frac = player.escape_speed() / player.max_speed() if GameState.is_planet() and player.planet_k > 0.5 else -1.0
+	_check_embryo(delta)
+	hud.second_chance = _chance_t
 	_check_tips()
+
+
+## Гонка зародыша с газом: 10 масс Земли до его конца — гигант; не успел —
+## каменная планета, а суперземле дают второй шанс нырнуть в молодого гиганта.
+func _check_embryo(delta: float) -> void:
+	if not GameState.is_embryo() or GameState.ending != "" or player.dead or GameState.gas_left < 0.0:
+		return
+	if is_instance_valid(guide):
+		return  # Звездочёт рассказывает: время стоит
+	var e := GameState.earth_masses()
+	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
+		_finish("giant_cold" if player.position.length() > GameData.SNOW_LINE else "giant_hot")
+		return
+	if _chance_t >= 0.0:
+		_chance_t -= delta
+		if _chance_t <= 0.0:
+			_chance_t = -1.0
+			rivals.remove_giant()
+			_finish("super_earth")
+		return
+	if GameState.gas_left > 0.0:
+		return
+	if e >= GameData.SUPER_EARTHS:
+		_chance_t = GameData.SECOND_CHANCE_TIME
+		rivals.spawn_giant()
+		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром")
+	else:
+		_finish(GameData.planet_ending(GameState.fate_type(), GameData.composition(GameState.materials), GameState.core_share))
+
+
+func _finish(kind: String) -> void:
+	if GameState.ending != "":
+		return
+	var pts := GameState.finish(kind)
+	_shake = 0.8
+	_show_ending(kind, pts)
+
+
+func _show_ending(kind: String, pts: int) -> void:
+	joystick.reset()
+	joystick.visible = false
+	hud.visible = false
+	player.move_input = Vector2.ZERO
+	get_tree().paused = true
+	var screen := EndingScreen.new(kind, pts)
+	$UI.add_child(screen)
 
 
 ## Множитель приближения при отъезде: плавно в логарифмах туда, пауза, обратно.
@@ -527,6 +594,7 @@ func _check_tips() -> void:
 		"material": GameState.is_boulder() and _intro_time - _boulder_time > 40.0 \
 				and GameData.BOULDER_MATERIAL.has(GameState.body_type()),
 		"clump": pebble_field.clump_left > 3.0 and pebble_field.clump_left < PebbleField.CLUMP_TIME - 1.0,
+		"forks": GameState.body_type() != "unformed" and player.pebble_k >= 1.0,
 	}
 	if GameState.is_planet():
 		# На этапе планетезимали свои явления; прежние подсказки там не к месту.

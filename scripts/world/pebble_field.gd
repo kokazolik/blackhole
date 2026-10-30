@@ -1280,6 +1280,9 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		# Убегающий рост: чем ты крупнее, тем больше прибавляет каждая добыча.
 		gain *= 1.0 + Skills.stat("runaway") * 0.35 * log(maxf(GameData.planet_km(GameState.mass), 1.0)) / log(10.0)
 		heat = minf(heat + HEAT_BITE * clampf(p.r / player.radius, 0.1, 1.0) + 0.004, 1.0)
+		if GameState.is_embryo():
+			# Рой планетезималей почти выеден: зародыш растёт галечной аккрецией и ударами.
+			gain *= GameData.EMBRYO_FLOW if p.flow else GameData.EMBRYO_SWARM
 	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * gain
 	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 		chain += 1

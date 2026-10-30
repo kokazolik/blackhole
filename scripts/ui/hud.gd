@@ -379,7 +379,9 @@ func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void
 	if GameState.is_melted and not _core_was_melted:
 		_core_flash = 1.0
 	_core_was_melted = GameState.is_melted
-	if GameState.is_melted:
+	if GameState.is_embryo() and GameState.gas_left >= 0.0:
+		_set_embryo_text()
+	elif GameState.is_melted:
 		_set_core_text("Недра расплавились", "ядро %d%%" % roundi(GameState.core_share * 100.0), "железо стекло к центру", UiTheme.GOLD)
 	elif GameState.core_too_cold():
 		_set_core_text("Недра остыли", "хондрит", "хондры ×2", UiTheme.CHONDRULE)
@@ -395,6 +397,26 @@ func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void
 	if _planet_label.text != swarm:
 		_planet_label.text = swarm
 		_planet_label.add_theme_color_override("font_color", Color(0.5, 0.92, 0.82).lerp(Color(1.0, 0.65, 0.4), clampf(heat, 0.0, 1.0)))
+
+
+## Зародыш: медальон показывает гонку с газом диска.
+var second_chance := -1.0  # секунд второго шанса суперземли (ставит main), <0 — нет
+
+
+func _set_embryo_text() -> void:
+	var e := GameState.earth_masses()
+	if second_chance >= 0.0:
+		_set_core_text("Второй шанс · %s" % _clock(second_chance), "нырни в гиганта", "медленно: он затянет тебя", UiTheme.GOLD)
+	elif GameState.gas_left > 0.0:
+		_set_core_text("Газ диска · %s" % _clock(GameState.gas_left), GameData.format_earths(GameState.mass),
+			"гигант — с %d масс Земли" % roundi(GameData.GIANT_EARTHS), Color(0.6, 0.9, 1.0) if e < GameData.SUPER_EARTHS else UiTheme.GOLD)
+	else:
+		_set_core_text("Газ рассеялся", GameData.format_earths(GameState.mass), "каменная планета", UiTheme.PARCHMENT)
+
+
+static func _clock(t: float) -> String:
+	var sec := ceili(maxf(t, 0.0))
+	return "%d:%02d" % [sec / 60, sec % 60]
 
 
 func _set_core_text(title: String, value: String, sub: String, col: Color) -> void:
@@ -420,7 +442,15 @@ func _draw_core() -> void:
 	var cold := not melted and GameState.core_too_cold()
 	var t := GameState.core_temp()
 	var prog := clampf((t - GameData.CORE_COLD) / (GameData.MELT_T - GameData.CORE_COLD), 0.0, 1.0)
-	if melted:
+	if GameState.is_embryo() and GameState.gas_left >= 0.0:
+		# Кольцо газа диска: тает по часовой, как песочные часы гонки.
+		var gas := GameState.gas_frac() if second_chance < 0.0 else second_chance / GameData.SECOND_CHANCE_TIME
+		var gas_col := Color(0.55, 0.85, 1.0) if second_chance < 0.0 else UiTheme.GOLD
+		if gas > 0.0:
+			ci.draw_arc(c, ring, -PI * 0.5, -PI * 0.5 + gas * TAU, maxi(int(64 * gas), 3), Color(gas_col, 0.85), 3.0, true)
+			var tip := c + Vector2.from_angle(-PI * 0.5 + gas * TAU) * ring
+			ci.draw_circle(tip, 3.2, Color(gas_col.lightened(0.5), 0.95))
+	elif melted:
 		ci.draw_arc(c, ring, 0.0, TAU, 64, Color(UiTheme.GOLD, 0.9), 3.0, true)
 	elif cold:
 		ci.draw_arc(c, ring, 0.0, TAU, 64, Color(UiTheme.CHONDRULE, 0.8), 3.0, true)
@@ -619,6 +649,8 @@ func _refresh() -> void:
 	_refresh_pending = false
 	_refresh_t = REFRESH_EVERY
 	_mass_label.text = "масса %s · %s" % [GameData.format_mass(GameState.mass), GameData.format_size(GameState.mass)]
+	if GameState.is_embryo():
+		_mass_label.text = "масса %s · %s" % [GameData.format_earths(GameState.mass), GameData.format_size(GameState.mass)]
 	var idx := maxi(GameData.stage_index(GameState.mass), GameState.stage)
 	var stage: Dictionary = GameData.STAGES[idx]
 	if idx + 1 < GameData.STAGES.size():
@@ -630,6 +662,11 @@ func _refresh() -> void:
 			_stage_progress = clampf((log(maxf(GameState.mass, 1.0)) - lo) / (log(next.mass) - lo), 0.0, 1.0)
 		else:
 			_stage_progress = clampf(inverse_lerp(stage.mass, next.mass, GameState.mass), 0.0, 1.0)
+	elif GameState.is_embryo():
+		# Гонка с газом: до гиганта — 10 масс Земли, шкала логарифмическая.
+		_stage_label.text = "%s → газовый гигант: %d масс Земли" % [stage.name, roundi(GameData.GIANT_EARTHS)]
+		var lo := log(GameData.earth_masses(stage.mass))
+		_stage_progress = clampf((log(maxf(GameState.earth_masses(), 1e-6)) - lo) / (log(GameData.GIANT_EARTHS) - lo), 0.0, 1.0)
 	else:
 		_stage_label.text = stage.name
 		_stage_progress = 1.0

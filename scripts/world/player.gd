@@ -33,6 +33,7 @@ var drift_velocity := Vector2.ZERO  # снос встречным ветром �
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var boulder_k := 0.0                # 0 — галька, 1 — валун
 var planet_k := 0.0                 # 0 — валун, 1 — планетезималь
+var migration := Vector2.ZERO       # снос зародыша к звезде газом диска
 var shadow := 0.0                   # 0..1: насколько ты в ветровой тени крупного тела
 var pebble_field: PebbleField       # для ветровой тени; ставит main
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
@@ -240,7 +241,12 @@ func _process(delta: float) -> void:
 		shadow = pebble_field.shadow_at(position)
 		drift_velocity *= 1.0 - PebbleField.SHADOW_CALM * shadow
 	kick *= exp(-0.45 * delta)
-	position += (velocity + drift_velocity + frame_velocity + kick) * delta
+	# Миграция зародыша: газ диска тянет тяжёлое тело к звезде, пока не рассеется.
+	migration = Vector2.ZERO
+	if GameState.is_embryo() and GameState.gas_left > 0.0 and GameState.ending == "":
+		migration = -position.normalized() * max_speed() * GameData.MIGRATE \
+			* clampf(sqrt(GameState.earth_masses()), 0.15, 2.0) * GameState.gas_frac()
+	position += (velocity + drift_velocity + frame_velocity + kick + migration) * delta
 	if GameState.is_planet():
 		GameState.tick_planet(delta)
 		planet_world = lerpf(planet_world, GameData.planet_world(GameState.mass), 1.0 - exp(-1.5 * delta))
@@ -293,6 +299,7 @@ func die() -> void:
 		return
 	dead = true
 	velocity = Vector2.ZERO
+	GameState.burned_embryo = GameState.is_embryo()
 	GameState.burned_up = true
 	_grain.visible = false
 	_pebble.visible = false
@@ -412,6 +419,7 @@ func _update_grain(r: float) -> void:
 		_planet.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
 		mat.set_shader_parameter("light_dir", (-position).normalized())
 		mat.set_shader_parameter("spin", _spin)
+		mat.set_shader_parameter("round_k", GameData.roundness(GameState.mass))
 		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
 		mat.set_shader_parameter("mix_w", _mix)

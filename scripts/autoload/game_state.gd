@@ -10,6 +10,8 @@ signal absorbed(position: Vector2, material: String, gained: float)
 signal stage_reached(index: int)  # впервые достигнута новая стадия (Галька, ...)
 signal chipped(position: Vector2, lost: float)  # удар: от тела откололись осколки
 signal melted  # планетезималь расплавилась от алюминия-26: железо ушло в ядро
+signal moon_formed(position: Vector2)  # косой гигантский удар: из обломков собралась луна
+signal gas_gone  # газ диска рассеялся: гонка зародыша окончена
 
 const SAVE_PATH := "user://save.json"
 const SAVE_VERSION := 1
@@ -23,6 +25,7 @@ var materials := {}
 var skill_levels := {}
 var player_position := Vector2(GameData.START_DISTANCE, 0.0)
 var burned_up := false  # пылинка испарилась у звезды: забег окончен, сохранять нечего
+var burned_embryo := false  # сгорел зародыш (упал в звезду), а не пылинка; для экрана гибели
 var stage := 0  # высшая достигнутая стадия: потеря массы осколками её не отнимает
 # Не сбрасываются вместе с забегом: пролог и обучение достаточно пройти один раз.
 var prologue_seen := false
@@ -41,6 +44,14 @@ var core_share := 0.0    # доля металла, ушедшая в ядро �
 var melt_type := ""      # тип тела в момент плавления: дальше состав не меняется
 var zone_eaten := {}     # кольцо диска (GameData.zone_bin) → сколько вещества из него съедено
 var embryo_path := ""    # путь после планетезимали (GameData.EMBRYO_PATHS), записан навсегда
+# Этап «Зародыш планеты»:
+var gas_left := -1.0     # секунд до рассеяния газа диска; <0 — гонка ещё не началась
+var magma_hits := 0      # гигантских ударов: хондрит плавится в магматический океан
+var has_moon := false
+var ending := ""         # чем кончился забег (GameData.ENDINGS), "" — ещё идёт
+# Не сбрасываются вместе с забегом: наследие прошлых концовок.
+var legacy := 0
+var endings_seen: Array = []
 
 
 func _ready() -> void:
@@ -79,7 +90,7 @@ func absorb_mass(base_mass: float, base_value: float, material: String, at: Vect
 		materials[material] = materials.get(material, 0.0) + gained_mass
 	if is_planet():
 		eat_zone(player_position.length(), gained_mass)
-	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
+	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value") * value_bonus()
 	add_currency(gained)
 	mass_changed.emit(mass)
 	absorbed.emit(at, material, gained)
@@ -106,7 +117,7 @@ func absorb_mix(base_mass: float, base_value: float, mix: Dictionary, at: Vector
 			materials[key] = materials.get(key, 0.0) + gained_mass * float(mix[key]) / total
 	if is_planet():
 		eat_zone(player_position.length(), gained_mass)
-	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
+	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value") * value_bonus()
 	add_currency(gained)
 	mass_changed.emit(mass)
 	absorbed.emit(at, top, gained)
@@ -119,6 +130,69 @@ func _add_frozen(gained_mass: float) -> void:
 	var shares := GameData.composition(materials)
 	for key in shares:
 		materials[key] = materials.get(key, 0.0) + gained_mass * float(shares[key])
+
+
+## Наследие прошлых концовок и луна: множитель звёздной пыли.
+func value_bonus() -> float:
+	return (1.0 + GameData.LEGACY_BONUS * legacy) * (1.0 + (GameData.MOON_BONUS if has_moon else 0.0))
+
+
+func is_embryo() -> bool:
+	return stage >= GameData.EMBRYO_STAGE
+
+
+## Доля газа диска, что ещё осталась (1 — в начале этапа зародыша).
+func gas_frac() -> float:
+	if gas_left < 0.0:
+		return 1.0
+	return clampf(gas_left / GameData.GAS_TIME, 0.0, 1.0)
+
+
+func earth_masses() -> float:
+	return GameData.earth_masses(mass)
+
+
+## Гигантский удар зародыша: rel — масса соседа в долях твоей, slant — доля
+## касательной скорости. Удары греют тело до магматического океана: хондрит
+## плавится здесь, с тем составом, что набрал. Косой удар выбрасывает диск
+## обломков, из него собирается луна.
+func giant_impact(rel: float, slant: float, at: Vector2) -> void:
+	if not is_embryo() or rel < GameData.IMPACT_REL:
+		return
+	magma_hits += 1
+	if not is_melted and magma_hits >= GameData.MAGMA_IMPACTS:
+		_melt()
+	if not has_moon and slant >= GameData.MOON_SLANT:
+		has_moon = true
+		moon_formed.emit(at)
+	save_game()
+
+
+func _melt() -> void:
+	is_melted = true
+	core_share = float(GameData.composition(materials).get("metal", 0.0))
+	melt_type = GameData.planet_type(body_type())
+	save_game()
+	melted.emit()
+
+
+## Тип тела для судьбы: застывший при плавлении, иначе нынешний.
+func fate_type() -> String:
+	return melt_type if is_melted and melt_type != "" else GameData.planet_type(body_type())
+
+
+## Забег окончен концовкой: начисляем наследие (за новую концовку — вдвое).
+func finish(kind: String) -> int:
+	if ending != "":
+		return 0
+	ending = kind
+	var pts := int(GameData.ENDINGS[kind]["legacy"])
+	if not kind in endings_seen:
+		endings_seen.append(kind)
+		pts *= 2
+	legacy += pts
+	save_game()
+	return pts
 
 
 func is_pebble() -> bool:
@@ -168,14 +242,14 @@ func core_too_cold() -> bool:
 ## до температуры плавления, плавятся.
 func tick_planet(delta: float) -> void:
 	planet_time += delta
+	if is_embryo() and gas_left > 0.0:
+		gas_left = maxf(gas_left - delta, 0.0)
+		if gas_left == 0.0:
+			gas_gone.emit()
 	if is_melted:
 		return
 	if core_temp() >= GameData.MELT_T:
-		is_melted = true
-		core_share = float(GameData.composition(materials).get("metal", 0.0))
-		melt_type = GameData.planet_type(body_type())
-		save_game()
-		melted.emit()
+		_melt()
 
 
 func _check_stage() -> void:
@@ -303,6 +377,12 @@ func save_game() -> void:
 		"melt_type": melt_type,
 		"zone_eaten": zone_eaten,
 		"embryo_path": embryo_path,
+		"gas_left": gas_left,
+		"magma_hits": magma_hits,
+		"has_moon": has_moon,
+		"ending": ending,
+		"legacy": legacy,
+		"endings_seen": endings_seen,
 	}
 	if tree_seen != null:
 		data.tree_seen = tree_seen
@@ -336,6 +416,12 @@ func load_game() -> void:
 	melt_type = str(data.get("melt_type", ""))
 	zone_eaten = Dictionary(data.get("zone_eaten", {}))
 	embryo_path = str(data.get("embryo_path", ""))
+	gas_left = float(data.get("gas_left", -1.0))
+	magma_hits = int(data.get("magma_hits", 0))
+	has_moon = bool(data.get("has_moon", false))
+	ending = str(data.get("ending", ""))
+	legacy = int(data.get("legacy", 0))
+	endings_seen = Array(data.get("endings_seen", []))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
@@ -387,6 +473,10 @@ func _reset_values() -> void:
 	melt_type = ""
 	zone_eaten = {}
 	embryo_path = ""
+	gas_left = -1.0
+	magma_hits = 0
+	has_moon = false
+	ending = ""
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:

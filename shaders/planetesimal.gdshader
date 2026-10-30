@@ -14,6 +14,7 @@ uniform vec4 mix_w = vec4(0.25);  // доли: силикаты, металл, �
 uniform float spin = 0.0;         // поворот вокруг своей оси, рад
 uniform float tilt = 0.45;        // наклон оси к нам
 uniform float seed = 0.37;
+uniform float round_k = 0.0;     // 0 — бугристое тело, 1 — шар: крупное тело собственная гравитация скругляет
 
 const float BODY = 0.36;   // единичный радиус тела в долях квадрата (как у гальки)
 const float R_MAX = 1.38;  // выше рельеф не поднимается
@@ -48,7 +49,7 @@ vec4 surf_at(vec3 d) {
 
 float height_at(vec3 d) {
 	vec2 c = surf_at(d).rg;
-	return c.r + c.g / 64.0;
+	return (c.r + c.g / 64.0) * (1.0 - 0.85 * round_k);
 }
 
 // Та же высота, но смешанная вручную: видеокарта смешивает соседние пиксели
@@ -69,7 +70,7 @@ float height_exact(vec3 d) {
 	vec2 c = texelFetch(surf, ivec2(i.x, i1.y), 0).rg;
 	vec2 e = texelFetch(surf, i1, 0).rg;
 	vec2 m = mix(mix(a, b, w.x), mix(c, e, w.x), w.y);
-	return m.r + m.g / 64.0;
+	return (m.r + m.g / 64.0) * (1.0 - 0.85 * round_k);
 }
 
 float outside_exact(vec3 q) {
