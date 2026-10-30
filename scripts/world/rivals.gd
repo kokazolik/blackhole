@@ -22,7 +22,13 @@ const SHADER := preload("res://shaders/planetesimal.gdshader")
 const PEBBLE_SCALE := 2.78   # как у тела игрока: видимый радиус — ровно r
 const NAMES := ["Ида", "Матильда", "Гаспра", "Лютеция", "Эрос", "Паллада", "Юнона", "Гигия", "Психея", "Веста",
 	"Аррокот", "Итокава", "Рюгу", "Бенну", "Церера", "Фебa", "Дактиль", "Клото", "Сильвия", "Европа"]
-const GROWTH := 0.0035       # соседи растут сами (едят свой рой), доля массы в секунду
+const SPAWN_MIN := 30.0       # пауза между новыми соседями, с
+const SPAWN_MAX := 45.0
+const REL_MIN := 0.04         # масса соседа в долях твоей
+const REL_MAX := 0.45
+const BIG_CHANCE := 0.15      # доля соседей крупнее тебя
+const SHEAR_AGE := 60.0      # через сколько секунд сосед уплывает по своей орбите
+const GROWTH := 0.0015       # соседи растут сами (едят свой рой), доля массы в секунду
 const WANDER := 0.25         # их собственная скорость, в твоих предельных скоростях
 const MERGE_KEEP := 0.8      # доля массы соседа, что остаётся в тебе при слиянии
 const MERGE_KEEP_BIG := 0.6  # если сосед крупнее: больше вещества разлетается
@@ -43,6 +49,7 @@ class Rival:
 	var hit_cd := 0.0
 	var wander_t := 0.0
 	var kicked := false
+	var age := 0.0
 
 var player: Player
 var pebble_field: PebbleField
@@ -159,11 +166,14 @@ func _maintain(delta: float) -> void:
 			count += 1
 	_spawn_t -= delta
 	if count < _target_count() and _spawn_t <= 0.0:
-		_spawn_t = rng.randf_range(6.0, 12.0)
+		_spawn_t = rng.randf_range(SPAWN_MIN, SPAWN_MAX)
 		var dir := Vector2.from_angle(rng.randf() * TAU)
 		var at := player.position + dir * view_r * rng.randf_range(1.1, 1.5)
 		if at.length() > GameData.sublimation_distance() * 1.3:
-			var rel := exp(rng.randf_range(log(0.25), log(1.8)))
+			# Убегающий рост: почти все соседи заметно мельче тебя, изредка — крупнее.
+			var rel := exp(rng.randf_range(log(REL_MIN), log(REL_MAX)))
+			if rng.randf() < BIG_CHANCE:
+				rel = rng.randf_range(1.1, 2.0)
 			var rv := _add("rival", at, GameState.mass * rel)
 			rv.vel = -dir.rotated(rng.randf_range(-1.0, 1.0)) * player.max_speed() * WANDER
 
@@ -208,6 +218,7 @@ func _remove(rv: Rival) -> void:
 func _move(rv: Rival, delta: float) -> void:
 	rv.hit_cd -= delta
 	rv.spin += rv.spin_rate * delta
+	rv.age += delta
 	if rv.kind == "rival":
 		# Соседи растут сами: едят свой рой. Крупный растёт быстрее.
 		rv.mass *= exp(GROWTH * pow(rv.mass / GameState.mass, 0.33) * delta)
@@ -218,6 +229,10 @@ func _move(rv: Rival, delta: float) -> void:
 			# «Своя полоса»: соседи держатся подальше от тебя.
 			if Skills.stat("oligarch") > 0.0:
 				target = (world_pos(rv) - player.position).normalized() * player.max_speed() * WANDER
+			# Сдвиг орбит: соседа на чуть другой орбите со временем уносит прочь,
+			# и вместо него приходит новый.
+			if rv.age > SHEAR_AGE:
+				target = (world_pos(rv) - player.position).normalized() * player.max_speed() * WANDER * 1.5
 			rv.vel = target
 	rv.r = GameData.body_radius(rv.mass)
 	rv.pos += rv.vel * delta
@@ -374,7 +389,7 @@ func _events(delta: float) -> void:
 		_twin_t = rng.randf_range(130.0, 180.0)
 		var dir := (player.velocity.normalized() if player.velocity.length() > 5.0 else Vector2.from_angle(rng.randf() * TAU)).rotated(rng.randf_range(-0.5, 0.5))
 		var at := player.position + dir * view_r * 1.1
-		var rv := _add("twin", at, GameState.mass * rng.randf_range(0.6, 0.9))
+		var rv := _add("twin", at, GameState.mass * rng.randf_range(0.4, 0.6))
 		rv.vel = -dir * player.escape_speed() * 0.5
 		event_started.emit("twin", at)
 	# Пролёт олигарха: тело в десять раз крупнее проходит мимо, его притяжение
