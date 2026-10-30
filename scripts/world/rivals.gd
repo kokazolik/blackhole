@@ -24,9 +24,10 @@ const NAMES := ["Ида", "Матильда", "Гаспра", "Лютеция", 
 	"Аррокот", "Итокава", "Рюгу", "Бенну", "Церера", "Фебa", "Дактиль", "Клото", "Сильвия", "Европа"]
 const SPAWN_MIN := 30.0       # пауза между новыми соседями, с
 const SPAWN_MAX := 45.0
-const REL_MIN := 0.04         # масса соседа в долях твоей
-const REL_MAX := 0.45
+const REL_MIN := 0.12         # масса соседа в долях твоей
+const REL_MAX := 0.35
 const BIG_CHANCE := 0.15      # доля соседей крупнее тебя
+const STIR := 0.03           # как сильно сосед твоей массы раскачивает рой вблизи
 const SHEAR_AGE := 60.0      # через сколько секунд сосед уплывает по своей орбите
 const GROWTH := 0.0015       # соседи растут сами (едят свой рой), доля массы в секунду
 const WANDER := 0.25         # их собственная скорость, в твоих предельных скоростях
@@ -81,6 +82,23 @@ func active() -> bool:
 	return GameState.is_planet() and player.planet_k > 0.9 and not player.dead and not player.planet_surface().is_empty()
 
 
+## Радиус соседа на экране: в той же пропорции к тебе, что и размеры в км над
+## вами (GameData.planet_km), чтобы тело вдвое больше по подписи и выглядело вдвое крупнее.
+func screen_r(mass: float) -> float:
+	return player.radius * GameData.planet_km(mass) / GameData.planet_km(GameState.mass)
+
+
+## Звездочёт хочет показать соседа, а рядом никого: подкладываем мелкого. INF — нельзя.
+func spawn_for_guide() -> Vector2:
+	if not active():
+		return Vector2.INF
+	var dir := Vector2.from_angle(rng.randf() * TAU)
+	var at := player.position + dir * player.radius * 7.0
+	var rv := _add("rival", at, GameState.mass * 0.5)
+	rv.vel = Vector2.ZERO
+	return at
+
+
 func world_pos(rv: Rival) -> Vector2:
 	return rv.pos + dust_field.frame_offset
 
@@ -106,6 +124,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	_follow_world_scale()
+	_stir(delta)
 	_events(delta)
 	_maintain(delta)
 	_eat_t -= delta
@@ -123,6 +142,19 @@ func _process(delta: float) -> void:
 		i -= 1
 	_draw_sprites()
 	queue_redraw()
+
+
+## Соседи тоже раскачивают рой своей гравитацией: крупный рядом — сильно, мелкий
+## вдалеке — едва. Поэтому рядом с большими телами расти труднее (так убегающий
+## рост переходит в олигархический).
+func _stir(delta: float) -> void:
+	var view_r := dust_field.view_radius()
+	for rv in rivals:
+		var d := world_pos(rv).distance_to(player.position)
+		if d < view_r:
+			var near := 1.0 - d / view_r
+			pebble_field.heat += STIR * clampf(rv.mass / GameState.mass, 0.0, 3.0) * near * near * delta
+	pebble_field.heat = minf(pebble_field.heat, 1.0)
 
 
 # --- Масштаб мира: на 10 и 100 км всё вокруг мельчает вдвое, вместе с соседями ---
@@ -183,7 +215,7 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	rv.kind = kind
 	rv.mass = mass
 	rv.pos = at - dust_field.frame_offset
-	rv.r = GameData.body_radius(mass)
+	rv.r = screen_r(mass)
 	rv.name = NAMES[_name_i % NAMES.size()]
 	_name_i += 1
 	rv.spin = rng.randf() * TAU
@@ -234,7 +266,7 @@ func _move(rv: Rival, delta: float) -> void:
 			if rv.age > SHEAR_AGE:
 				target = (world_pos(rv) - player.position).normalized() * player.max_speed() * WANDER * 1.5
 			rv.vel = target
-	rv.r = GameData.body_radius(rv.mass)
+	rv.r = screen_r(rv.mass)
 	rv.pos += rv.vel * delta
 	if rv.kind == "oligarch":
 		_sling(rv, delta)
@@ -400,7 +432,7 @@ func _events(delta: float) -> void:
 		var dir := Vector2.from_angle(rng.randf() * TAU)
 		var side := dir.orthogonal() * (1.0 if rng.randf() < 0.5 else -1.0)
 		var mass := GameState.mass * 10.0
-		var r := GameData.body_radius(mass)
+		var r := screen_r(mass)
 		var at := player.position + side * (r + player.radius * rng.randf_range(3.0, 6.0)) - dir * (view_r + r * 1.2)
 		var rv := _add("oligarch", at, mass)
 		rv.vel = dir * (view_r + r) * 2.0 / 30.0

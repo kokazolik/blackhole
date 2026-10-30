@@ -25,6 +25,7 @@ const BURN_RATE := 0.9     # скорость испарения при макс
 # Внутри снеговой линии лёд гальки медленно сублимирует: в долях льда за секунду
 # на полной глубине (за 2000 ед. от линии). Ледяному пути лучше держаться снаружи.
 const ICE_SUBLIMATION := 0.004
+const RADIAL_K := 0.3  # планетезималь: доля скорости, с которой меняешь орбиту
 
 var velocity := Vector2.ZERO        # собственное движение относительно окружающей пыли
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
@@ -222,7 +223,14 @@ func _process(delta: float) -> void:
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
 	var accel := lerpf(ACCEL_FACTOR, PEBBLE_ACCEL_FACTOR * Skills.stat("thrust"), pebble_k)
-	velocity = velocity.move_toward(dir * top, top * accel * delta)
+	var want := dir * top
+	if planet_k > 0.0:
+		# Планетезималь идёт по своей орбите: вдоль неё двигаться легко, а сменить
+		# орбиту (к звезде или от неё) тяжело — для этого нужен большой разгон.
+		var out := position.normalized()
+		var radial := want.dot(out)
+		want -= out * radial * (1.0 - lerpf(1.0, RADIAL_K, planet_k))
+	velocity = velocity.move_toward(want, top * accel * delta)
 	# Игрок вместе со всей пылью вокруг летит по орбите, стик добавляет своё движение.
 	frame_velocity = GameData.orbit_velocity(position)
 	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.

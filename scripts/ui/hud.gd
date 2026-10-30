@@ -332,18 +332,24 @@ func set_wind(drift: Vector2, pos: Vector2, pebble_k: float, shadow := 0.0) -> v
 
 
 ## Планетезималь: порог слипания, раскачка роя, выеденность полосы, нагрев недр.
-func set_planet(on: bool, heat: float, depletion: float) -> void:
+func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void:
 	_planet_label.visible = on
 	if not on:
 		return
 	var lines := PackedStringArray()
 	lines.append("Убегание: %s м/с" % _num(GameData.escape_ms(GameState.mass)))
-	lines.append("Рой: спокоен" if heat < 0.3 else "Рой раскачан: %d%%" % roundi(heat * 100.0))
-	lines.append("Полоса выедена: %d%%" % roundi(depletion * 100.0))
-	if GameState.is_melted:
-		lines.append("Расплавлен: ядро %d%% железа" % roundi(GameState.core_share * 100.0))
+	# Чем спокойнее рой, тем шире круг захвата: показываем, во сколько раз.
+	if heat < 0.3:
+		lines.append("Рой спокоен · захват ×%.1f" % capture)
 	else:
-		lines.append("Алюминий-26: нагрев %d%%" % roundi(GameState.al_heat() * 100.0))
+		lines.append("Рой взбудоражен %d%% · захват ×%.1f" % [roundi(heat * 100.0), capture])
+	lines.append("Кормовая полоса выедена: %d%%" % roundi(depletion * 100.0))
+	if GameState.is_melted:
+		lines.append("Недра расплавились: ядро %d%% железа" % roundi(GameState.core_share * 100.0))
+	elif GameState.core_too_cold():
+		lines.append("Недра остыли: ты хондрит · хондры ×2")
+	else:
+		lines.append("Недра: %d K · плавятся при %d K" % [roundi(GameState.core_temp()), roundi(GameData.MELT_T)])
 	var text := "\n".join(lines)
 	if _planet_label.text != text:
 		_planet_label.text = text

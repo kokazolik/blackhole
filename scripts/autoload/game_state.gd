@@ -38,6 +38,7 @@ var tree_seen = []  # узлы, что игрок уже видел в книг�
 var planet_time := 0.0   # секунд на этапе: по ним остывает алюминий-26
 var is_melted := false   # недра расплавились, железо ушло в ядро
 var core_share := 0.0    # доля металла, ушедшая в ядро при плавлении
+var melt_type := ""      # тип тела в момент плавления: дальше состав не меняется
 var zone_eaten := {}     # кольцо диска (GameData.zone_bin) → сколько вещества из него съедено
 var embryo_path := ""    # путь после планетезимали (GameData.EMBRYO_PATHS), записан навсегда
 
@@ -110,16 +111,31 @@ func al_heat() -> float:
 	return GameData.al_heat(planet_time / Skills.stat("al_slow"))
 
 
-## Время на этапе планетезимали идёт, алюминий остывает; тело крупнее порога,
-## пока жар не угас, плавится.
+## Температура недр, K: растёт с размером, падает по мере распада алюминия.
+func core_temp() -> float:
+	return GameData.core_temp(GameData.planet_km(mass), al_heat(), Skills.stat("al_slow"))
+
+
+## Тело не расплавилось и уже не расплавится: хондрит, хранящий хондры.
+func is_chondrite() -> bool:
+	return is_planet() and not is_melted and core_too_cold()
+
+
+## Плавиться уже нечем: даже у крупного тела недра не дойдут до плавления.
+func core_too_cold() -> bool:
+	return GameData.CORE_COLD + GameData.CORE_HEAT * al_heat() < GameData.MELT_T
+
+
+## Время на этапе планетезимали идёт, алюминий остывает; недра, разогревшиеся
+## до температуры плавления, плавятся.
 func tick_planet(delta: float) -> void:
 	planet_time += delta
 	if is_melted:
 		return
-	var need := GameData.MELT_KM / Skills.stat("al_slow")
-	if GameData.planet_km(mass) >= need and al_heat() >= GameData.MELT_HEAT:
+	if core_temp() >= GameData.MELT_T:
 		is_melted = true
 		core_share = float(GameData.composition(materials).get("metal", 0.0))
+		melt_type = GameData.planet_type(body_type())
 		save_game()
 		melted.emit()
 
@@ -244,6 +260,7 @@ func save_game() -> void:
 		"planet_time": planet_time,
 		"melted": is_melted,
 		"core_share": core_share,
+		"melt_type": melt_type,
 		"zone_eaten": zone_eaten,
 		"embryo_path": embryo_path,
 	}
@@ -276,6 +293,7 @@ func load_game() -> void:
 	planet_time = float(data.get("planet_time", 0.0))
 	is_melted = bool(data.get("melted", false))
 	core_share = float(data.get("core_share", 0.0))
+	melt_type = str(data.get("melt_type", ""))
 	zone_eaten = Dictionary(data.get("zone_eaten", {}))
 	embryo_path = str(data.get("embryo_path", ""))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
@@ -326,6 +344,7 @@ func _reset_values() -> void:
 	planet_time = 0.0
 	is_melted = false
 	core_share = 0.0
+	melt_type = ""
 	zone_eaten = {}
 	embryo_path = ""
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)

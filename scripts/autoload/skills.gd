@@ -93,6 +93,8 @@ func _process(delta: float) -> void:
 
 
 func _current_body() -> String:
+	if GameState.is_melted and GameState.melt_type != "":
+		return GameState.melt_type  # расплавленное тело: состав застыл
 	return GameState.body_type() if GameState.is_boulder() else ""
 
 
@@ -245,8 +247,10 @@ func compute(levels: Dictionary) -> Dictionary:
 				out[key] = float(out.get(key, 1.0)) + float(effects[key]) * lvl
 	# Вещество продолжает путь: выбранный на гальке состав даёт валуну свой бонус.
 	var bonus: Dictionary = _body_bonus().get("effects", {})
+	# Расплавленное тело разделилось на ядро, мантию и кору: вещество работает вдвое.
+	var melt_k := 2.0 if GameState.is_melted else 1.0
 	for key in bonus:
-		out[key] = float(out.get(key, 1.0)) + float(bonus[key])
+		out[key] = float(out.get(key, 1.0)) + float(bonus[key]) * melt_k
 	# Расплавленное тело крепче: обломки спеклись в цельную мантию.
 	if GameState.is_melted:
 		out.qstar = float(out.qstar) + 0.3

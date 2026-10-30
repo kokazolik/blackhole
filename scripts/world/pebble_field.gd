@@ -143,6 +143,8 @@ const CHONDRULE_DEBRIS := 0.2   # с обломка столкновения и�
 const CHONDRULE_GEODE := 2      # в жеоде их сразу несколько
 const CHONDRULE_BOULDER := 0.3  # валун ест в разы больше тел: шанс ниже, иначе хондр горы
 # Планетезималь: рой вокруг раскачивается твоим притяжением и остывает в газе.
+const GRAV_PULL := 0.9       # сила притяжения мелочи в сфере Хилла
+const GRAV_SWIRL := 0.35     # насколько она закручивается вокруг тебя
 const HEAT_BITE := 0.05      # нагрев роя за добычу твоего размера
 const HEAT_FLY := 0.1        # нагрев в секунду, если носишься на полной скорости
 const HEAT_COOL := 0.035     # остывание в секунду (при нагреве 1 — втрое быстрее)
@@ -357,8 +359,20 @@ func _process(delta: float) -> void:
 		if not p.crash and not p.flow:
 			p.vel *= drag
 		if _planet and not (p.pulled or p.crash or p.flow or p.own or p.life > 0.0 or p.chunk_mass > 0.0):
-			# Рой раскачан: тела несутся со случайными скоростями, ловить их труднее.
-			p.vel = p.vel.lerp(p.jit * esc * HEAT_JITTER * heat, 1.0 - exp(-1.2 * delta))
+			var to_me := player.position - wp
+			var dm := to_me.length()
+			# Рой раскачан: тела рядом несутся со случайными скоростями, ловить их труднее.
+			# Раскачивает их твоя гравитация, поэтому вдали от тебя рой спокойнее.
+			var near := clampf(1.6 - dm / maxf(hill_r, 1.0) * 0.6, 0.0, 1.0)
+			p.vel = p.vel.lerp(p.jit * esc * HEAT_JITTER * heat * near, 1.0 - exp(-1.2 * delta))
+			if dm < hill_r and dm > player.radius:
+				# Внутри сферы Хилла правит твоя гравитация: мелочь тянется к тебе по
+				# дуге, закручиваясь вокруг (ускорение — как 1/r²).
+				var acc := esc * esc * GRAV_PULL / player.radius * pow(player.radius / dm, 2.0)
+				acc = minf(acc, esc * 3.0)
+				var dir := to_me / dm
+				p.vel += (dir + dir.orthogonal() * GRAV_SWIRL) * acc * delta
+				p.vel = p.vel.limit_length(esc * 1.3)
 		if p.flow and hill_r > 0.0 and wp.distance_squared_to(player.position) < hill_r * hill_r:
 			# Сфера Хилла: газ тормозит гальку внутри неё, и та падает на тебя.
 			p.flow = false
@@ -1213,6 +1227,8 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		found = CHONDRULE_GEODE
 	else:
 		var k := CHONDRULE_BOULDER if GameState.is_boulder() else 1.0
+		if GameState.is_chondrite():
+			k *= 2.0  # непереплавленное тело: хондры уцелели
 		if (p.life > 0.0 or p.clump) and rng.randf() < CHONDRULE_DEBRIS * k:
 			found = 1
 		elif not easy and rng.randf() < CHONDRULE_CHANCE * k:
@@ -2178,6 +2194,7 @@ func _update_heat(delta: float) -> void:
 
 ## Круг захвата и сфера Хилла вокруг планетезимали.
 func _draw_planet_rings(px: float) -> void:
+	_draw_feeding_bands(px)
 	var c := player.position
 	var cap := player.pull_radius()
 	var cold := 1.0 - heat
@@ -2188,6 +2205,29 @@ func _draw_planet_rings(px: float) -> void:
 		dash.append(c + Vector2.from_angle(k * TAU / 60.0) * hill)
 		dash.append(c + Vector2.from_angle((k + 0.45) * TAU / 60.0) * hill)
 	_hint.draw_multiline(dash, Color(0.75, 0.8, 1.0, 0.16), 1.2 * px)
+
+
+## Кормовые полосы: кольца вокруг звезды. Твоя подсвечена, и чем сильнее она
+## выедена, тем тусклее. Соседние полосы видно по краям, их свежесть — по цвету.
+func _draw_feeding_bands(px: float) -> void:
+	var d := player.position.length()
+	if d < 1.0:
+		return
+	var span := clampf(dust_field.view_radius() * 1.6 / d, 0.05, PI)
+	var ang := player.position.angle()
+	var mine := GameData.zone_bin(d)
+	for b: int in [mine - 1, mine, mine + 1]:
+		if b < 0:
+			continue
+		var r0: float = b * GameData.ZONE_BIN
+		var mid: float = r0 + GameData.ZONE_BIN * 0.5
+		var full := 1.0 - GameState.zone_depletion(mid)
+		var col := Color(0.55, 0.5, 0.45).lerp(Color(1.0, 0.85, 0.45), full)
+		var a := (0.07 if b == mine else 0.035) * (0.35 + 0.65 * full)
+		_hint.draw_arc(Vector2.ZERO, mid, ang - span, ang + span, 96, Color(col, a), GameData.ZONE_BIN, false)
+		for edge: float in [r0, r0 + GameData.ZONE_BIN]:
+			if edge > 0.0:
+				_hint.draw_arc(Vector2.ZERO, edge, ang - span, ang + span, 96, Color(col, 0.35 if b == mine else 0.18), 1.5 * px, true)
 
 
 ## Галечный поток: из внешнего диска к звезде дрейфует река гальки. Сфера Хилла

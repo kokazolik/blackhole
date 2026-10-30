@@ -216,6 +216,7 @@ func _jump(mass: float, stage: int) -> void:
 	# Прыжок посреди этапа планетезимали: недра ещё горячие, полоса не тронута.
 	GameState.planet_time = 0.0
 	GameState.is_melted = false
+	GameState.melt_type = ""
 	GameState.zone_eaten = {}
 	GameState.embryo_path = ""
 	GameState.tips_seen = []

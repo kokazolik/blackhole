@@ -258,7 +258,8 @@ func _connect_planet() -> void:
 	GameState.melted.connect(func() -> void:
 		var info: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(GameState.body_type())]
 		_shake = maxf(_shake, 0.7)
-		_show_caption("Тело расплавилось", "алюминий-26 нагрел недра: железо ушло в ядро, %s" % info["melt"]))
+		if "melt" in GameState.tips_seen:
+			_show_caption("Тело расплавилось", "алюминий-26 нагрел недра: железо ушло в ядро, %s" % info["melt"]))
 
 
 func _on_planet_event(kind: String, _at: Vector2) -> void:
@@ -285,7 +286,8 @@ func _on_planet_event(kind: String, _at: Vector2) -> void:
 ## Тело выросло до тысячи километров: путь дальше решает состав и место в диске.
 func _reach_embryo() -> void:
 	if GameState.embryo_path == "":
-		GameState.embryo_path = GameData.embryo_path(GameState.body_type(), player.position.length())
+		var type := GameState.melt_type if GameState.is_melted and GameState.melt_type != "" else GameState.body_type()
+		GameState.embryo_path = GameData.embryo_path(type, player.position.length())
 		GameState.save_game()
 	var path: Dictionary = GameData.EMBRYO_PATHS.get(GameState.embryo_path, GameData.EMBRYO_PATHS["silicate"])
 	_show_caption("Зародыш планеты: %s" % path["name"], path["desc"])
@@ -458,7 +460,7 @@ func _process(delta: float) -> void:
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
-	hud.set_planet(GameState.is_planet() and player.planet_k > 0.5, pebble_field.heat, GameState.zone_depletion(player.position.length()))
+	hud.set_planet(GameState.is_planet() and player.planet_k > 0.5, pebble_field.heat, player.capture_k(), GameState.zone_depletion(player.position.length()))
 	_check_tips()
 
 
@@ -536,6 +538,8 @@ func _check_tips() -> void:
 			"heat": pebble_field.heat > 0.6,
 			"zone": GameState.zone_depletion(player.position.length()) > 0.6,
 			"hill": km >= 100.0,
+			"al_warm": not GameState.is_melted and GameState.core_temp() > 800.0,
+			"melt": GameState.is_melted,
 		}
 		for kind in found:
 			if found[kind] and not kind in GameState.tips_seen:
