@@ -2522,5 +2522,5 @@ func _draw_dance() -> void:
 		var a := (h - floorf(h)) * TAU + spin * (0.8 + 0.4 * fmod(h * 7.0, 1.0))
 		var rr := ring_r * (1.0 + 0.09 * sin(j * 12.9898) * (1.0 - fall))
 		var tw := 0.55 + 0.45 * sin(_dance_t * 2.0 + j * 1.7)
-		var sz := maxf(ring_r * 0.012 * (0.6 + fmod(h * 13.0, 1.0)), 1.0 * px)
+		var sz := maxf(ring_r * 0.0055 * (0.6 + fmod(h * 13.0, 1.0)), 1.0 * px)
 		_dance.draw_circle(c + Vector2.from_angle(a) * rr, sz, Color(glow.lerp(Color(1.0, 0.85, 0.6), fmod(h * 3.0, 1.0)), (0.35 + 0.5 * tw) * ring_k))

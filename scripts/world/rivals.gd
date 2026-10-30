@@ -224,7 +224,7 @@ func _maintain(delta: float) -> void:
 			# Эпоха гигантских ударов: у звезды гальки мало, зато зародышей тесно —
 			# там растут слияниями. За снеговой линией их реже, там кормит галька.
 			var inner := player.position.length() < GameData.SNOW_LINE
-			_spawn_t = (rng.randf_range(60.0, 75.0) if inner else rng.randf_range(90.0, 120.0)) / Skills.stat("rival_rate")
+			_spawn_t = (rng.randf_range(75.0, 90.0) if inner else rng.randf_range(90.0, 120.0)) / Skills.stat("rival_rate")
 		# Сосед на соседней орбите: кто ближе к звезде, догоняет тебя сзади,
 		# кто дальше — ты сам нагоняешь его. Поэтому он выплывает из-за края
 		# экрана вдоль орбиты, а не сбоку.
@@ -545,7 +545,8 @@ func _events(delta: float) -> void:
 	# Пролёт олигарха: тело в десять раз крупнее проходит мимо, его притяжение
 	# сдвигает твою орбиту — к звезде или от неё, смотря с какой стороны пройдёт.
 	_olig_t -= delta
-	if km >= 10.0 and _olig_t <= 0.0:
+	# У зародыша олигарх — ты сам: тело вдесятеро крупнее было бы больше Юпитера.
+	if km >= 10.0 and _olig_t <= 0.0 and not GameState.is_embryo():
 		_olig_t = rng.randf_range(180.0, 240.0)
 		# Он на соседней орбите: ближе к звезде — обгоняет, дальше — ты его нагоняешь.
 		var axes := _orbit_axes()

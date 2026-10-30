@@ -182,7 +182,12 @@ func capture_k() -> float:
 ## Сфера Хилла на экране: где твоё притяжение сильнее прилива звезды.
 func hill_radius() -> float:
 	var r := radius * GameData.HILL_SCREEN * GameData.hill_ratio(position.length()) * Skills.stat("hill")
-	return maxf(r, pull_radius() * 1.4)
+	r = maxf(r, pull_radius() * 1.4)
+	# Крупный зародыш близко к камере: сфера Хилла не уходит за край экрана.
+	var cam := get_viewport().get_camera_2d()
+	if cam and GameState.is_embryo():
+		r = minf(r, get_viewport_rect().size.y * 0.5 / cam.zoom.y * 0.92)
+	return r
 
 
 ## Скорость убегания: медленнее неё всё слипается, оно не может отскочить.

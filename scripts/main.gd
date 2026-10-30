@@ -5,6 +5,7 @@ const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экр�
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
 const BOULDER_ZOOM := 0.99            # валун: камера дальше — гальки вокруг стали мелочью
+const EMBRYO_ZOOM := 1.9  # зародыш — почти планета: камера ближе, ты крупный на экране
 const PEBBLE_ZOOM := 1.65             # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
 # Новый этап — отъезд, как в «Степенях десяти»: камера улетает далеко, ты
 # сжимаешься в точку среди того, что вокруг, и возвращается.
@@ -453,7 +454,8 @@ func _set_world_visible(on: bool) -> void:
 func _target_zoom() -> float:
 	var start_zoom := SCREEN_RADIUS_AT_START / GameData.BASE_RADIUS
 	var z := start_zoom * pow(GameData.BASE_RADIUS / player.radius, ZOOM_GROWTH_EXP)
-	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k) * lerpf(1.0, BOULDER_ZOOM, player.boulder_k)
+	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k) * lerpf(1.0, BOULDER_ZOOM, player.boulder_k) \
+		* lerpf(1.0, EMBRYO_ZOOM, player.embryo_k)
 
 
 func _process(delta: float) -> void:
