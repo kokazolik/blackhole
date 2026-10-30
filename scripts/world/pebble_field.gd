@@ -242,6 +242,7 @@ var _planet := false  # этап планетезимали в полную си
 
 func _ready() -> void:
 	rng.randomize()
+	_bake_silhouettes()
 	var quad := QuadMesh.new()
 	quad.size = Vector2.ONE
 	_mm.transform_format = MultiMesh.TRANSFORM_2D
@@ -1014,25 +1015,76 @@ func _edge(p: Pebble, dir: Vector2) -> float:
 		return _frag_edge(p, dir)
 	if p.holes.is_empty():
 		return big
-	var u := dir.rotated(p.angle)  # в оси текстуры тела
+	var u := _to_tex(dir, p.angle)  # в оси текстуры тела
+	var rim := _sil_at(p.cell, u)
 	var last := 0.15
 	for k in 18:
-		var t := 0.15 + 0.85 * (k + 1) / 18.0
+		var t := (0.15 + 0.85 * (k + 1) / 18.0) * rim
 		if _in_hole(p, u * t):
 			return big * last
 		last = t
-	return big
+	return big * rim
+
+
+## Оси текстуры тела ↔ мир. QuadMesh в 2D перевёрнут по Y (UV.y растёт вверх
+## по экрану), поэтому шейдер видит тело зеркально: туда же зеркалим и здесь,
+## иначе выемка от удара сверху рисуется снизу, а обводка не совпадает с краем.
+static func _to_tex(v: Vector2, angle: float) -> Vector2:
+	return Vector2(v.x, -v.y).rotated(angle)
+
+
+static func _from_tex(v: Vector2, angle: float) -> Vector2:
+	var w := v.rotated(-angle)
+	return Vector2(w.x, -w.y)
+
+
+const SIL_STEPS := 64
+static var _sil := PackedFloat32Array()  # край силуэта каждой ячейки атласа по углам, в радиусах тела
+
+
+## Силуэт гальки в атласе не круг: по углам он от 0,8 до 1 радиуса. Запоминаем
+## край по 64 направлениям, чтобы обводка шла по настоящему краю, а не по кругу.
+static func _bake_silhouettes() -> void:
+	if not _sil.is_empty():
+		return
+	var img: Image = ATLAS.get_image()
+	_sil.resize(16 * SIL_STEPS)
+	_sil.fill(1.0)
+	if img == null:
+		return
+	if img.is_compressed():
+		img.decompress()
+	var cw := img.get_width() / 4.0
+	for cell in 16:
+		var o := Vector2(cell % 4, floori(cell / 4.0)) * cw + Vector2.ONE * cw * 0.5
+		for k in SIL_STEPS:
+			var u := Vector2.from_angle(TAU * k / SIL_STEPS)
+			var edge := 0.0
+			for i in 60:
+				var t := (i + 1) / 60.0 * 1.35
+				var px := o + u * t * 0.36 * cw
+				if img.get_pixelv(px.clamp(Vector2.ZERO, Vector2(img.get_size()) - Vector2.ONE)).a > 0.5:
+					edge = t
+			_sil[cell * SIL_STEPS + k] = maxf(edge, 0.5)
+
+
+## Край силуэта ячейки атласа в сторону u (оси текстуры), в радиусах тела.
+static func _sil_at(cell: int, u: Vector2) -> float:
+	if _sil.is_empty():
+		return 1.0
+	var k := posmod(roundi(u.angle() / TAU * SIL_STEPS), SIL_STEPS)
+	return _sil[clampi(cell, 0, 15) * SIL_STEPS + k]
 
 
 ## Край куска: он — ячейка исходного тела (в его радиусах frag_r), центр куска
 ## в frag_origin. Идём от центра наружу, пока не выйдем из ячейки или из тела.
 func _frag_edge(p: Pebble, dir: Vector2) -> float:
-	var u := dir.rotated(p.angle)
+	var u := _to_tex(dir, p.angle)
 	var last := 0.0
 	for k in 24:
 		var t := p.frag_ext * (k + 1) / 24.0
 		var q := p.frag_origin + u * t
-		if q.length() > 1.0:
+		if q.length() > _sil_at(p.cell, q):
 			break
 		var inside := true
 		for pl in p.frag:
@@ -1298,7 +1350,7 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 	pebbles.remove_at(index)
 	var shape := _circle()
 	var seeds: Array[Vector2] = []
-	var local_hit := (-n).rotated(p.angle)  # точка удара в осях текстуры гальки
+	var local_hit := _to_tex(-n, p.angle)  # точка удара в осях текстуры гальки
 	if parts == 2:
 		# Пополам: трещина идёт от места удара через центр.
 		var side := local_hit.orthogonal().rotated(rng.randf_range(-0.2, 0.2))
@@ -1343,7 +1395,7 @@ func _split(p: Pebble, index: int, wp: Vector2, n: Vector2, impact: float, m_oth
 		var c := Pebble.new()
 		c.r = p.r * pow(share, 1.0 / 3.0)
 		var centre := _centroid(cell)
-		var out := centre.rotated(-p.angle)
+		var out := _from_tex(centre, p.angle)
 		c.pos = wp + out * p.r - dust_field.frame_offset
 		var d := (out.normalized() * 0.6 + n * 0.4).normalized()  # разлетаются от центра и от удара
 		c.vel = d * impact * rng.randf_range(0.3, 0.6)
@@ -1537,7 +1589,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 	_puff(at, (-n).rotated(-1.1), p.material, 7)
 	# Шапка той высоты, что отвечает отколотому объёму, со стороны удара
 	# (в осях текстуры тела). Куски — её ячейки; на теле остаются ровно их следы.
-	var res := _cap_pieces((-n).rotated(p.angle), count, _cap_height(f))
+	var res := _cap_pieces(_to_tex(-n, p.angle), count, _cap_height(f))
 	var cells: Array[PackedVector2Array] = res[0]
 	for cell in cells:
 		var planes := _cell_planes(cell)
@@ -1564,7 +1616,7 @@ func _break_chunks(p: Pebble, wp: Vector2, n: Vector2, impact: float, total: flo
 		c.r = r_before * pow(piece_m / m_other, 1.0 / 3.0)
 		var centre := _centroid(cell)
 		_set_frag(c, cell, centre, visual)
-		var out := centre.rotated(-p.angle)
+		var out := _from_tex(centre, p.angle)
 		# Кусок появляется у места удара, но снаружи тебя.
 		var cp := wp + out * visual
 		var from_me := cp - player.position
