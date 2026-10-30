@@ -387,8 +387,13 @@ func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void
 		_set_core_text("Недра остыли", "хондрит", "хондры ×2", UiTheme.CHONDRULE)
 	else:
 		var t := GameState.core_temp()
-		var left := maxf(GameData.MELT_T - t, 0.0)
-		_set_core_text("Недра · греет алюминий", "%d K" % (roundi(t / 10.0) * 10), "до плавления %d K" % (roundi(left / 10.0) * 10), UiTheme.GOLD)
+		var melt := GameState.melt_t()
+		var cool := GameState.core_cooling()
+		# Лёд уносит тепло: видно, насколько выше порог из-за воды в недрах.
+		var sub := "плавится при %d K" % (roundi(melt / 10.0) * 10)
+		if cool >= 10.0:
+			sub += " · лёд +%d K" % (roundi(cool / 10.0) * 10)
+		_set_core_text("Недра · греет алюминий", "%d K" % (roundi(t / 10.0) * 10), sub, UiTheme.GOLD)
 	_swarm_heat = heat
 	_swarm_capture = capture
 	# Чем спокойнее рой, тем шире круг захвата: показываем, во сколько раз.
@@ -441,7 +446,7 @@ func _draw_core() -> void:
 	var melted := GameState.is_melted
 	var cold := not melted and GameState.core_too_cold()
 	var t := GameState.core_temp()
-	var prog := clampf((t - GameData.CORE_COLD) / (GameData.MELT_T - GameData.CORE_COLD), 0.0, 1.0)
+	var prog := clampf((t - GameData.CORE_COLD) / (GameState.melt_t() - GameData.CORE_COLD), 0.0, 1.0)
 	if GameState.is_embryo() and GameState.gas_left >= 0.0:
 		# Кольцо газа диска: тает по часовой, как песочные часы гонки.
 		var gas := GameState.gas_frac() if second_chance < 0.0 else second_chance / GameData.SECOND_CHANCE_TIME

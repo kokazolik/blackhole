@@ -237,7 +237,17 @@ func is_chondrite() -> bool:
 
 ## Плавиться уже нечем: даже у крупного тела недра не дойдут до плавления.
 func core_too_cold() -> bool:
-	return GameData.CORE_COLD + GameData.CORE_HEAT * al_heat() < GameData.MELT_T
+	return GameData.CORE_COLD + GameData.CORE_HEAT * al_heat() < melt_t()
+
+
+## Порог плавления недр: лёд и вода уносят тепло, «Холодные недра» — ещё больше.
+func melt_t() -> float:
+	return GameData.MELT_T + core_cooling()
+
+
+## На сколько кельвинов лёд, углерод и навык поднимают порог плавления.
+func core_cooling() -> float:
+	return GameData.wet_cooling(GameData.composition(materials)) + Skills.stat("cold_core")
 
 
 ## Время на этапе планетезимали идёт, алюминий остывает; недра, разогревшиеся
@@ -250,7 +260,7 @@ func tick_planet(delta: float) -> void:
 			gas_gone.emit()
 	if is_melted:
 		return
-	if core_temp() >= GameData.MELT_T:
+	if core_temp() >= melt_t():
 		_melt()
 
 
