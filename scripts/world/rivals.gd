@@ -29,8 +29,8 @@ const SPAWN_MAX := 90.0
 const REL_MIN := 0.3         # масса соседа в долях твоей
 const REL_MAX := 0.7
 const BIG_CHANCE := 0.15      # доля соседей крупнее тебя
-const EMBRYO_REL_MIN := 0.12  # соседи-зародыши: размер в долях твоего
-const EMBRYO_REL_MAX := 0.35
+const EMBRYO_REL_MIN := 0.3   # соседи-зародыши: размер в долях твоего (по массе 3–17%)
+const EMBRYO_REL_MAX := 0.55
 const STIR := 0.03           # как сильно сосед твоей массы раскачивает рой вблизи
 const SHEAR_AGE := 60.0      # через сколько секунд сосед уплывает по своей орбите
 const GROWTH := 0.0015       # соседи растут сами (едят свой рой), доля массы в секунду
@@ -223,7 +223,7 @@ func _maintain(delta: float) -> void:
 			# Эпоха гигантских ударов: у звезды гальки мало, зато зародышей тесно —
 			# там растут слияниями. За снеговой линией их реже, там кормит галька.
 			var inner := player.position.length() < GameData.SNOW_LINE
-			_spawn_t = (rng.randf_range(25.0, 35.0) if inner else rng.randf_range(45.0, 60.0)) / Skills.stat("rival_rate")
+			_spawn_t = (rng.randf_range(40.0, 55.0) if inner else rng.randf_range(60.0, 80.0)) / Skills.stat("rival_rate")
 		# Сосед на соседней орбите: кто ближе к звезде, догоняет тебя сзади,
 		# кто дальше — ты сам нагоняешь его. Поэтому он выплывает из-за края
 		# экрана вдоль орбиты, а не сбоку.
@@ -236,8 +236,8 @@ func _maintain(delta: float) -> void:
 			if rng.randf() < BIG_CHANCE:
 				rel = rng.randf_range(1.1, 2.0)
 			if GameState.is_embryo():
-				# Зародыши мельче тебя: масса Земли растёт как куб размера, и сосед в полроста
-				# прибавил бы втрое. Крупные встречи — это гигантские удары.
+				# Зародыши мельче тебя и без редких великанов: масса Земли растёт как куб
+				# размера, сосед крупнее тебя решал бы всю гонку одним слиянием.
 				rel = exp(rng.randf_range(log(EMBRYO_REL_MIN), log(EMBRYO_REL_MAX)))
 			var rv := _add("rival", at, GameState.mass * rel)
 			rv.vel = _orbit_flow(rv)
@@ -464,7 +464,7 @@ func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 			pebble_field.spawn_fragments(at, (at - player.position).normalized().orthogonal(), 10, rv.mass * (1.0 - keep), "", 0.25, true)
 		GameState.giant_impact(rel_m, slant, at)
 	if GameState.is_embryo() and Skills.stat("devour") > 0.0 and rv.kind == "rival":
-		_spawn_t = minf(_spawn_t, 10.0)  # «Пожиратель»: следующий сосед уже на подходе
+		_spawn_t = minf(_spawn_t, 20.0)  # «Пожиратель»: следующий сосед уже на подходе
 	merged.emit(at, rv.kind)
 	_remove(rv)
 
