@@ -73,7 +73,10 @@ func absorb(level: int, material: String, at: Vector2, grains := 1) -> void:
 func absorb_mass(base_mass: float, base_value: float, material: String, at: Vector2) -> void:
 	var gained_mass: float = base_mass * body_bonus("mass")
 	mass += gained_mass
-	materials[material] = materials.get(material, 0.0) + gained_mass
+	if is_melted:
+		_add_frozen(gained_mass)
+	else:
+		materials[material] = materials.get(material, 0.0) + gained_mass
 	if is_planet():
 		eat_zone(player_position.length(), gained_mass)
 	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
@@ -81,6 +84,41 @@ func absorb_mass(base_mass: float, base_value: float, material: String, at: Vect
 	mass_changed.emit(mass)
 	absorbed.emit(at, material, gained)
 	_check_stage()
+
+
+## Присоединить тело смешанного состава (сосед-планетезималь): масса делится
+## по долям mix, а не уходит целиком в один материал.
+func absorb_mix(base_mass: float, base_value: float, mix: Dictionary, at: Vector2) -> void:
+	var total := 0.0
+	var top := ""
+	for key in mix:
+		total += float(mix[key])
+		if top == "" or float(mix[key]) > float(mix[top]):
+			top = key
+	if total <= 0.0:
+		return
+	var gained_mass: float = base_mass * body_bonus("mass")
+	mass += gained_mass
+	if is_melted:
+		_add_frozen(gained_mass)
+	else:
+		for key in mix:
+			materials[key] = materials.get(key, 0.0) + gained_mass * float(mix[key]) / total
+	if is_planet():
+		eat_zone(player_position.length(), gained_mass)
+	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
+	add_currency(gained)
+	mass_changed.emit(mass)
+	absorbed.emit(at, top, gained)
+	_check_stage()
+
+
+## После плавления состав застыл: новое вещество растворяется в мантии и коре
+## в тех же долях, тип тела больше не меняется.
+func _add_frozen(gained_mass: float) -> void:
+	var shares := GameData.composition(materials)
+	for key in shares:
+		materials[key] = materials.get(key, 0.0) + gained_mass * float(shares[key])
 
 
 func is_pebble() -> bool:
@@ -174,6 +212,8 @@ func regrow(delta: float) -> void:
 
 ## Сублимация льда внутри снеговой линии: уходит только лёд.
 func sublimate_ice(amount: float) -> void:
+	if is_melted:
+		return  # лёд расплавленного тела — под корой, состав застыл
 	var ice: float = materials.get("ice", 0.0)
 	amount = minf(amount, ice)
 	if amount <= 0.0:

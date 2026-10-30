@@ -2341,10 +2341,14 @@ func start_flow() -> void:
 
 ## Куски после удара о соседа: разлетаются от точки удара, их можно доесть.
 ## own — твои куски («Куча щебня» тянет их обратно).
+## material == "" — куски смешанного состава, как вещество полосы вокруг.
 func spawn_fragments(at: Vector2, dir: Vector2, count: int, total_mass: float, material: String, size: float, own := false) -> void:
 	count = mini(count, MAX_PEBBLES - pebbles.size())
 	if count <= 0:
 		return
+	var mixed := material == ""
+	if mixed:
+		material = _pick_material(at.length())
 	_debris(at, dir, player.escape_speed(), material, 10)
 	for k in count:
 		var c := Pebble.new()
@@ -2353,7 +2357,7 @@ func spawn_fragments(at: Vector2, dir: Vector2, count: int, total_mass: float, m
 		c.pos = at + d * c.r * rng.randf_range(0.5, 2.0) - dust_field.frame_offset
 		c.vel = d * player.escape_speed() * rng.randf_range(0.4, 1.2)
 		c.chunk_mass = total_mass / count
-		c.material = material
+		c.material = _pick_material(at.length()) if mixed else material
 		c.cell = GameData.MATERIAL_ORDER.find(material) * 4 + rng.randi() % 4
 		c.angle = rng.randf() * TAU
 		c.spin = rng.randf_range(-2.0, 2.0)

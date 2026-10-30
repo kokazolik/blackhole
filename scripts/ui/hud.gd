@@ -637,8 +637,11 @@ func _refresh() -> void:
 	for key in _material_labels:
 		_material_labels[key].text = "● %s %d%%" % [GameData.MATERIALS[key].name, roundi(shares[key] * 100.0)]
 	var type := GameState.body_type()
+	# После плавления тип застыл (в старых сохранениях состав мог уплыть).
+	if GameState.is_melted and GameState.melt_type != "" and GameData.planet_type(type) != GameState.melt_type:
+		type = GameState.melt_type
 	var body: Dictionary = GameData.BODY_TYPES[type]
-	_body_label.text = body.name
+	_body_label.text = body.name + (" · застыло" if GameState.is_melted else "")
 	var body_col: Color = GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT
 	if body_col != _body_col:
 		# Смена цвета темы пересчитывает стиль подписи: только когда он и правда другой.

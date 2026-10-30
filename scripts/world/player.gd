@@ -274,7 +274,7 @@ func _update_heat(delta: float) -> void:
 	ice_vapor = 0.0
 	# Вспышка звезды отодвигает снеговую линию: лёд тает и чуть дальше неё.
 	var inside := GameData.SNOW_LINE * (1.0 + 0.25 * Star.flare) - GameData.SNOW_LINE_WIDTH * 0.5 - dist
-	if pebble_k > 0.5 and inside > 0.0:
+	if pebble_k > 0.5 and inside > 0.0 and not GameState.is_melted:
 		var ice: float = GameState.materials.get("ice", 0.0)
 		ice_vapor = ice * ICE_SUBLIMATION * clampf(inside / 2000.0, 0.15, 1.0)
 		# У планетезимали тает только поверхность: лёд в недрах прячется под коркой,

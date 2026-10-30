@@ -320,8 +320,7 @@ func _check_player(rv: Rival) -> void:
 	# Приливный разрыв: мелкий сосед, прошедший совсем близко, рвётся на куски.
 	if Skills.stat("tidal") > 0.0 and rv.kind != "oligarch" and rv.mass < GameState.mass * 0.8 \
 			and d < (player.radius + rv.r) * 1.7 and d > (player.radius + rv.r):
-		var mat := _rival_material(rv)
-		pebble_field.spawn_fragments(c, -to.normalized(), 10, rv.mass * 0.5, mat, 0.3, true)
+		pebble_field.spawn_fragments(c, -to.normalized(), 10, rv.mass * 0.5, "", 0.3, true)
 		shattered.emit(c)
 		_remove(rv)
 		return
@@ -365,9 +364,14 @@ func _check_player(rv: Rival) -> void:
 	rv.vel += n * j * (1.0 - share)
 
 
-func _rival_material(rv: Rival) -> String:
-	var w := GameData.material_weights((rv.pos + dust_field.frame_offset).length())
-	return GameData.pick_weighted(w, rng)
+## Состав соседа: он вырос из того же вещества полосы, что и твой рой, — смесь
+## по долям зоны с учётом твоей избирательности. Раньше вся его масса уходила
+## в один случайный материал, и одно слияние ломало состав.
+func _rival_mix(rv: Rival) -> Dictionary:
+	var w := GameData.material_weights(world_pos(rv).length())
+	for key in w:
+		w[key] *= Skills.stat("affinity_" + key)
+	return w
 
 
 func _merge(rv: Rival, at: Vector2) -> void:
@@ -375,8 +379,7 @@ func _merge(rv: Rival, at: Vector2) -> void:
 	var rel := clampf(rv.r / player.radius, 0.2, 2.0)
 	var value := PebbleField.VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, PebbleField.VALUE_MASS_EXP) \
 		* pow(rel / 0.2, 1.5) * GameData.boulder_value(GameState.mass) * GameData.PLANET_VALUE
-	var mat := _rival_material(rv)
-	GameState.absorb_mass(rv.mass * keep, value, mat, at)
+	GameState.absorb_mix(rv.mass * keep, value, _rival_mix(rv), at)
 	pebble_field.heat = minf(pebble_field.heat + 0.25, 1.0)
 	if rv.kind == "twin":
 		GameState.add_chondrules(3, at)
@@ -387,7 +390,7 @@ func _merge(rv: Rival, at: Vector2) -> void:
 ## Ты сильнее: сосед раскалывается, обломки летят семейством вдоль орбиты.
 func _shatter(rv: Rival, at: Vector2, n: Vector2, impact: float) -> void:
 	var c := world_pos(rv)
-	pebble_field.spawn_fragments(c, n, 14, rv.mass * 0.6, _rival_material(rv), 0.32)
+	pebble_field.spawn_fragments(c, n, 14, rv.mass * 0.6, "", 0.32)
 	GameState.chip(GameState.mass * 0.02, at)
 	shattered.emit(c)
 	_remove(rv)
@@ -415,7 +418,7 @@ func _crater(rv: Rival, at: Vector2, n: Vector2, q: float) -> void:
 		theirs = 0.0
 	GameState.chip(mine, at)
 	rv.mass -= theirs
-	pebble_field.spawn_fragments(at, n.orthogonal() * (1.0 if rng.randf() < 0.5 else -1.0), 6, (mine + theirs) * 0.6, _rival_material(rv), 0.2)
+	pebble_field.spawn_fragments(at, n.orthogonal() * (1.0 if rng.randf() < 0.5 else -1.0), 6, (mine + theirs) * 0.6, "", 0.2)
 	grazed.emit(at)
 
 
