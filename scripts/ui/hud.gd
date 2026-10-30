@@ -31,7 +31,18 @@ var _zone_label: Label
 var _zone_desc: Label
 var _zone_name := ""
 var _wind_label: Label
-var _planet_label: Label  # планетезималь: убегание, рой, полоса, алюминий
+var _planet_label: Label  # планетезималь: рой (пока строкой)
+var _core_box: HBoxContainer  # медальон недр: разрез тела и подписи
+var _core_icon: Control
+var _core_title: Label
+var _core_value: Label
+var _core_sub: Label
+var _core_flash := 0.0   # вспышка в момент плавления
+var _core_was_melted := false
+var _map_depl := -1.0    # выеденность кормовой полосы на карте
+var _map_temp := -1.0    # жар поверхности: им светится метка на карте (планетезималь)
+var _swarm_heat := 0.0
+var _swarm_capture := 1.0
 var _disc_map := Control.new()  # полоска диска от звезды наружу: где какое вещество
 var _map_dist := 0.0
 var _map_rings := 0.0  # видимость колец-ловушек на карте (появляются у гальки)
@@ -39,6 +50,9 @@ var _map_tex: ImageTexture
 var _map_drawn := Vector2(-1.0, -1.0)  # положение метки и видимость колец при последней отрисовке
 const MAP_RANGE := Vector2(2600.0, 12500.0)
 const MAP_SIZE := Vector2(250.0, 36.0)
+const CORE_R := 28.0     # радиус медальона недр
+const SWARM_ORBIT := Vector2(8.0, 22.0)  # орбита роя за кольцом: при захвате ×1.3 и ×6
+const FEED_DOTS := 5     # точки корма на полосе карты
 var _heat_time := 0.0
 var _body_desc: Label
 var _tree_button: Button
@@ -158,13 +172,35 @@ func _build() -> void:
 	wind_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wind_pad.add_child(_wind_label)
 	zone_box.add_child(wind_pad)
-	_planet_label = _label(14, Color(0.85, 0.9, 1.0), UiTheme.FONT_SEMI)
+	# Планетезималь: медальон недр — разрез твоего тела.
+	_core_box = HBoxContainer.new()
+	_core_box.add_theme_constant_override("separation", 10)
+	_core_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_core_box.visible = false
+	var core_pad := MarginContainer.new()
+	core_pad.add_theme_constant_override("margin_top", 10)
+	core_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	core_pad.add_child(_core_box)
+	zone_box.add_child(core_pad)
+	_core_icon = Control.new()
+	_core_icon.custom_minimum_size = Vector2.ONE * (CORE_R + 6.0 + SWARM_ORBIT.y + 6.0) * 2.0
+	_core_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_core_icon.draw.connect(_draw_core)
+	_core_box.add_child(_core_icon)
+	var core_text := VBoxContainer.new()
+	core_text.alignment = BoxContainer.ALIGNMENT_CENTER
+	core_text.add_theme_constant_override("separation", -3)
+	core_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_core_box.add_child(core_text)
+	_core_title = _label(15, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	core_text.add_child(_core_title)
+	_core_value = _label(24, UiTheme.GOLD, UiTheme.FONT_NUMBERS)
+	core_text.add_child(_core_value)
+	_core_sub = _label(12, UiTheme.TEXT_DIM, UiTheme.FONT_SEMI)
+	core_text.add_child(_core_sub)
+	_planet_label = _label(12, Color(0.85, 0.9, 1.0), UiTheme.FONT_SEMI)
 	_planet_label.visible = false
-	var planet_pad := MarginContainer.new()
-	planet_pad.add_theme_constant_override("margin_top", 6)
-	planet_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	planet_pad.add_child(_planet_label)
-	zone_box.add_child(planet_pad)
+	core_text.add_child(_planet_label)
 
 	# Сверху по центру: стадия, прогресс до следующей, состав тела.
 	var top := VBoxContainer.new()
@@ -331,28 +367,160 @@ func set_wind(drift: Vector2, pos: Vector2, pebble_k: float, shadow := 0.0) -> v
 		_set_wind_text("Газ выносит к кольцу: %d м/с" % roundi(-radial), Color(0.7, 1.0, 0.75))
 
 
-## Планетезималь: порог слипания, раскачка роя, выеденность полосы, нагрев недр.
+## Планетезималь: медальон недр, раскачка роя, выеденность полосы на карте.
 func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void:
+	_core_box.visible = on
 	_planet_label.visible = on
 	if not on:
 		return
-	var lines := PackedStringArray()
-	lines.append("Убегание: %s м/с" % _num(GameData.escape_ms(GameState.mass)))
-	# Чем спокойнее рой, тем шире круг захвата: показываем, во сколько раз.
-	if heat < 0.3:
-		lines.append("Рой спокоен · захват ×%.1f" % capture)
-	else:
-		lines.append("Рой взбудоражен %d%% · захват ×%.1f" % [roundi(heat * 100.0), capture])
-	lines.append("Кормовая полоса выедена: %d%%" % roundi(depletion * 100.0))
+	if absf(depletion - _map_depl) > 0.01:
+		_map_depl = depletion
+		_disc_map.queue_redraw()
+	if GameState.is_melted and not _core_was_melted:
+		_core_flash = 1.0
+	_core_was_melted = GameState.is_melted
 	if GameState.is_melted:
-		lines.append("Недра расплавились: ядро %d%% железа" % roundi(GameState.core_share * 100.0))
+		_set_core_text("Недра расплавились", "ядро %d%%" % roundi(GameState.core_share * 100.0), "железо стекло к центру", UiTheme.GOLD)
 	elif GameState.core_too_cold():
-		lines.append("Недра остыли: ты хондрит · хондры ×2")
+		_set_core_text("Недра остыли", "хондрит", "хондры ×2", UiTheme.CHONDRULE)
 	else:
-		lines.append("Недра: %d K (греет алюминий) · плавятся при %d K" % [roundi(GameState.core_temp()), roundi(GameData.MELT_T)])
-	var text := "\n".join(lines)
-	if _planet_label.text != text:
-		_planet_label.text = text
+		var t := GameState.core_temp()
+		var left := maxf(GameData.MELT_T - t, 0.0)
+		_set_core_text("Недра · греет алюминий", "%d K" % (roundi(t / 10.0) * 10), "до плавления %d K" % (roundi(left / 10.0) * 10), UiTheme.GOLD)
+	_swarm_heat = heat
+	_swarm_capture = capture
+	# Чем спокойнее рой, тем шире круг захвата: показываем, во сколько раз.
+	var swarm := "рой спокоен · захват ×%.1f" % capture if heat < 0.3 \
+		else "рой взбудоражен %d%% · захват ×%.1f" % [roundi(heat * 100.0), capture]
+	if _planet_label.text != swarm:
+		_planet_label.text = swarm
+		_planet_label.add_theme_color_override("font_color", Color(0.5, 0.92, 0.82).lerp(Color(1.0, 0.65, 0.4), clampf(heat, 0.0, 1.0)))
+
+
+func _set_core_text(title: String, value: String, sub: String, col: Color) -> void:
+	if _core_title.text != title:
+		_core_title.text = title
+	if _core_value.text != value:
+		_core_value.text = value
+		_core_value.add_theme_color_override("font_color", col)
+	if _core_sub.text != sub:
+		_core_sub.text = sub
+
+
+## Медальон недр: разрез тела. Пока греется — светящееся ядро и кольцо с искрой,
+## ползущей к температуре плавления; расплавился — железный шар в центре;
+## остыл — хондры в толще камня.
+func _draw_core() -> void:
+	var ci := _core_icon
+	var c := ci.size * 0.5
+	var r := CORE_R
+	var ring := r + 6.0
+	ci.draw_arc(c, ring, 0.0, TAU, 64, Color(1, 1, 1, 0.12), 3.0, true)
+	var melted := GameState.is_melted
+	var cold := not melted and GameState.core_too_cold()
+	var t := GameState.core_temp()
+	var prog := clampf((t - GameData.CORE_COLD) / (GameData.MELT_T - GameData.CORE_COLD), 0.0, 1.0)
+	if melted:
+		ci.draw_arc(c, ring, 0.0, TAU, 64, Color(UiTheme.GOLD, 0.9), 3.0, true)
+	elif cold:
+		ci.draw_arc(c, ring, 0.0, TAU, 64, Color(UiTheme.CHONDRULE, 0.8), 3.0, true)
+	else:
+		# Кольцо от холодного синего к раскалённому: путь до плавления.
+		var steps := maxi(int(48.0 * prog), 1)
+		var a0 := -PI * 0.5
+		for i in steps:
+			var f0 := float(i) / steps * prog
+			var f1 := float(i + 1) / steps * prog
+			ci.draw_arc(c, ring, a0 + f0 * TAU, a0 + f1 * TAU + 0.02, 3, _core_color(f1), 3.0, true)
+		var tip := c + Vector2.from_angle(a0 + prog * TAU) * ring
+		ci.draw_circle(tip, 6.0, Color(1.0, 0.75, 0.4, 0.25))
+		ci.draw_circle(tip, 3.2, Color(1.0, 0.95, 0.8))
+		UiTheme.draw_spark(ci, c + Vector2(0, -ring), 5.0, Color(UiTheme.GOLD, 0.9))
+	_draw_swarm(c, ring)
+	# Каменная кора: тёмный диск со светлым бликом и вкраплениями.
+	ci.draw_circle(c, r, Color(0.24, 0.18, 0.14))
+	ci.draw_circle(c + Vector2(-0.15, -0.15) * r, r * 0.82, Color(0.36, 0.29, 0.23))
+	ci.draw_circle(c + Vector2(-0.3, -0.3) * r, r * 0.45, Color(0.45, 0.37, 0.3, 0.6))
+	for i in 26:
+		var a := i * 2.39996
+		var d := r * 0.92 * sqrt(fposmod(i * 0.377, 1.0))
+		var dark := i % 3 != 0
+		ci.draw_circle(c + Vector2.from_angle(a) * d, 0.9 + (i % 4) * 0.45,
+			Color(0.12, 0.09, 0.07, 0.45) if dark else Color(0.7, 0.62, 0.52, 0.35))
+	var pulse := 0.5 + 0.5 * sin(_time * 2.4)
+	if melted:
+		# Железо собралось в центре; вокруг ещё светится остывающая магма.
+		var fe := r * (0.3 + 0.35 * clampf(GameState.core_share / 0.4, 0.0, 1.0))
+		ci.draw_circle(c, fe * 1.5, Color(1.0, 0.55, 0.25, 0.18 + 0.08 * pulse))
+		ci.draw_circle(c, fe, Color(0.35, 0.39, 0.48))
+		ci.draw_circle(c + Vector2(-0.1, -0.1) * fe, fe * 0.82, Color(0.62, 0.67, 0.76))
+		ci.draw_circle(c + Vector2(-0.35, -0.35) * fe, fe * 0.3, Color(0.95, 0.97, 1.0, 0.9))
+		# Капли железа ещё тонут к центру.
+		for i in 4:
+			var ph := fposmod(_time * 0.25 + i * 0.25, 1.0)
+			var a := i * 1.7 + 0.4
+			var p := c + Vector2.from_angle(a) * lerpf(r * 0.85, fe, ph)
+			ci.draw_circle(p, 1.8, Color(0.75, 0.8, 0.88, 1.0 - ph))
+	elif cold:
+		for i in 8:
+			var a := i * 2.1 + 0.3
+			var d := r * (0.2 + 0.6 * fposmod(i * 0.53, 1.0))
+			UiTheme.draw_chondrule(ci, c + Vector2.from_angle(a) * d, 2.6 + (i % 3) * 0.9)
+	else:
+		# Ядро греется: свечение растёт с температурой и дышит.
+		var glow := lerpf(0.25, 0.75, prog) * r
+		var col := _core_color(prog)
+		for k in 6:
+			var f := 1.0 - k / 6.0
+			ci.draw_circle(c, glow * (0.35 + 0.65 * f) * (1.0 + 0.05 * pulse), Color(col, 0.12 + 0.1 * (1.0 - f)))
+		ci.draw_circle(c, glow * 0.3, Color(1.0, 0.92, 0.7, 0.6 + 0.3 * prog))
+		# Жилки жара расходятся от ядра.
+		for k in 6:
+			var a := k * 1.047 + _time * 0.1
+			var pts := PackedVector2Array()
+			for j in 5:
+				var f := j / 4.0
+				pts.append(c + Vector2.from_angle(a + 0.35 * f) * lerpf(glow * 0.4, r * 0.85, f))
+			ci.draw_polyline(pts, Color(1.0, 0.65, 0.3, 0.25 + 0.35 * prog), 1.2, true)
+	ci.draw_arc(c, r, 0.0, TAU, 48, Color(0, 0, 0, 0.45), 1.5, true)
+	if _core_flash > 0.0:
+		ci.draw_circle(c, ring + 8.0 * (1.0 - _core_flash), Color(1.0, 0.9, 0.6, 0.5 * _core_flash))
+
+
+## Рой — камешки на орбите вокруг медальона. Радиус орбиты — круг захвата.
+## Спокойный рой кружит ровно; взбудораженный — орбиты вытягиваются, камни
+## дёргаются и оставляют рыжие штрихи.
+func _draw_swarm(c: Vector2, ring: float) -> void:
+	var ci := _core_icon
+	var heat := clampf(_swarm_heat, 0.0, 1.0)
+	var col := UiTheme.CHONDRULE.lerp(Color(1.0, 0.6, 0.32), heat)
+	var k := clampf((_swarm_capture - 1.3) / 4.7, 0.0, 1.0)
+	var rr := ring + lerpf(SWARM_ORBIT.x, SWARM_ORBIT.y, k)
+	var n := 40
+	for i in n:
+		if i % 2 == 0:
+			var a := TAU * i / n
+			ci.draw_arc(c, rr, a, a + TAU / n, 2, Color(col, 0.35), 1.0, true)
+	var spin := _time * lerpf(0.35, 0.9, heat)
+	for i in 12:
+		var a := TAU * i / 12.0 + spin
+		var e := heat * (0.12 + 0.08 * sin(i * 1.7))
+		var d := rr * (1.0 + e * sin(a * 2.0 + i))
+		var jit := Vector2(sin(_time * 13.0 + i * 5.0), cos(_time * 11.0 + i * 7.0)) * 1.8 * heat
+		var p := c + Vector2.from_angle(a) * d + jit
+		if heat > 0.1:
+			var tang := Vector2.from_angle(a + PI * 0.5)
+			ci.draw_line(p, p - tang * 8.0 * heat, Color(col, 0.55), 1.3, true)
+		var pr := 1.7 + (i % 3) * 0.5
+		ci.draw_circle(p, pr, Color(0.84, 0.77, 0.67) if i % 3 else Color(0.67, 0.59, 0.5))
+
+
+## Цвет нагрева недр: от холодного синего через багровый к белому калению.
+static func _core_color(f: float) -> Color:
+	var stops := [Color(0.35, 0.5, 0.9), Color(0.8, 0.25, 0.15), Color(1.0, 0.55, 0.2), Color(1.0, 0.95, 0.75)]
+	var x := clampf(f, 0.0, 1.0) * (stops.size() - 1)
+	var i := mini(int(x), stops.size() - 2)
+	return (stops[i] as Color).lerp(stops[i + 1], x - i)
 
 
 static func _num(v: float) -> String:
@@ -367,7 +535,14 @@ func _set_wind_text(text: String, col: Color) -> void:
 
 
 func set_temperature(temp: float) -> void:
-	_heat_label.visible = temp > GameData.SPACE_TEMP + 100.0
+	# У планетезимали жар показывает метка на карте диска; строка — только в опасности.
+	var on_map := _core_box.visible
+	if on_map and absf(temp - _map_temp) > 5.0:
+		_map_temp = temp
+		_disc_map.queue_redraw()
+	elif not on_map:
+		_map_temp = -1.0
+	_heat_label.visible = temp > (GameData.GLOW_TEMP if on_map else GameData.SPACE_TEMP + 100.0)
 	if not _heat_label.visible:
 		return
 	var state := "нагрев"
@@ -529,10 +704,37 @@ func _draw_disc_map() -> void:
 		for ring in GameData.PRESSURE_RINGS:
 			var rx := _map_x(ring)
 			_disc_map.draw_circle(Vector2(rx, y + h * 0.5), 2.2, Color(0.9, 1.0, 0.75, 0.8 * _map_rings))
+	# Кормовая полоса планетезимали: подсвечена вокруг метки, точки корма гаснут.
+	if _core_box.visible and _map_depl >= 0.0:
+		var bin := GameData.zone_bin(_map_dist)
+		var x0 := _map_x(bin * GameData.ZONE_BIN)
+		var x1 := _map_x((bin + 1) * GameData.ZONE_BIN)
+		var band := Rect2(x0, y - 2, maxf(x1 - x0, 4.0), h + 4)
+		_disc_map.draw_rect(band, Color(UiTheme.GOLD, 0.22))
+		_disc_map.draw_rect(band, Color(UiTheme.GOLD, 0.85), false, 1.0)
+		var left := ceili((1.0 - _map_depl) * FEED_DOTS - 0.001)
+		for i in FEED_DOTS:
+			var dx := band.position.x + band.size.x * (i + 0.5) / FEED_DOTS
+			var lit := i < left
+			_disc_map.draw_circle(Vector2(dx, y + h * 0.5), 1.6 if lit else 1.1,
+				UiTheme.GOLD if lit else Color(1, 1, 1, 0.25))
 	# Ты здесь.
 	var px := _map_x(_map_dist)
+	var mark_col := UiTheme.GOLD
+	if _map_temp > 0.0:
+		# Зона испарения у звезды и метка, светящаяся жаром поверхности.
+		var sub := _map_x(GameData.sublimation_distance())
+		for i in 6:
+			var fi := i / 6.0
+			_disc_map.draw_rect(Rect2(sub * fi, y - 2, sub / 6.0 + 0.5, h + 4), Color(1.0, 0.25, 0.12, 0.75 * (1.0 - fi)))
+		var f := clampf((_map_temp - GameData.SPACE_TEMP) / (GameData.SUBLIMATION_TEMP - GameData.SPACE_TEMP), 0.0, 1.0)
+		mark_col = UiTheme.GOLD.lerp(Color(1.0, 0.5, 0.2), clampf(f * 2.0, 0.0, 1.0)).lerp(Color(1.0, 0.97, 0.9), clampf(f * 2.0 - 1.0, 0.0, 1.0))
+		var glow := 7.0 + 12.0 * f
+		for k in 4:
+			_disc_map.draw_circle(Vector2(px, y + h * 0.5), glow * (1.0 - k * 0.22), Color(mark_col, 0.1 + 0.05 * k))
+		_disc_map.draw_string(font, Vector2(px + 7, y - 2), "%d K" % (roundi(_map_temp / 10.0) * 10), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, mark_col)
 	var marker := PackedVector2Array([Vector2(px, y - 1), Vector2(px - 5, y - 9), Vector2(px + 5, y - 9)])
-	_disc_map.draw_colored_polygon(marker, UiTheme.GOLD)
+	_disc_map.draw_colored_polygon(marker, mark_col)
 
 
 func _draw_currency_icon() -> void:
@@ -652,6 +854,9 @@ func _process(delta: float) -> void:
 			_fps_t = 0.0
 			_fps_worst = 0.0
 	_currency_icon.queue_redraw()
+	if _core_box.visible:
+		_core_flash = maxf(_core_flash - delta * 0.8, 0.0)
+		_core_icon.queue_redraw()
 	# Валюта «докручивается» до нового значения, полоса стадии плавно растёт.
 	var target := GameState.currency
 	if absf(target - _shown_currency) < 0.05:

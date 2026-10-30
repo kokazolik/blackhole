@@ -461,6 +461,7 @@ func _process(delta: float) -> void:
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
 	hud.set_planet(GameState.is_planet() and player.planet_k > 0.5, pebble_field.heat, player.capture_k(), GameState.zone_depletion(player.position.length()))
+	joystick.escape_frac = player.escape_speed() / player.max_speed() if GameState.is_planet() and player.planet_k > 0.5 else -1.0
 	_check_tips()
 
 
