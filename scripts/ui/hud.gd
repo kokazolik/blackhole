@@ -31,6 +31,7 @@ var _zone_label: Label
 var _zone_desc: Label
 var _zone_name := ""
 var _wind_label: Label
+var _planet_label: Label  # планетезималь: убегание, рой, полоса, алюминий
 var _disc_map := Control.new()  # полоска диска от звезды наружу: где какое вещество
 var _map_dist := 0.0
 var _map_rings := 0.0  # видимость колец-ловушек на карте (появляются у гальки)
@@ -157,6 +158,13 @@ func _build() -> void:
 	wind_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wind_pad.add_child(_wind_label)
 	zone_box.add_child(wind_pad)
+	_planet_label = _label(14, Color(0.85, 0.9, 1.0), UiTheme.FONT_SEMI)
+	_planet_label.visible = false
+	var planet_pad := MarginContainer.new()
+	planet_pad.add_theme_constant_override("margin_top", 6)
+	planet_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	planet_pad.add_child(_planet_label)
+	zone_box.add_child(planet_pad)
 
 	# Сверху по центру: стадия, прогресс до следующей, состав тела.
 	var top := VBoxContainer.new()
@@ -309,7 +317,7 @@ func set_wind(drift: Vector2, pos: Vector2, pebble_k: float, shadow := 0.0) -> v
 	if absf(state.x - _map_drawn.x) > 0.5 or absf(state.y - _map_drawn.y) > 0.02:
 		_map_drawn = state
 		_disc_map.queue_redraw()
-	_wind_label.visible = pebble_k > 0.5
+	_wind_label.visible = pebble_k > 0.5 and not GameState.is_planet()
 	if not _wind_label.visible:
 		return
 	var radial := -drift.dot(pos.normalized())  # > 0 — сносит к звезде
@@ -321,6 +329,28 @@ func set_wind(drift: Vector2, pos: Vector2, pebble_k: float, shadow := 0.0) -> v
 		_set_wind_text("Встречный ветер: снос к звезде %d м/с" % roundi(radial), Color(0.75, 0.88, 1.0))
 	else:
 		_set_wind_text("Газ выносит к кольцу: %d м/с" % roundi(-radial), Color(0.7, 1.0, 0.75))
+
+
+## Планетезималь: порог слипания, раскачка роя, выеденность полосы, нагрев недр.
+func set_planet(on: bool, heat: float, depletion: float) -> void:
+	_planet_label.visible = on
+	if not on:
+		return
+	var lines := PackedStringArray()
+	lines.append("Убегание: %s м/с" % _num(GameData.escape_ms(GameState.mass)))
+	lines.append("Рой: спокоен" if heat < 0.3 else "Рой раскачан: %d%%" % roundi(heat * 100.0))
+	lines.append("Полоса выедена: %d%%" % roundi(depletion * 100.0))
+	if GameState.is_melted:
+		lines.append("Расплавлен: ядро %d%% железа" % roundi(GameState.core_share * 100.0))
+	else:
+		lines.append("Алюминий-26: нагрев %d%%" % roundi(GameState.al_heat() * 100.0))
+	var text := "\n".join(lines)
+	if _planet_label.text != text:
+		_planet_label.text = text
+
+
+static func _num(v: float) -> String:
+	return "%.1f" % v if v < 10.0 else str(roundi(v))
 
 
 ## Смена цвета пересобирает тему подписи: делаем это, только когда цвет и правда меняется.
@@ -352,10 +382,11 @@ func set_temperature(temp: float) -> void:
 
 ## Отдельная строка: лёд тает внутри снеговой линии.
 func set_ice_vapor(rate: float) -> void:
-	_ice_label.visible = rate > 0.0
-	if rate <= 0.0:
+	var pct := rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0
+	_ice_label.visible = pct >= 0.05
+	if not _ice_label.visible:
 		return
-	_ice_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % (rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0)
+	_ice_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % pct
 
 
 func _label(font_size: int, color: Color, font: Font = null) -> Label:
@@ -433,7 +464,9 @@ func _refresh() -> void:
 		_body_col = body_col
 		_body_label.add_theme_color_override("font_color", body_col)
 	_body_desc.text = "· " + body.desc
-	if GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
+	if GameState.is_planet():
+		_body_desc.text = "· планетезимали: " + GameData.PLANET_MATERIAL[GameData.planet_type(type)].text
+	elif GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
 		_body_desc.text = "· валуну: " + GameData.BOULDER_MATERIAL[type].text
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()

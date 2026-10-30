@@ -9,6 +9,7 @@ signal skills_changed
 signal absorbed(position: Vector2, material: String, gained: float)
 signal stage_reached(index: int)  # впервые достигнута новая стадия (Галька, ...)
 signal chipped(position: Vector2, lost: float)  # удар: от тела откололись осколки
+signal melted  # планетезималь расплавилась от алюминия-26: железо ушло в ядро
 
 const SAVE_PATH := "user://save.json"
 const SAVE_VERSION := 1
@@ -33,6 +34,12 @@ var heal_pool := 0.0  # отколотая масса, которая ещё п�
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 var tree_view: Array = []  # где игрок оставил камеру книги: [x, y, масштаб] точки в центре
 var tree_seen = []  # узлы, что игрок уже видел в книге; null — старое сохранение
+# Этап «Планетезималь»:
+var planet_time := 0.0   # секунд на этапе: по ним остывает алюминий-26
+var is_melted := false   # недра расплавились, железо ушло в ядро
+var core_share := 0.0    # доля металла, ушедшая в ядро при плавлении
+var zone_eaten := {}     # кольцо диска (GameData.zone_bin) → сколько вещества из него съедено
+var embryo_path := ""    # путь после планетезимали (GameData.EMBRYO_PATHS), записан навсегда
 
 
 func _ready() -> void:
@@ -66,6 +73,8 @@ func absorb_mass(base_mass: float, base_value: float, material: String, at: Vect
 	var gained_mass: float = base_mass * body_bonus("mass")
 	mass += gained_mass
 	materials[material] = materials.get(material, 0.0) + gained_mass
+	if is_planet():
+		eat_zone(player_position.length(), gained_mass)
 	var gained: float = base_value * Skills.stat("value") * Skills.stat("value_mul") * (1.0 if is_boulder() else Skills.stat("pebble_value_mul")) * body_bonus("value")
 	add_currency(gained)
 	mass_changed.emit(mass)
@@ -79,6 +88,40 @@ func is_pebble() -> bool:
 
 func is_boulder() -> bool:
 	return stage >= GameData.BOULDER_STAGE
+
+
+func is_planet() -> bool:
+	return stage >= GameData.PLANETESIMAL_STAGE
+
+
+## Сколько кормовой полосы на этом расстоянии уже выедено, 0..1.
+func zone_depletion(distance: float) -> float:
+	var bin := str(GameData.zone_bin(distance))
+	return clampf(float(zone_eaten.get(bin, 0.0)) / (GameData.zone_capacity(distance) * Skills.stat("zone")), 0.0, 1.0)
+
+
+func eat_zone(distance: float, amount: float) -> void:
+	var bin := str(GameData.zone_bin(distance))
+	zone_eaten[bin] = float(zone_eaten.get(bin, 0.0)) + amount
+
+
+## Жар алюминия-26: 1 в начале этапа, вдвое меньше каждые AL_HALF (навык замедляет).
+func al_heat() -> float:
+	return GameData.al_heat(planet_time / Skills.stat("al_slow"))
+
+
+## Время на этапе планетезимали идёт, алюминий остывает; тело крупнее порога,
+## пока жар не угас, плавится.
+func tick_planet(delta: float) -> void:
+	planet_time += delta
+	if is_melted:
+		return
+	var need := GameData.MELT_KM / Skills.stat("al_slow")
+	if GameData.planet_km(mass) >= need and al_heat() >= GameData.MELT_HEAT:
+		is_melted = true
+		core_share = float(GameData.composition(materials).get("metal", 0.0))
+		save_game()
+		melted.emit()
 
 
 func _check_stage() -> void:
@@ -198,6 +241,11 @@ func save_game() -> void:
 		"tips_seen": tips_seen,
 		"fps_120": fps_120,
 		"tree_view": tree_view,
+		"planet_time": planet_time,
+		"melted": is_melted,
+		"core_share": core_share,
+		"zone_eaten": zone_eaten,
+		"embryo_path": embryo_path,
 	}
 	if tree_seen != null:
 		data.tree_seen = tree_seen
@@ -225,6 +273,11 @@ func load_game() -> void:
 	tips_seen = Array(data.get("tips_seen", []))
 	fps_120 = bool(data.get("fps_120", false))
 	tree_view = Array(data.get("tree_view", []))
+	planet_time = float(data.get("planet_time", 0.0))
+	is_melted = bool(data.get("melted", false))
+	core_share = float(data.get("core_share", 0.0))
+	zone_eaten = Dictionary(data.get("zone_eaten", {}))
+	embryo_path = str(data.get("embryo_path", ""))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
@@ -270,6 +323,11 @@ func _reset_values() -> void:
 	skill_levels = {}
 	tree_view = []
 	tree_seen = []
+	planet_time = 0.0
+	is_melted = false
+	core_share = 0.0
+	zone_eaten = {}
+	embryo_path = ""
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:

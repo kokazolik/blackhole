@@ -73,6 +73,7 @@ const STAGES := [
 	{"name": "Галька", "mass": 30.0},
 	{"name": "Валун", "mass": 3000.0},        # ~1 м: в сто раз крупнее гальки
 	{"name": "Планетезималь", "mass": 3000000.0},  # ~1 км: здесь уже правит гравитация
+	{"name": "Зародыш планеты", "mass": 3000000000.0},  # ~1000 км: кормовая полоса выедена
 ]
 
 
@@ -430,3 +431,142 @@ static func boulder_gain(m: float) -> float:
 	if m <= BOULDER_MASS:
 		return 1.0
 	return BOULDER_GAIN * pow(m / BOULDER_MASS, -BOULDER_GAIN_FADE)
+
+
+# --- Этап «Планетезималь» ---
+# Тело от километра до тысячи километров держит собственная гравитация. Сливается
+# всё, что подлетает медленнее второй космической (скорости убегания), а исход
+# быстрого удара решает удельная энергия Q против прочности тела Q*.
+# Настоящие числа (плотность 2 г/см³): убегание ~1,06 м/с на километр радиуса,
+# Q* ~100 Дж/кг у километрового тела и ~10⁶ у тысячекилометрового.
+const EMBRYO_STAGE := 4
+const PLANET_MASS := 3.0e6       # 1 км
+const PLANET_END_MASS := 3.0e9   # ~1000 км: тело становится зародышем планеты
+const AU_UNITS := SNOW_LINE / 2.7  # снеговая линия молодой звезды около 2,7 а.е.
+# Масштаб против звезды. Настоящая звезда в тысячу раз крупнее даже тысячекилометрового
+# тела. Чтобы планетезималь не дорастала на экране до звезды, на 10 и на 100 км мир
+# вокруг тебя снова мельчает вдвое, как при превращении в валун (BOULDER_WORLD):
+# ты остаёшься того же размера на экране, а звезда и диск становятся огромнее.
+const PLANET_WORLD_STEPS := [[3.0e7, 0.5], [3.0e8, 0.5]]
+# Скорость убегания в игре: от скорости слипания валуна, растёт с радиусом медленнее,
+# чем настоящая (в тысячу раз за этап на экране не показать).
+const PLANET_ESC_K := 2.0
+const PLANET_ESC_EXP := 0.25
+# Сфера Хилла: ~170 радиусов тела на 1 а.е. при любом размере, дальше от звезды шире.
+# На экране сжата, иначе не влезла бы.
+const HILL_PER_AU := 170.0
+const HILL_SCREEN := 0.035
+# Рост: каждая добыча прибавляет долю массы, как на валуне, но планетезималь
+# собирает мелочь гравитацией и растёт быстрее.
+const PLANET_GAIN := 2.0
+const PLANET_GAIN_FADE := 0.05
+const PLANET_VALUE := 3.0
+# Кормовая полоса: кольцо диска шириной ZONE_BIN. Всё вещество в ней рано или поздно
+# проходит мимо тебя; съел — оно кончается (масса изоляции). За снеговой линией
+# вещества в разы больше: там есть лёд.
+const ZONE_BIN := 700.0
+const ZONE_CAPACITY := 0.6       # в долях PLANET_END_MASS внутри снеговой линии
+const ZONE_SNOW_BOOST := 2.5
+# Алюминий-26: период полураспада 0,72 млн лет. В игре — 5 минут на этапе.
+# Тело крупнее ~20 км, выросшее, пока жар не угас, плавится: железо тонет в ядро.
+const AL_HALF := 300.0
+const MELT_KM := 20.0
+const MELT_HEAT := 0.3
+
+
+## Настоящий радиус тела в километрах (по шкале real_size_cm).
+static func planet_km(m: float) -> float:
+	return real_size_cm(m) / 100000.0
+
+
+## Во сколько раз мир вокруг ещё мельче, чем на валуне (1, 0.5, 0.25).
+static func planet_world(m: float) -> float:
+	var k := 1.0
+	for step in PLANET_WORLD_STEPS:
+		if m >= step[0]:
+			k *= step[1]
+	return k
+
+
+## Настоящая скорость убегания, м/с (плотность 2 г/см³).
+static func escape_ms(m: float) -> float:
+	return 1.06 * planet_km(m)
+
+
+## Скорость убегания тела массы m в игровых единицах.
+static func escape_game(m: float) -> float:
+	var true_r := body_radius(m) / world_k
+	var base := STICK_SPEED * pow(true_r / PEBBLE_REF_RADIUS, 0.4) * speed_k()
+	return base * PLANET_ESC_K * pow(maxf(planet_km(m), 1.0), PLANET_ESC_EXP)
+
+
+## Удельная прочность Q*, Дж/кг: у километра ~100, к 1000 км ~10⁶
+## (Benz & Asphaug 1999, приблизительно).
+static func qstar(km: float) -> float:
+	if km < 10.0:
+		return 100.0 * maxf(km, 0.1)
+	return 1000.0 * pow(km / 10.0, 1.5)
+
+
+## Во сколько раз быстрее убегания надо ударить тело твоей массы, чтобы разнести.
+## Настоящее отношение — от ~27 у километра до ~2,7 у тысячи км; в игре сжато
+## в 4…2, иначе мелкие тела не раскалывались бы никогда.
+static func disrupt_ratio(m: float) -> float:
+	var km := maxf(planet_km(m), 1.0)
+	return lerpf(4.0, 2.0, clampf(log(km) / log(1000.0), 0.0, 1.0))
+
+
+## Сфера Хилла в радиусах тела на этом расстоянии от звезды (настоящая).
+static func hill_ratio(distance: float) -> float:
+	return HILL_PER_AU * distance / AU_UNITS
+
+
+## Кольцо диска (кормовая полоса), в котором точка.
+static func zone_bin(distance: float) -> int:
+	return int(distance / ZONE_BIN)
+
+
+## Сколько вещества всего в кормовой полосе на этом расстоянии.
+static func zone_capacity(distance: float) -> float:
+	var snow := ZONE_SNOW_BOOST if distance > SNOW_LINE else 1.0
+	return PLANET_END_MASS * ZONE_CAPACITY * snow
+
+
+## Доля массы за добычу на этапе планетезимали.
+static func planet_gain(m: float) -> float:
+	return PLANET_GAIN * pow(maxf(m / PLANET_MASS, 1.0), -PLANET_GAIN_FADE)
+
+
+## Жар алюминия-26 (1 — в начале этапа) через t секунд.
+static func al_heat(t: float) -> float:
+	return pow(0.5, t / AL_HALF)
+
+
+# Что вещество даёт планетезимали и как она плавится. Эффекты складываются с навыками.
+const PLANET_MATERIAL := {
+	"metal": {"effects": {"qstar": 0.25}, "text": "металл: прочность +25%", "melt": "огромное железное ядро"},
+	"silicate": {"effects": {"heal": 0.15}, "text": "камень: обломки возвращаются +15%", "melt": "базальтовая кора, как у Весты"},
+	"ice": {"effects": {"hill": 0.1}, "text": "лёд лёгкий: сфера Хилла +10%", "melt": "подлёдный океан, как у Цереры"},
+	"carbon": {"effects": {"calm": 0.1}, "text": "углерод гасит удары: рой остывает на 10% быстрее", "melt": "вода в порах и органика"},
+	"chondrite": {"effects": {"qstar": 0.08, "heal": 0.05, "calm": 0.04}, "text": "смесь: понемногу всего", "melt": "слоистое тело"},
+}
+
+# Путь после планетезимали: решает состав тела.
+const EMBRYO_PATHS := {
+	"ice": {"name": "Ледяное ядро", "desc": "галечная аккреция до ~10 масс Земли, потом лавина газа: газовый гигант"},
+	"silicate": {"name": "Каменный зародыш", "desc": "гигантские столкновения: землеподобная планета, может быть, со своей Луной"},
+	"metal": {"name": "Железный зародыш", "desc": "огромное ядро: железный мир, как Меркурий"},
+	"carbon": {"name": "Тёмный зародыш", "desc": "вода и органика: тёмный мир или планета-океан"},
+}
+
+
+## Путь по составу: смесь выбирает по месту — за снеговой линией ледяное ядро.
+## Тип тела для бонусов планетезимали: несложившийся состав считается смесью.
+static func planet_type(type: String) -> String:
+	return type if PLANET_MATERIAL.has(type) else "chondrite"
+
+
+static func embryo_path(type: String, distance: float) -> String:
+	if EMBRYO_PATHS.has(type):
+		return type
+	return "ice" if distance > SNOW_LINE else "silicate"

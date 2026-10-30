@@ -120,6 +120,11 @@ func _show_dev() -> void:
 	_dev_button("Галька → валун", func(): _jump(2900.0, 1))
 	_dev_button("Валун: начало", func(): _jump(3001.0, 2))
 	_dev_button("Валун: ~100 000", func(): _jump(100000.0, 2))
+	_dev_button("Валун → планетезималь", func(): _jump(2900000.0, 2))
+	_dev_button("Планетезималь: 1 км", func(): _jump(3100000.0, 3))
+	_dev_button("Планетезималь: 10 км", func(): _jump(3.0e7, 3))
+	_dev_button("Планетезималь: 100 км", func(): _jump(3.0e8, 3))
+	_dev_button("Планетезималь → зародыш", func(): _jump(2.9e9, 3))
 	var fps := _dev_button("", func(): pass)
 	var fps_text := func(): fps.text = "FPS: вкл" if Hud.show_fps else "FPS: выкл"
 	fps_text.call()
@@ -208,6 +213,11 @@ func _jump(mass: float, stage: int) -> void:
 	# «Галька: начало» — с рассказом Звездочёта, как у нового игрока.
 	GameState.pebble_intro_done = stage >= 1 and mass > 35.0
 	GameState.boulder_intro_done = stage >= 2 and mass > 3100.0
+	# Прыжок посреди этапа планетезимали: недра ещё горячие, полоса не тронута.
+	GameState.planet_time = 0.0
+	GameState.is_melted = false
+	GameState.zone_eaten = {}
+	GameState.embryo_path = ""
 	GameState.tips_seen = []
 	GameState.save_game()
 	Fader.go(Fader.GAME)

@@ -24,6 +24,7 @@ signal pebble_absorbed(world_position: Vector2)
 signal crash_started(world_position: Vector2)  # два валуна летят друг в друга
 signal crash_burst(world_position: Vector2)    # столкнулись: облако обломков
 signal clump_started(world_position: Vector2)
+signal flow_started(world_position: Vector2)  # поток гальки из внешнего диска (планетезималь)
 
 const ATLAS := preload("res://assets/pebbles/pebble_atlas.png")
 const SHADER := preload("res://shaders/pebble.gdshader")
@@ -141,6 +142,14 @@ const CHONDRULE_CHANCE := 0.06  # с настоящего слипания (ме
 const CHONDRULE_DEBRIS := 0.2   # с обломка столкновения или мелочи сгустка
 const CHONDRULE_GEODE := 2      # в жеоде их сразу несколько
 const CHONDRULE_BOULDER := 0.3  # валун ест в разы больше тел: шанс ниже, иначе хондр горы
+# Планетезималь: рой вокруг раскачивается твоим притяжением и остывает в газе.
+const HEAT_BITE := 0.05      # нагрев роя за добычу твоего размера
+const HEAT_FLY := 0.1        # нагрев в секунду, если носишься на полной скорости
+const HEAT_COOL := 0.035     # остывание в секунду (при нагреве 1 — втрое быстрее)
+const HEAT_JITTER := 1.4     # случайные скорости тел при полном нагреве, в скоростях убегания
+const FLOW_TIME := 26.0      # поток гальки идёт столько секунд
+const FLOW_COUNT := 34
+const FLOW_CATCH := 0.5      # доля потока, что застревает в сфере Хилла без навыков
 
 class Pebble:
 	var pos: Vector2  # в системе отсчёта пыли (мир = pos + dust_field.frame_offset)
@@ -182,6 +191,8 @@ class Pebble:
 	var frag_ext := 1.0   # насколько ячейка простирается от своего центра
 	var solo_ver := 0     # меняется, когда меняются грани
 	var damage := 0.0      # трещины от прежних ударов (0..DAMAGE_MAX): во столько слабее тело
+	var jit := Vector2.from_angle(randf() * TAU)  # куда несёт тело случайная скорость роя
+	var flow := false      # из галечного потока: летит к звезде, сфера Хилла может поймать
 
 var player: Player
 var dust_field: DustField
@@ -221,6 +232,9 @@ var pulse_t := -1.0  # сколько идёт текущая волна имп�
 var _sinking: Array[Dictionary] = []  # съеденные тела, что ещё уходят в тебя
 var _boulder_look := false  # этап «Валун»: крупные тела рисуем глыбами
 var _puffs: Array[Dictionary] = []  # облачка пыли от ударов
+var heat := 0.0       # планетезималь: насколько рой вокруг раскачан, 0..1
+var flow_left := 0.0  # сколько ещё идёт галечный поток
+var _planet := false  # этап планетезимали в полную силу
 
 
 func _ready() -> void:
@@ -314,11 +328,23 @@ func _process(delta: float) -> void:
 	var drag := pow(DRAG, delta)
 	var pull := Skills.stat("pebble_pull")
 	var pull_cap := 0.5
+	_planet = GameState.is_planet() and player.planet_k > 0.5
+	var esc := player.escape_speed()
+	if _planet:
+		_update_heat(delta)
+		flow_left = maxf(flow_left - delta, 0.0)
 	if GameState.is_boulder():
 		# Своё притяжение валуна: само растёт к концу этапа, навыки «Тяготения»
 		# включают его раньше и разгоняют притянутое быстрее.
 		pull += GameData.self_gravity(GameState.mass) + Skills.stat("self_grav")
 		pull_cap *= Skills.stat("grav_focus")
+	# Притянутое летит к тебе не быстрее этого: у планетезимали — чуть медленнее
+	# второй космической, чтобы прилипать, а не отскакивать.
+	var pull_lim := player.max_speed() * pull_cap
+	if _planet:
+		pull = 1.0 + Skills.stat("self_grav")
+		pull_lim = esc * 0.85
+	var hill_r := player.hill_radius() if _planet else 0.0
 	var rubble := Skills.stat("rubble_pile") > 0.0
 	var pull_r := player.pull_radius()  # не дальше края экрана, см. Player.pull_radius
 	var evap := GameData.sublimation_distance()
@@ -328,8 +354,18 @@ func _process(delta: float) -> void:
 	while i >= 0:
 		var p := pebbles[i]
 		var wp := world_pos(p)
-		if not p.crash:
+		if not p.crash and not p.flow:
 			p.vel *= drag
+		if _planet and not (p.pulled or p.crash or p.flow or p.own or p.life > 0.0 or p.chunk_mass > 0.0):
+			# Рой раскачан: тела несутся со случайными скоростями, ловить их труднее.
+			p.vel = p.vel.lerp(p.jit * esc * HEAT_JITTER * heat, 1.0 - exp(-1.2 * delta))
+		if p.flow and hill_r > 0.0 and wp.distance_squared_to(player.position) < hill_r * hill_r:
+			# Сфера Хилла: газ тормозит гальку внутри неё, и та падает на тебя.
+			p.flow = false
+			if rng.randf() < clampf(FLOW_CATCH * Skills.stat("flow_catch"), 0.0, 0.95):
+				p.pulled = true
+			else:
+				p.vel *= 0.6
 		if p.life > 0.0:
 			p.life -= delta
 			if p.life <= 0.0:
@@ -360,7 +396,7 @@ func _process(delta: float) -> void:
 			p.vel = p.vel.lerp(eddy_flow(wp), 1.0 - exp(-3.0 * delta))
 		if p.pulled:
 			var home := player.position - wp
-			p.vel = home.normalized() * player.max_speed() * PULLED_SPEED
+			p.vel = home.normalized() * (esc * 0.8 if _planet else player.max_speed() * PULLED_SPEED)
 		elif rubble and p.own and p.hit_cd < 0.6:
 			# «Куча щебня»: свои куски разлетелись и возвращаются, их держит твой вес.
 			var back := player.position - wp
@@ -373,11 +409,11 @@ func _process(delta: float) -> void:
 				# Гальки подплывают, а не летят снарядом: тянем слабее, чем пыль, и не
 				# разгоняем быстрее половины твоей скорости (с «Фокусировкой» — быстрее).
 				p.vel += to_p / dl * player.radius * 4.0 * pull * (1.0 - dl / pull_r) * delta
-				p.vel = p.vel.limit_length(player.max_speed() * pull_cap)
+				p.vel = p.vel.limit_length(pull_lim)
 		p.drift_t -= delta
 		if p.drift_t <= 0.0:
 			# Валуны на столкновение газ не сносит: иначе разные по размеру разминутся.
-			p.drift = Vector2.ZERO if p.crash else GameData.gas_drift(wp, p.r)
+			p.drift = Vector2.ZERO if p.crash or p.flow else GameData.gas_drift(wp, p.r)
 			p.drift_t = DRIFT_EVERY * rng.randf_range(0.8, 1.2)  # вразброс, чтобы не все в один кадр
 		p.pos += (p.vel + calm_drift(wp, p.drift, p)) * delta
 		p.angle += p.spin * delta
@@ -562,7 +598,7 @@ func _maintain() -> void:
 	while i >= 0:
 		var q := pebbles[i]
 		# Тела событий рождаются за краем экрана и должны успеть доплыть.
-		var event := q.swarm or q.eddy or q.clump or q.crash
+		var event := q.swarm or q.eddy or q.clump or q.crash or q.flow
 		if world_pos(q).distance_to(pp) > active_r * (1.7 if event else 1.2):
 			pebbles.remove_at(i)
 		i -= 1
@@ -570,10 +606,15 @@ func _maintain() -> void:
 	# Число галек в округе не растёт с приближением камеры: иначе рост ускорялся бы сам собой.
 	# Чем крупнее ты, тем реже в округе тела, которые тебе по силам: к концу этапа
 	# рост не срывается в лавину.
-	var stage_mass := GameData.BOULDER_MASS if GameState.is_boulder() else 30.0
+	var stage_mass := GameData.PLANET_MASS if GameState.is_planet() else (GameData.BOULDER_MASS if GameState.is_boulder() else 30.0)
 	var thin := pow(maxf(GameState.mass / (stage_mass * THINNING_FROM), 1.0), -MASS_THINNING)
 	var target := mini(int(BASE_COUNT * (BOULDER_COUNT if GameState.is_boulder() else 1.0) * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.pebble_k * thin + 0.5), MAX_PEBBLES)
 	var food_target := int(FOOD_COUNT * clampf(density, 0.3, 2.5) * Skills.stat("pebbles") * player.boulder_k + 0.5)
+	if GameState.is_planet():
+		# Кормовая полоса выедается: вещества в ней всё меньше, пока не сменишь орбиту.
+		var left := 1.0 - 0.85 * GameState.zone_depletion(pp.length())
+		target = int(target * left + 0.5)
+		food_target = int(food_target * left + 0.5)
 	var bodies := 0
 	var food := 0
 	for p in pebbles:
@@ -775,6 +816,8 @@ func _update_eddy(delta: float) -> void:
 		_update_eddy_fx(delta)
 		return
 	_eddy_fx.visible = false
+	if GameState.is_planet():
+		return  # километровое тело вихрей газа уже не замечает
 	_eddy_timer -= delta
 	if _eddy_timer <= 0.0 and not player.dead:
 		_eddy_timer = EDDY_INTERVAL * rng.randf_range(0.8, 1.2)
@@ -885,7 +928,7 @@ func _collide(p: Pebble, index: int) -> void:
 		var loss := raw_loss * Skills.stat("chip")
 		if not absorbable(p):
 			# Ты тоже можешь треснуть, но ты крепче: шанс в разы меньше, чем у гальки.
-			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K:
+			if p.r > player.radius * 0.6 and rng.randf() < split_chance(p, excess) * SELF_SPLIT_K / (Skills.stat("qstar") if _planet else 1.0):
 				_self_split(at, n, impact)
 			# Чем кончится удар, считаем по энергии, как в моделях разрушения
 			# астероидов: удельная энергия удара Q (скорость вдоль линии удара
@@ -1135,7 +1178,13 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 	var m := GameData.bite_mass(p.r * (FOOD_MASS_R if p.food else 1.0), GameState.mass)
 	if p.chunk_mass > 0.0:
 		m = p.chunk_mass
-	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * GameData.boulder_gain(GameState.mass)
+	var gain := GameData.boulder_gain(GameState.mass)
+	if _planet:
+		gain = GameData.planet_gain(GameState.mass)
+		# Убегающий рост: чем ты крупнее, тем больше прибавляет каждая добыча.
+		gain *= 1.0 + Skills.stat("runaway") * 0.35 * log(maxf(GameData.planet_km(GameState.mass), 1.0)) / log(10.0)
+		heat = minf(heat + HEAT_BITE * clampf(p.r / player.radius, 0.1, 1.0) + 0.004, 1.0)
+	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * gain
 	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 		chain += 1
 		_chain_timer = GameData.COMBO_WINDOW
@@ -1151,6 +1200,8 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		value *= FOOD_VALUE
 	if GameState.is_boulder():
 		value *= GameData.boulder_value(GameState.mass)
+	if _planet:
+		value *= GameData.PLANET_VALUE
 	if p.geode:
 		value *= Skills.stat("geode_value")
 		geode_found.emit(wp, value)
@@ -1189,7 +1240,8 @@ func split_chance(p: Pebble, excess: float) -> float:
 func _impact_q(p: Pebble, impact: float, brittle: float) -> float:
 	var m_t := GameData.pebble_mass(p.r, GameState.mass)
 	var m_p := GameState.mass
-	var v_crit := brittle * DISRUPT_V * sqrt(1.0 - p.damage)
+	var ratio := GameData.disrupt_ratio(m_t) if _planet else DISRUPT_V
+	var v_crit := brittle * ratio * sqrt(1.0 - p.damage)
 	return pow(impact / v_crit, 2.0) * 2.0 * m_p / (m_p + m_t)
 
 
@@ -1806,6 +1858,8 @@ func _draw_hints() -> void:
 	_draw_clump()
 	_draw_puffs()
 	_draw_abilities()
+	if _planet:
+		_draw_planet_rings(px)
 	var stick := player.stick_speed()
 	# Пунктиры всех крупных галек — одним вызовом: по вызову на штрих телефон
 	# не тянул, когда вокруг рой крупных галек.
@@ -1842,8 +1896,11 @@ func _draw_hints() -> void:
 			continue
 		var n := to / maxf(dist, 0.001)
 		var approach := (player.motion() - p.drift).dot(n)
-		var ok := approach <= stick * Skills.stat("glue_" + p.material)
+		var limit := stick if _planet else stick * Skills.stat("glue_" + p.material)
+		var ok := approach <= limit
 		var col := Color(0.5, 1.0, 0.55) if ok else Color(1.0, 0.32, 0.25)
+		if _planet and not ok and approach <= limit * 2.0:
+			col = Color(1.0, 0.82, 0.3)  # быстрее убегания: скол и обломки, но не раскол
 		var face := (-to).angle()
 		var mat_col: Color = GameData.MATERIALS[p.material].color
 		if p.holes.is_empty():
@@ -1956,6 +2013,12 @@ func _crash_burst(a: Pebble, b: Pebble) -> void:
 			c.spin = rng.randf_range(-2.0, 2.0)
 			c.life = CRASH_LIFE * rng.randf_range(0.85, 1.0)
 			c.hit_cd = 0.8
+			# Разбитые планетезимали были расплавлены: в обломках попадаются куски
+			# железных ядер — так появились железные метеориты.
+			if _planet and rng.randf() < 0.06 * Skills.stat("debris_value"):
+				c.geode = true
+				c.material = "metal"
+				c.cell = GameData.MATERIAL_ORDER.find("metal") * 4
 			pebbles.append(c)
 		_debris(wp, (wp - at).normalized(), speed, body.material, 16)
 	_crash_pair.clear()
@@ -1987,7 +2050,7 @@ func _update_clump(delta: float) -> void:
 		if clump_left <= 0.0:
 			_clump_end()
 		return
-	if not GameState.is_boulder() or player.boulder_k < 1.0 or player.dead:
+	if not GameState.is_boulder() or GameState.is_planet() or player.boulder_k < 1.0 or player.dead:
 		return
 	if GameData.trap_strength(player.position.length()) < 0.5:
 		return  # сгусток бывает только там, где копятся гальки
@@ -2092,3 +2155,96 @@ func _draw_clump() -> void:
 		var r := clump_radius * (1.25 - 0.22 * k)
 		_hint.draw_circle(c, r, Color(1.0, 0.82, 0.55, 0.022 * fade))
 	_hint.draw_arc(c, clump_radius * 1.25, 0.0, TAU, 64, Color(1.0, 0.85, 0.6, 0.22 * fade), 1.5 / camera.zoom.x, true)
+
+
+
+## Планетезималь: нагрев роя от добычи и от быстрого полёта, остывание в газе.
+## «Успокоение» время от времени гасит его разом.
+var _still_t := 0.0
+
+
+func _update_heat(delta: float) -> void:
+	var fast := player.velocity.length() / maxf(player.max_speed(), 0.001)
+	heat += HEAT_FLY * fast * fast * delta
+	heat -= HEAT_COOL * Skills.stat("calm") * (1.0 + 2.0 * heat) * delta
+	heat = clampf(heat, 0.0, 1.0)
+	var still := Skills.stat("still")
+	if still > 0.0:
+		_still_t += delta
+		if _still_t >= 40.0 - 8.0 * still:
+			_still_t = 0.0
+			heat = 0.0
+
+
+## Круг захвата и сфера Хилла вокруг планетезимали.
+func _draw_planet_rings(px: float) -> void:
+	var c := player.position
+	var cap := player.pull_radius()
+	var cold := 1.0 - heat
+	_hint.draw_arc(c, cap, 0.0, TAU, 96, Color(0.55 + 0.45 * heat, 0.85 * cold + 0.4, 1.0 * cold + 0.3, 0.22), 1.5 * px, true)
+	var hill := player.hill_radius()
+	var dash := PackedVector2Array()
+	for k in 60:
+		dash.append(c + Vector2.from_angle(k * TAU / 60.0) * hill)
+		dash.append(c + Vector2.from_angle((k + 0.45) * TAU / 60.0) * hill)
+	_hint.draw_multiline(dash, Color(0.75, 0.8, 1.0, 0.16), 1.2 * px)
+
+
+## Галечный поток: из внешнего диска к звезде дрейфует река гальки. Сфера Хилла
+## планетезимали ловит часть её (галечная аккреция).
+func start_flow() -> void:
+	var view_r := dust_field.view_radius()
+	var out := player.position.normalized()
+	var across := out.orthogonal()
+	var speed := player.max_speed() * 0.55
+	var count := mini(FLOW_COUNT, MAX_PEBBLES - pebbles.size())
+	for k in count:
+		var p := Pebble.new()
+		var at := player.position + out * view_r * rng.randf_range(1.1, 2.2) + across * rng.randf_range(-0.7, 0.7) * view_r
+		p.pos = at - dust_field.frame_offset
+		p.r = player.radius * rng.randf_range(FOOD_R.x, FOOD_R.y) * 0.8
+		p.food = true
+		p.flow = true
+		p.vel = -out * speed * rng.randf_range(0.8, 1.2)
+		p.material = _pick_material(at.length())
+		p.cell = GameData.MATERIAL_ORDER.find(p.material) * 4 + rng.randi() % 4
+		p.angle = rng.randf() * TAU
+		p.spin = rng.randf_range(-0.4, 0.4)
+		pebbles.append(p)
+	flow_left = FLOW_TIME
+	flow_started.emit(player.position + out * view_r)
+
+
+## Куски после удара о соседа: разлетаются от точки удара, их можно доесть.
+## own — твои куски («Куча щебня» тянет их обратно).
+func spawn_fragments(at: Vector2, dir: Vector2, count: int, total_mass: float, material: String, size: float, own := false) -> void:
+	count = mini(count, MAX_PEBBLES - pebbles.size())
+	if count <= 0:
+		return
+	_debris(at, dir, player.escape_speed(), material, 10)
+	for k in count:
+		var c := Pebble.new()
+		c.r = player.radius * size * rng.randf_range(0.5, 1.0)
+		var d := dir.rotated(rng.randf_range(-1.2, 1.2))
+		c.pos = at + d * c.r * rng.randf_range(0.5, 2.0) - dust_field.frame_offset
+		c.vel = d * player.escape_speed() * rng.randf_range(0.4, 1.2)
+		c.chunk_mass = total_mass / count
+		c.material = material
+		c.cell = GameData.MATERIAL_ORDER.find(material) * 4 + rng.randi() % 4
+		c.angle = rng.randf() * TAU
+		c.spin = rng.randf_range(-2.0, 2.0)
+		c.shard = true
+		c.shard_seed = rng.randf()
+		c.hit_cd = 0.6
+		c.own = own
+		c.life = 0.0 if own else CRASH_LIFE * rng.randf_range(0.8, 1.2)
+		pebbles.append(c)
+
+
+## Срывает с тебя щебень с экватора (раскрутка светом): куски остаются рядом.
+func shed_equator(share: float) -> void:
+	var lost := GameState.mass * share
+	GameState.chip(lost, player.position)
+	var axis := Vector2.from_angle(rng.randf() * TAU)
+	for side in [-1.0, 1.0]:
+		spawn_fragments(player.position + axis * side * player.radius, axis * side, 5, lost * 0.4, _main_material(), 0.18, true)
