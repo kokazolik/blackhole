@@ -40,6 +40,11 @@ const MERGE_KEEP_BIG := 0.6  # если сосед крупнее: больше 
 const CRATER_LOSS := 0.08    # скол при ударе на пороге раскола, в долях массы
 const KICK := 0.55           # праща олигарха, в твоих предельных скоростях
 const YORP_RAMP := 14.0
+const IMPACT_FAR := 3.0      # гигантский удар рождается на этом числе радиусов экрана
+const IMPACT_SPEED := 1.4    # его скорость в твоих предельных: убегая во всю прыть, смягчишь до слияния
+const IMPACT_TURN := 0.35   # рад/с: как сильно твоё притяжение доворачивает его к тебе
+const IMPACT_SLOW := 0.5     # сближение медленнее этой доли твоей скорости — слияние
+const WARN_TIME := 12.0      # за сколько секунд до удара показывать, откуда летит тело
 
 class Rival:
 	var pos: Vector2   # в системе отсчёта пыли
@@ -198,7 +203,7 @@ func _maintain(delta: float) -> void:
 		var far := world_pos(rv).distance_to(player.position)
 		if rv.kind == "giant":
 			pass
-		elif far > view_r * (3.2 if rv.kind == "rival" else 2.4) or (rv.kind == "impactor" and rv.hit_cd < -12.0):
+		elif far > view_r * (3.2 if rv.kind == "rival" else IMPACT_FAR + 0.6) or (rv.kind == "impactor" and rv.hit_cd < -25.0):
 			_remove(rv)
 		i -= 1
 	var count := 0
@@ -298,6 +303,14 @@ func _move(rv: Rival, delta: float) -> void:
 		rv.mass *= exp(GROWTH * pow(rv.mass / GameState.mass, 0.33) * delta)
 		# Скорость сходится к орбитальному течению; толчки от ударов гаснут.
 		rv.vel = rv.vel.lerp(_orbit_flow(rv), 1.0 - exp(-FLOW_GRIP * delta))
+	elif rv.kind == "impactor":
+		# Гравитационная фокусировка: пока летит к тебе, твоё притяжение понемногу
+		# доворачивает его. Убегаешь вдоль его хода — он догоняет мягко; уходишь
+		# вбок резко — проскочит мимо.
+		var to := player.position - world_pos(rv)
+		if to.dot(rv.vel) > 0.0:
+			var turn := clampf(rv.vel.angle_to(to), -IMPACT_TURN * delta, IMPACT_TURN * delta)
+			rv.vel = rv.vel.rotated(turn)
 	elif rv.kind == "giant":
 		# Гигант на соседней орбите медленно сходится с тобой: нырнуть в него — твоя забота.
 		var to := player.position - world_pos(rv)
@@ -352,6 +365,7 @@ func _check_player(rv: Rival) -> void:
 	var at := player.position + n * player.radius
 	var rel_v := player.motion() + player.kick - rv.vel
 	var slant := 0.0 if rel_v.length() < 0.001 else absf(rel_v.normalized().cross(n))
+	var hit_v := _threat_speed(rv, impact, esc)
 	if rv.kind == "giant":
 		# В гиганта не разбиться: медленно — он затягивает тебя в себя, быстро — отскок.
 		if impact <= esc * 2.0:
@@ -360,14 +374,14 @@ func _check_player(rv: Rival) -> void:
 			rv.hit_cd = 1.0
 			player.velocity -= n * impact * 1.3
 		return
-	if rv.kind != "oligarch" and impact <= esc:
+	if rv.kind != "oligarch" and hit_v <= esc:
 		_merge(rv, at, slant)
 		return
 	# Удельная энергия удара против прочности меньшего тела: Q = ½·μ·v²/M.
 	# На пороге (Q = Q*) равные тела разносит при скорости disrupt_ratio убеганий.
 	var small := minf(m1, m2)
 	var mu := m1 * m2 / pow(m1 + m2, 2.0)
-	var q := mu / 0.25 * pow(impact / (GameData.disrupt_ratio(small) * esc), 2.0)
+	var q := mu / 0.25 * pow(hit_v / (GameData.disrupt_ratio(small) * esc), 2.0)
 	var player_small := m1 <= m2 or rv.kind == "oligarch"
 	if player_small:
 		q /= Skills.stat("qstar")
@@ -481,7 +495,7 @@ func _events(delta: float) -> void:
 		var dir: Vector2 = (axes[1] * ahead + axes[0] * rng.randf_range(-0.15, 0.15)).normalized()
 		var at := player.position + dir * view_r * 1.1
 		var rv := _add("twin", at, GameState.mass * rng.randf_range(0.75, 0.9))
-		rv.vel = -dir * player.escape_speed() * 0.5
+		rv.vel = -dir * minf(player.escape_speed() * 0.5, player.max_speed() * 0.6)
 		event_started.emit("twin", at)
 	# Пролёт олигарха: тело в десять раз крупнее проходит мимо, его притяжение
 	# сдвигает твою орбиту — к звезде или от неё, смотря с какой стороны пройдёт.
@@ -502,10 +516,14 @@ func _events(delta: float) -> void:
 	_impact_t -= delta
 	if km >= 100.0 and _impact_t <= 0.0:
 		_impact_t = rng.randf_range(120.0, 160.0) if GameState.is_embryo() else rng.randf_range(200.0, 260.0)
-		var dir := Vector2.from_angle(rng.randf() * TAU)
-		var at := player.position + dir * view_r * 1.15
+		# Идёт по соседней орбите — спереди или сзади, почти вдоль твоего пути: так
+		# его можно догнать или от него уйти (поперёк орбиты ты медлителен).
+		var axes := _orbit_axes()
+		var dir: Vector2 = (axes[1] * (1.0 if rng.randf() < 0.5 else -1.0) + axes[0] * rng.randf_range(-0.3, 0.3)).normalized()
+		# Рождается далеко за краем экрана: стрелка у края заранее показывает, откуда он идёт.
+		var at := player.position + dir * view_r * IMPACT_FAR
 		var rv := _add("impactor", at, GameState.mass * rng.randf_range(0.5, 1.1))
-		rv.vel = -dir * player.escape_speed() * 2.6
+		rv.vel = -dir * player.max_speed() * IMPACT_SPEED
 		event_started.emit("impactor", at)
 	# Поток гальки из внешнего диска: у тел в сотни км его ловит сфера Хилла.
 	_flow_t -= delta
@@ -581,6 +599,36 @@ func _draw_sprites() -> void:
 
 ## Чем кончится удар на текущей скорости — по тому же правилу, что и сам удар:
 ## зелёная дуга — слияние, жёлтая — скол, красная — раскол (твой или соседа).
+## Скорость удара по шкале скорости убегания. Настоящая вторая космическая у тел
+## в сотни км во много раз быстрее всего, что движется на экране: гигантский удар
+## на ней пролетал бы экран за долю секунды. Поэтому он идёт видимо медленно, а
+## исход решает скорость сближения против твоей: IMPACT_SLOW твоих предельных
+## скоростей — порог слияния. Догнать его ход — значит смягчить удар.
+func _threat_speed(rv: Rival, impact: float, esc: float) -> float:
+	if rv.kind != "impactor":
+		return impact
+	return esc * impact / (player.max_speed() * IMPACT_SLOW)
+
+
+## Через сколько секунд тело коснётся тебя при нынешних скоростях; INF — разойдётесь.
+## Ищем ближайшее сближение по прямой: относительная скорость и отрезок между центрами.
+func time_to_hit(rv: Rival) -> float:
+	var d := world_pos(rv) - player.position
+	var v := rv.vel - (player.motion() + player.kick)
+	var vv := v.length_squared()
+	if vv < 0.0001:
+		return INF
+	var t := -d.dot(v) / vv
+	if t <= 0.0:
+		return INF
+	var miss := (d + v * t).length()
+	var contact := player.radius + rv.r
+	if miss > contact * 1.6:
+		return INF
+	var back := sqrt(maxf(contact * contact - miss * miss, 0.0)) / sqrt(vv)
+	return maxf(t - back, 0.0)
+
+
 func outcome(rv: Rival) -> String:
 	var to := world_pos(rv) - player.position
 	var n := to.normalized()
@@ -588,6 +636,7 @@ func outcome(rv: Rival) -> String:
 	var esc := GameData.escape_game(maxf(GameState.mass, rv.mass))
 	if rv.kind == "giant":
 		return "merge" if impact <= esc * 2.0 else "crater"
+	impact = _threat_speed(rv, impact, esc)
 	if rv.kind != "oligarch" and impact <= esc:
 		return "merge"
 	var small := minf(GameState.mass, rv.mass)
@@ -601,16 +650,117 @@ func outcome(rv: Rival) -> String:
 	return "break" if player_small else "shatter"
 
 
+const OUTCOME_COLORS := {"merge": Color(0.5, 1.0, 0.55), "crater": Color(1.0, 0.82, 0.3),
+	"shatter": Color(1.0, 0.55, 0.3), "break": Color(1.0, 0.32, 0.25)}
+
+
+## Доля касательной скорости при ударе сейчас: 0 — лоб в лоб, 1 — вскользь.
+func slant(rv: Rival) -> float:
+	var n := (world_pos(rv) - player.position).normalized()
+	var rel_v := player.motion() + player.kick - rv.vel
+	return 0.0 if rel_v.length() < 0.001 else absf(rel_v.normalized().cross(n))
+
+
+## Подпись прицела: чем кончится удар, если сохранить скорость.
+func outcome_text(rv: Rival) -> String:
+	var o := outcome(rv)
+	match o:
+		"merge":
+			if rv.kind == "giant":
+				return "он затянет тебя"
+			if GameState.is_embryo() and not GameState.has_moon and rv.mass / GameState.mass >= GameData.IMPACT_REL:
+				return "слияние · луна" if slant(rv) >= GameData.MOON_SLANT else "слияние · зайди вскользь для луны"
+			return "слияние"
+		"crater":
+			return "скол: сбавь скорость"
+		"shatter":
+			return "раскол соседа"
+	return "тебя расколет!"
+
+
+## Прицел удара: дуга на соседе цвета исхода, точка касания на тебе, подпись,
+## а для скола и раскола — веер, куда полетят обломки.
 func _draw_outcome(rv: Rival, c: Vector2, px: float) -> void:
 	var to := c - player.position
 	var reach := (player.radius + rv.r) * 4.0
 	if to.length() > reach:
 		return
 	var fade := clampf((reach - to.length()) / (reach * 0.4), 0.0, 1.0)
-	var col: Color = {"merge": Color(0.5, 1.0, 0.55), "crater": Color(1.0, 0.82, 0.3),
-		"shatter": Color(1.0, 0.55, 0.3), "break": Color(1.0, 0.32, 0.25)}[outcome(rv)]
+	var o := outcome(rv)
+	var col: Color = OUTCOME_COLORS[o]
 	var face := (-to).angle()
 	draw_arc(c, rv.r * 1.12 + 2.0 * px, face - 1.1, face + 1.1, 24, Color(col, 0.85 * fade), 2.5 * px, true)
+	var n := to.normalized()
+	var hit := player.position + n * player.radius
+	draw_arc(hit, 7.0 * px, 0.0, TAU, 16, Color(col, 0.9 * fade), 2.0 * px, true)
+	draw_line(hit - n.orthogonal() * 11.0 * px, hit + n.orthogonal() * 11.0 * px, Color(col, 0.7 * fade), 1.5 * px)
+	if o == "crater" or o == "shatter" or o == "break":
+		# Обломки разлетаются от места удара: при сколе вдоль поверхности, при расколе — дальше.
+		var spread := n.orthogonal() if o == "crater" else (n if o == "shatter" else -n)
+		for k in 5:
+			var a := spread.rotated((k - 2) * 0.25)
+			for j in 3:
+				var p0 := hit + a * (rv.r * 0.4 + j * rv.r * 0.35)
+				draw_line(p0, p0 + a * rv.r * 0.2, Color(col, 0.5 * fade * (1.0 - j * 0.25)), 1.5 * px)
+	var label := outcome_text(rv)
+	var font := ThemeDB.fallback_font
+	var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+	var at := c + Vector2(0.0, rv.r + 26.0 * px)  # под соседом: над ним его имя
+	draw_set_transform(at - Vector2(w * 0.5, 0.0) * px, 0.0, Vector2(px, px))
+	draw_string_outline(font, Vector2.ZERO, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, 4, Color(0, 0, 0, 0.6 * fade))
+	draw_string(font, Vector2.ZERO, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(col, fade))
+	draw_set_transform(Vector2.ZERO)
+
+
+## Тела, что летят в тебя быстрее, чем можно слиться: у края экрана стрелка —
+## откуда идёт, через сколько секунд удар и чем он кончится, если ничего не делать.
+func _draw_warnings(px: float) -> void:
+	var view := get_viewport_rect().size * 0.5 * px
+	var font := ThemeDB.fallback_font
+	for rv in rivals:
+		if rv.kind == "giant":
+			continue
+		var t := time_to_hit(rv)
+		if t > WARN_TIME:
+			continue
+		var o := outcome(rv)
+		if o == "merge" and rv.kind != "impactor":
+			continue  # мирный сосед подплывает сам — не тревожим
+		var to := world_pos(rv) - player.position
+		if to.length() < (player.radius + rv.r) * 4.0:
+			continue  # вблизи говорит прицел удара
+		var inside := absf(to.x) < view.x - rv.r and absf(to.y) < view.y - rv.r
+		var col: Color = OUTCOME_COLORS[o]
+		var blink := 0.65 + 0.35 * sin(Time.get_ticks_msec() * (0.004 + 0.012 * (1.0 - t / WARN_TIME)))
+		var dir := to.normalized()
+		var p: Vector2
+		if inside:
+			# Тело уже на экране: кольцо-предупреждение вокруг него.
+			p = world_pos(rv) - dir * (rv.r + 34.0 * px)
+			draw_arc(world_pos(rv), rv.r * 1.3, 0.0, TAU, 48, Color(col, 0.35 * blink), 2.0 * px, true)
+		else:
+			# Стрелка у края, но не под интерфейсом сверху и не под стиком снизу.
+			var lim_x := view.x - 90.0 * px
+			var lim_y := view.y - (150.0 if dir.y < 0.0 else 110.0) * px
+			var edge := minf(lim_x / maxf(absf(dir.x), 0.001), lim_y / maxf(absf(dir.y), 0.001))
+			p = player.position + dir * edge
+		var sz := 26.0 * px
+		var tip := p + dir * sz
+		draw_colored_polygon(PackedVector2Array([tip, p - dir * sz * 0.5 + dir.orthogonal() * sz * 0.8,
+			p - dir * sz * 0.2, p - dir * sz * 0.5 - dir.orthogonal() * sz * 0.8]), Color(col, blink))
+		var dist := to.length() / maxf(player.radius, 0.001)
+		var lines := ["удар через %d с" % ceili(t), "%d твоих радиусов" % roundi(dist)]
+		if o != "merge":
+			lines.append("уходи с пути или лети от него")
+		var y := -19.0 * px * (lines.size() - 1) if dir.y > 0.3 else 0.0
+		for line in lines:
+			var w := font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			var at := p - dir * sz * 1.6 + Vector2(-w * 0.5 * px, y)
+			draw_set_transform(at, 0.0, Vector2(px, px))
+			draw_string_outline(font, Vector2.ZERO, line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, 4, Color(0, 0, 0, 0.6))
+			draw_string(font, Vector2.ZERO, line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(col, 0.95))
+			draw_set_transform(Vector2.ZERO)
+			y += 19.0 * px
 
 
 func _draw() -> void:
@@ -620,6 +770,7 @@ func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	_draw_moon(px)
 	_draw_giant_arrow(px)
+	_draw_warnings(px)
 	for rv in rivals:
 		if rv.kind == "giant":
 			if world_pos(rv).distance_to(player.position) > dust_field.view_radius() * 1.4 + rv.r:
