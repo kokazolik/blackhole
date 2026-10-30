@@ -58,9 +58,14 @@ func _ready() -> void:
 	box.add_child(_line(info["name"], UiTheme.FONT_SERIF_BOLD, 42, UiTheme.GOLD))
 	box.add_child(_line(info["desc"], UiTheme.FONT_SERIF_ITALIC, 21, UiTheme.PARCHMENT))
 
-	var core := "ядро %d%%" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
+	var core := "железное ядро %d%% массы" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
 	var stats := "%s · %s · %s%s" % [GameData.format_size(GameState.mass), GameData.format_earths(GameState.mass), core,
 		" · есть луна" if GameState.has_moon else ""]
+	if kind.begins_with("giant"):
+		# Состав был у ядра: теперь оно в центре, под толщей водорода и гелия.
+		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]
+		stats = "ядро: %s, %s, под толщей газа%s" % [body.to_lower(), GameData.format_earths(GameState.mass),
+			" · есть луна" if GameState.has_moon else ""]
 	box.add_child(_line(stats, null, 20, Color(0.75, 0.88, 1.0)))
 
 	var legacy := "Наследие +%d" % gained

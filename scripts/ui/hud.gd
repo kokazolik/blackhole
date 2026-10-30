@@ -382,7 +382,7 @@ func set_planet(on: bool, heat: float, capture: float, depletion: float) -> void
 	if GameState.is_embryo() and GameState.gas_left >= 0.0:
 		_set_embryo_text()
 	elif GameState.is_melted:
-		_set_core_text("Недра расплавились", "ядро %d%%" % roundi(GameState.core_share * 100.0), "железо стекло к центру", UiTheme.GOLD)
+		_set_core_text("Железное ядро", "%d%% массы" % roundi(GameState.core_share * 100.0), GameData.core_note(GameState.core_share), UiTheme.GOLD)
 	elif GameState.core_too_cold():
 		_set_core_text("Недра остыли", "хондрит", "хондры ×2", UiTheme.CHONDRULE)
 	else:

@@ -20,6 +20,7 @@ signal event_started(kind: String, world_position: Vector2)
 signal giant_captured(world_position: Vector2)  # суперземля нырнула в молодого гиганта
 
 const SHADER := preload("res://shaders/planetesimal.gdshader")
+const EMBRYO_SHADER := preload("res://shaders/embryo.gdshader")
 const PEBBLE_SCALE := 2.78   # как у тела игрока: видимый радиус — ровно r
 const NAMES := ["Ида", "Матильда", "Гаспра", "Лютеция", "Эрос", "Паллада", "Юнона", "Гигия", "Психея", "Веста",
 	"Аррокот", "Итокава", "Рюгу", "Бенну", "Церера", "Фебa", "Дактиль", "Клото", "Сильвия", "Европа"]
@@ -28,6 +29,8 @@ const SPAWN_MAX := 90.0
 const REL_MIN := 0.3         # масса соседа в долях твоей
 const REL_MAX := 0.7
 const BIG_CHANCE := 0.15      # доля соседей крупнее тебя
+const EMBRYO_REL_MIN := 0.12  # соседи-зародыши: размер в долях твоего
+const EMBRYO_REL_MAX := 0.35
 const STIR := 0.03           # как сильно сосед твоей массы раскачивает рой вблизи
 const SHEAR_AGE := 60.0      # через сколько секунд сосед уплывает по своей орбите
 const GROWTH := 0.0015       # соседи растут сами (едят свой рой), доля массы в секунду
@@ -59,6 +62,7 @@ class Rival:
 	var hit_cd := 0.0
 	var kicked := false
 	var age := 0.0
+	var embryo := false  # шар зародыша (embryo.gdshader), а не бугристая планетезималь
 
 var player: Player
 var pebble_field: PebbleField
@@ -190,6 +194,8 @@ func _follow_world_scale() -> void:
 # --- Соседи ---
 
 func _target_count() -> int:
+	if GameState.is_embryo():
+		return 3
 	if Skills.stat("oligarch") > 0.0:
 		return 1
 	return 2 if GameData.planet_km(GameState.mass) < 10.0 else 3
@@ -213,6 +219,11 @@ func _maintain(delta: float) -> void:
 	_spawn_t -= delta
 	if count < _target_count() and _spawn_t <= 0.0:
 		_spawn_t = rng.randf_range(SPAWN_MIN, SPAWN_MAX)
+		if GameState.is_embryo():
+			# Эпоха гигантских ударов: у звезды гальки мало, зато зародышей тесно —
+			# там растут слияниями. За снеговой линией их реже, там кормит галька.
+			var inner := player.position.length() < GameData.SNOW_LINE
+			_spawn_t = (rng.randf_range(25.0, 35.0) if inner else rng.randf_range(45.0, 60.0)) / Skills.stat("rival_rate")
 		# Сосед на соседней орбите: кто ближе к звезде, догоняет тебя сзади,
 		# кто дальше — ты сам нагоняешь его. Поэтому он выплывает из-за края
 		# экрана вдоль орбиты, а не сбоку.
@@ -224,6 +235,10 @@ func _maintain(delta: float) -> void:
 			var rel := exp(rng.randf_range(log(REL_MIN), log(REL_MAX)))
 			if rng.randf() < BIG_CHANCE:
 				rel = rng.randf_range(1.1, 2.0)
+			if GameState.is_embryo():
+				# Зародыши мельче тебя: масса Земли растёт как куб размера, и сосед в полроста
+				# прибавил бы втрое. Крупные встречи — это гигантские удары.
+				rel = exp(rng.randf_range(log(EMBRYO_REL_MIN), log(EMBRYO_REL_MAX)))
 			var rv := _add("rival", at, GameState.mass * rel)
 			rv.vel = _orbit_flow(rv)
 
@@ -241,6 +256,14 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	var sprite := Sprite2D.new()
 	sprite.texture = _blank
 	var mat := ShaderMaterial.new()
+	rv.embryo = GameState.is_embryo()
+	if rv.embryo:
+		_embryo_look(mat, at)
+		sprite.material = mat
+		add_child(sprite)
+		rv.sprite = sprite
+		rivals.append(rv)
+		return rv
 	mat.shader = SHADER
 	mat.set_shader_parameter("seed", rng.randf())
 	mat.set_shader_parameter("tilt", rng.randf_range(0.2, 0.8))
@@ -257,6 +280,19 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	rv.sprite = sprite
 	rivals.append(rv)
 	return rv
+
+
+## Соседний зародыш выглядит по своей зоне диска: у звезды железо и камень,
+## дальше камень и углерод, за снеговой линией лёд. Изредка — слоистая смесь.
+func _embryo_look(mat: ShaderMaterial, at: Vector2) -> void:
+	mat.shader = EMBRYO_SHADER
+	mat.set_shader_parameter("seed", rng.randf())
+	mat.set_shader_parameter("tilt", rng.randf_range(0.2, 0.8))
+	var style := 4
+	if rng.randf() > 0.15:
+		style = GameData.embryo_style(GameData.pick_weighted(GameData.material_weights(at.length()), rng))
+	mat.set_shader_parameter("style", style)
+	mat.set_shader_parameter("atmo_col", GameData.EMBRYO_ATMO[style])
 
 
 ## Оси орбиты в точке игрока: [от звезды, вдоль орбиты].
@@ -279,13 +315,14 @@ func _orbit_flow(rv: Rival) -> Vector2:
 	var dist := d.length()
 	if dist < 0.001:
 		return flow
-	if Skills.stat("oligarch") > 0.0 or rv.age > SHEAR_AGE:
+	var shear_age := SHEAR_AGE * (1.5 if GameState.is_embryo() else 1.0)
+	if (Skills.stat("oligarch") > 0.0 and not GameState.is_embryo()) or rv.age > shear_age:
 		# «Своя полоса» / сдвиг орбит: сосед расходится с тобой по радиусу.
 		flow += axes[0] * signf(dr if absf(dr) > 0.001 else 1.0) * speed * PULL
 	else:
 		# Притяжение растёт вблизи: издали сосед плывёт вдоль орбиты, а у тебя
 		# его траектория загибается к тебе.
-		flow -= d / dist * speed * PULL * clampf(span / dist, 0.25, 2.0)
+		flow -= d / dist * speed * PULL * Skills.stat("rival_pull") * clampf(span / dist, 0.25, 2.0)
 	return flow
 
 
@@ -411,10 +448,11 @@ func _rival_mix(rv: Rival) -> Dictionary:
 
 func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 	var keep := MERGE_KEEP if rv.mass <= GameState.mass else MERGE_KEEP_BIG
+	keep = minf(keep + Skills.stat("merge_keep"), 1.0)
 	var rel_m := rv.mass / GameState.mass
 	var rel := clampf(rv.r / player.radius, 0.2, 2.0)
 	var value := PebbleField.VALUE_PER_PEBBLE * pow(GameState.mass / 30.0, PebbleField.VALUE_MASS_EXP) \
-		* pow(rel / 0.2, 1.5) * GameData.boulder_value(GameState.mass) * GameData.PLANET_VALUE
+		* pow(rel / 0.2, 1.5) * GameData.boulder_value(GameState.mass) * GameData.PLANET_VALUE * Skills.stat("merge_value")
 	GameState.absorb_mix(rv.mass * keep, value, _rival_mix(rv), at)
 	pebble_field.heat = minf(pebble_field.heat + 0.25, 1.0)
 	if rv.kind == "twin":
@@ -425,6 +463,8 @@ func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 		if slant >= GameData.MOON_SLANT:
 			pebble_field.spawn_fragments(at, (at - player.position).normalized().orthogonal(), 10, rv.mass * (1.0 - keep), "", 0.25, true)
 		GameState.giant_impact(rel_m, slant, at)
+	if GameState.is_embryo() and Skills.stat("devour") > 0.0 and rv.kind == "rival":
+		_spawn_t = minf(_spawn_t, 10.0)  # «Пожиратель»: следующий сосед уже на подходе
 	merged.emit(at, rv.kind)
 	_remove(rv)
 
@@ -515,14 +555,19 @@ func _events(delta: float) -> void:
 	# Гигантский удар: сосед почти твоего размера идёт прямо на тебя.
 	_impact_t -= delta
 	if km >= 100.0 and _impact_t <= 0.0:
-		_impact_t = rng.randf_range(120.0, 160.0) if GameState.is_embryo() else rng.randf_range(200.0, 260.0)
+		_impact_t = rng.randf_range(200.0, 260.0)
+		if GameState.is_embryo():
+			var inner := player.position.length() < GameData.SNOW_LINE
+			_impact_t = (rng.randf_range(90.0, 120.0) if inner else rng.randf_range(120.0, 160.0)) / Skills.stat("impact_more")
 		# Идёт по соседней орбите — спереди или сзади, почти вдоль твоего пути: так
 		# его можно догнать или от него уйти (поперёк орбиты ты медлителен).
 		var axes := _orbit_axes()
 		var dir: Vector2 = (axes[1] * (1.0 if rng.randf() < 0.5 else -1.0) + axes[0] * rng.randf_range(-0.3, 0.3)).normalized()
 		# Рождается далеко за краем экрана: стрелка у края заранее показывает, откуда он идёт.
 		var at := player.position + dir * view_r * IMPACT_FAR
-		var rv := _add("impactor", at, GameState.mass * rng.randf_range(0.5, 1.1))
+		# У зародыша ударник мельче: масса Земли — куб размера, тело в твой рост дало бы ×8.
+		var rel := rng.randf_range(0.3, 0.6) if GameState.is_embryo() else rng.randf_range(0.5, 1.1)
+		var rv := _add("impactor", at, GameState.mass * rel)
 		rv.vel = -dir * player.max_speed() * IMPACT_SPEED
 		event_started.emit("impactor", at)
 	# Поток гальки из внешнего диска: у тел в сотни км его ловит сфера Хилла.
@@ -593,8 +638,13 @@ func _draw_sprites() -> void:
 		var mat := rv.sprite.material as ShaderMaterial
 		mat.set_shader_parameter("light_dir", (-c).normalized())
 		mat.set_shader_parameter("spin", rv.spin)
-		mat.set_shader_parameter("round_k", GameData.roundness(rv.mass))
 		mat.set_shader_parameter("star_light", light)
+		if rv.embryo:
+			mat.set_shader_parameter("atmo", GameData.embryo_atmo(rv.mass))
+			# Летящий на тебя ударник сам недавно пережил столкновение: в трещинах магма.
+			mat.set_shader_parameter("magma", 0.35 if rv.kind == "impactor" else 0.0)
+		else:
+			mat.set_shader_parameter("round_k", GameData.roundness(rv.mass))
 
 
 ## Чем кончится удар на текущей скорости — по тому же правилу, что и сам удар:

@@ -33,6 +33,7 @@ var drift_velocity := Vector2.ZERO  # снос встречным ветром �
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var boulder_k := 0.0                # 0 — галька, 1 — валун
 var planet_k := 0.0                 # 0 — валун, 1 — планетезималь
+var embryo_k := 0.0                 # 0 — планетезималь, 1 — зародыш-шар
 var migration := Vector2.ZERO       # снос зародыша к звезде газом диска
 var shadow := 0.0                   # 0..1: насколько ты в ветровой тени крупного тела
 var pebble_field: PebbleField       # для ветровой тени; ставит main
@@ -49,6 +50,7 @@ var _grain := Sprite2D.new()  # сам комок: отдельный спрай
 var _pebble := Sprite2D.new()  # процедурная галька, проступает при переходе
 var _planet := Sprite2D.new()  # планетезималь: объёмный шар по запечённому рельефу
 var _planet_bake: PlanetBake   # печётся заранее, ещё на позднем валуне
+var _embryo := Sprite2D.new()  # зародыш: шар с поверхностью по составу, магмой и атмосферой
 var _mix := Vector4(0.25, 0.25, 0.25, 0.25)  # сглаженные доли состава для шейдера
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
@@ -59,6 +61,7 @@ var planet_world := 1.0  # мир мельчает ещё (GameData.planet_world
 var kick := Vector2.ZERO # гравитационная праща: орбиту сносит, гаснет за секунды
 var yorp := 0.0          # 0..1 раскрутка светом: тело вращается всё быстрее
 var melt_glow := 0.0     # 1 в миг плавления, гаснет
+var magma := 0.0         # 1 сразу после гигантского удара: магматический океан, остывает
 
 
 func _ready() -> void:
@@ -92,13 +95,23 @@ func _ready() -> void:
 	_planet.texture = _pebble.texture
 	_planet.visible = false
 	add_child(_planet)
+	var embryo := ShaderMaterial.new()
+	embryo.shader = preload("res://shaders/embryo.gdshader")
+	embryo.set_shader_parameter("seed", planet.get_shader_parameter("seed"))
+	embryo.set_shader_parameter("tilt", planet.get_shader_parameter("tilt"))
+	_embryo.material = embryo
+	_embryo.texture = _pebble.texture
+	_embryo.visible = false
+	add_child(_embryo)
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	boulder_k = 1.0 if GameState.is_boulder() else 0.0
 	planet_k = 1.0 if GameState.stage >= GameData.PLANETESIMAL_STAGE else 0.0
+	embryo_k = 1.0 if GameState.is_embryo() else 0.0
 	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k) * planet_world
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.melted.connect(func() -> void: melt_glow = 1.0)
+	GameState.giant_hit.connect(func(rel: float) -> void: magma = minf(magma + 0.5 + rel, 1.0))
 
 
 func _on_stage_reached(index: int) -> void:
@@ -109,6 +122,8 @@ func _on_stage_reached(index: int) -> void:
 	elif index == GameData.PLANETESIMAL_STAGE:
 		_start_planet_bake()
 		create_tween().tween_property(self, "planet_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
+	elif index == GameData.EMBRYO_STAGE:
+		create_tween().tween_property(self, "embryo_k", 1.0, 3.0).set_trans(Tween.TRANS_SINE)
 
 
 ## Рельеф планетезимали печётся полосами за десяток кадров. Начинаем загодя,
@@ -244,7 +259,7 @@ func _process(delta: float) -> void:
 	# Миграция зародыша: газ диска тянет тяжёлое тело к звезде, пока не рассеется.
 	migration = Vector2.ZERO
 	if GameState.is_embryo() and GameState.gas_left > 0.0 and GameState.ending == "":
-		migration = -position.normalized() * max_speed() * GameData.MIGRATE \
+		migration = -position.normalized() * max_speed() * GameData.MIGRATE * maxf(Skills.stat("migrate"), 0.0) \
 			* clampf(sqrt(GameState.earth_masses()), 0.15, 2.0) * GameState.gas_frac()
 	position += (velocity + drift_velocity + frame_velocity + kick + migration) * delta
 	if GameState.is_planet():
@@ -252,6 +267,7 @@ func _process(delta: float) -> void:
 		planet_world = lerpf(planet_world, GameData.planet_world(GameState.mass), 1.0 - exp(-1.5 * delta))
 	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k) * planet_world
 	melt_glow = maxf(0.0, melt_glow - delta / 9.0)
+	magma = maxf(0.0, magma - delta / GameData.MAGMA_COOL)
 	GameState.regrow(delta)
 
 	_update_heat(delta)
@@ -303,6 +319,7 @@ func die() -> void:
 	GameState.burned_up = true
 	_grain.visible = false
 	_pebble.visible = false
+	_embryo.visible = false
 	_planet.visible = false
 	queue_redraw()
 	burned_up.emit()
@@ -412,7 +429,7 @@ func _update_grain(r: float) -> void:
 		body.set_shader_parameter("growth", clampf(log(maxf(GameState.mass, 30.0) / 30.0) / log(100.0), 0.0, 1.0))
 		body.set_shader_parameter("boulder", boulder_k * clampf(0.75 + 0.25 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
 		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.12 * _pulse), pebble_k * (1.0 - _planet_shown()))
-	_planet.visible = _planet_shown() > 0.0
+	_planet.visible = _planet_shown() > 0.0 and embryo_k < 1.0
 	if _planet.visible:
 		# Шар поворачивается в шейдере вокруг своей наклонной оси, а свет — с экрана.
 		var mat := _planet.material as ShaderMaterial
@@ -423,7 +440,21 @@ func _update_grain(r: float) -> void:
 		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
 		mat.set_shader_parameter("mix_w", _mix)
-		_planet.modulate = Color(Color.WHITE * (1.05 + 0.1 * _pulse), _planet_shown())
+		_planet.modulate = Color(Color.WHITE * (1.05 + 0.1 * _pulse), _planet_shown() * (1.0 - embryo_k))
+	_embryo.visible = embryo_k > 0.0
+	if _embryo.visible:
+		# Зародыш — уже шар: вид по составу, после удара светится магмой, тяжёлый — в дымке.
+		var em := _embryo.material as ShaderMaterial
+		var style := GameData.embryo_style(GameState.fate_type())
+		_embryo.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
+		em.set_shader_parameter("light_dir", (-position).normalized())
+		em.set_shader_parameter("spin", _spin)
+		em.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
+		em.set_shader_parameter("style", style)
+		em.set_shader_parameter("magma", magma)
+		em.set_shader_parameter("atmo", GameData.embryo_atmo(GameState.mass))
+		em.set_shader_parameter("atmo_col", GameData.EMBRYO_ATMO[style])
+		_embryo.modulate = Color(Color.WHITE * (1.0 + 0.06 * _pulse), embryo_k)
 
 
 ## Насколько видна планетезималь: пока рельеф не испечён, остаётся валун.

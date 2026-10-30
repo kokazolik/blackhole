@@ -1283,6 +1283,8 @@ func _eat(p: Pebble, index: int, at: Vector2, easy: bool) -> void:
 		if GameState.is_embryo():
 			# Рой планетезималей почти выеден: зародыш растёт галечной аккрецией и ударами.
 			gain *= GameData.EMBRYO_FLOW if p.flow else GameData.EMBRYO_SWARM
+			# «Галечная аккреция» и «Магматический океан»: жидкая поверхность глотает всё.
+			gain *= Skills.stat("embryo_feed") * (1.0 + Skills.stat("magma_feed") * player.magma)
 	m *= ACCRETION * Skills.stat("accretion") * Skills.stat("mass_" + p.material) * gain
 	if not easy:  # серию держат только настоящие слипания, мелочь её не продлевает
 		chain += 1

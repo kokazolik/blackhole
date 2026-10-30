@@ -12,6 +12,7 @@ signal chipped(position: Vector2, lost: float)  # удар: от тела отк
 signal melted  # планетезималь расплавилась от алюминия-26: железо ушло в ядро
 signal moon_formed(position: Vector2)  # косой гигантский удар: из обломков собралась луна
 signal gas_gone  # газ диска рассеялся: гонка зародыша окончена
+signal giant_hit(rel: float)  # гигантский удар зародыша: поверхность плавится в магматический океан
 
 const SAVE_PATH := "user://save.json"
 const SAVE_VERSION := 1
@@ -160,6 +161,7 @@ func giant_impact(rel: float, slant: float, at: Vector2) -> void:
 	if not is_embryo() or rel < GameData.IMPACT_REL:
 		return
 	magma_hits += 1
+	giant_hit.emit(rel)
 	if not is_melted and magma_hits >= GameData.MAGMA_IMPACTS:
 		_melt()
 	if not has_moon and slant >= GameData.MOON_SLANT:

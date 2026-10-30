@@ -1937,6 +1937,308 @@
 				"value": 0.12
 			},
 			"icon": "value_1"
+		},
+		{
+			"id": "e_root",
+			"title": "Зародыш планеты",
+			"desc": "Ты тяжелее всех вокруг, и соседи-зародыши сами тянутся к тебе: их притяжение к тебе +20%, а звёздной пыли с каждой добычи на 25% больше. Начало пути к планете.",
+			"cost": 50000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				20.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_pull": 0.2,
+				"value": 0.25
+			},
+			"icon": "gravity_1"
+		},
+		{
+			"id": "e_pull",
+			"title": "Притяжение зародыша",
+			"desc": "Соседи-зародыши загибают орбиты к тебе: тянутся на 20% сильнее за уровень, догонять их легче.",
+			"cost": 50000000,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-3.75,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_pull": 0.2
+			},
+			"icon": "reach_1"
+		},
+		{
+			"id": "e_crowd",
+			"title": "Тесная зона",
+			"desc": "Ты собираешь соседей с более широкой полосы орбит: новые зародыши приходят на 10% чаще за уровень.",
+			"cost": 200000000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-3.75,
+				22.5
+			],
+			"requires": [
+				"e_pull"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_rate": 0.1
+			},
+			"icon": "chain",
+			"requires_level": 3
+		},
+		{
+			"id": "e_devour",
+			"title": "Пожиратель",
+			"desc": "Легендарный навык. Едва ты поглотил соседа, его возмущения выводят к тебе следующего: новый зародыш появляется через десять секунд. Так рос Юпитер — глотая всё на своей орбите.",
+			"cost": 1000000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-3.75,
+				24
+			],
+			"requires": [
+				"e_crowd"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"devour": 1.0
+			},
+			"icon": "swarm",
+			"legendary": true,
+			"chondrules": [
+				60
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_keep",
+			"title": "Сращение",
+			"desc": "При слиянии меньше вещества разлетается в обломки: в тебе остаётся ещё 3% массы соседа за уровень.",
+			"cost": 50000000,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-1.25,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"merge_keep": 0.03
+			},
+			"icon": "toughness"
+		},
+		{
+			"id": "e_magma",
+			"title": "Магматический океан",
+			"desc": "После гигантского удара поверхность жидкая и глотает всё: пока она светится магмой, галька и мелочь дают на 40% больше массы за уровень.",
+			"cost": 200000000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-1.25,
+				22.5
+			],
+			"requires": [
+				"e_keep"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"magma_feed": 0.4
+			},
+			"icon": "pulse",
+			"requires_level": 3
+		},
+		{
+			"id": "e_impacts",
+			"title": "Эпоха гигантских ударов",
+			"desc": "Легендарный навык. Крупные соседи сталкиваются с тобой вдвое чаще. Каждый такой удар — огромная прибавка массы, если ты сумеешь его смягчить. Так собирались Земля и Венера.",
+			"cost": 1100000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-1.25,
+				24
+			],
+			"requires": [
+				"e_magma"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"impact_more": 1.0
+			},
+			"icon": "combo",
+			"legendary": true,
+			"chondrules": [
+				60
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_feed",
+			"title": "Галечная аккреция",
+			"desc": "Газ тормозит гальку у самой твоей поверхности: галька и мелочь дают на 10% больше массы за уровень.",
+			"cost": 50000000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				1.25,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"embryo_feed": 0.1
+			},
+			"icon": "pebble_swarm"
+		},
+		{
+			"id": "e_atmo",
+			"title": "Первичная атмосфера",
+			"desc": "Тонкая оболочка газа вокруг тебя тормозит пролетающую гальку: сфера Хилла ловит на 8% больше за уровень.",
+			"cost": 200000000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				1.25,
+				22.5
+			],
+			"requires": [
+				"e_feed"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"hill": 0.08
+			},
+			"icon": "halo",
+			"requires_level": 3
+		},
+		{
+			"id": "e_trap",
+			"title": "Ловушка давления",
+			"desc": "Легендарный навык. Ты встал на горб давления в газе: миграция к звезде остановилась, а дрейфующая галька скапливается рядом с тобой — её рост +50%.",
+			"cost": 1050000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				1.25,
+				24
+			],
+			"requires": [
+				"e_atmo"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"migrate": -1.0,
+				"embryo_feed": 0.5
+			},
+			"icon": "pebble_root",
+			"legendary": true,
+			"chondrules": [
+				60
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_trophy",
+			"title": "Трофеи слияний",
+			"desc": "Каждое слияние с соседом приносит на 25% больше звёздной пыли за уровень.",
+			"cost": 50000000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				3.75,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"merge_value": 0.25
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "e_mantle",
+			"title": "Тяжёлые недра",
+			"desc": "Множитель ко всей звёздной пыли: +0,15 за уровень поверх других навыков.",
+			"cost": 300000000,
+			"cost_growth": 1.15,
+			"max_level": 10,
+			"pos": [
+				3.75,
+				22.5
+			],
+			"requires": [
+				"e_trophy"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"value_mul": 0.15
+			},
+			"icon": "geode",
+			"requires_level": 3
+		},
+		{
+			"id": "e_brake",
+			"title": "Против течения",
+			"desc": "Ты лучше держишь орбиту в потоке газа: миграция к звезде на 15% слабее за уровень.",
+			"cost": 60000000,
+			"cost_growth": 1.35,
+			"max_level": 4,
+			"pos": [
+				2.5,
+				21
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"migrate": -0.15
+			},
+			"icon": "drift_1"
+		},
+		{
+			"id": "e_thrust",
+			"title": "Разгон зародыша",
+			"desc": "Тяжёлому телу нужен разгон: скорость +5% и тяга +5% за уровень.",
+			"cost": 60000000,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-2.5,
+				21
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"speed": 0.05,
+				"thrust": 0.05
+			},
+			"icon": "thrust"
 		}
 	]
 }
