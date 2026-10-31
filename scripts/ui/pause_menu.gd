@@ -78,6 +78,8 @@ func _show_paths() -> void:
 	_clear()
 	_title("Карта путей")
 	var now := mini(GameState.stage, 2) if GameState.stage < 3 else GameState.stage - 2
+	if GameState.is_giant():
+		now = 4
 	for i in GameData.FORK_MAP.size():
 		var fork: Array = GameData.FORK_MAP[i]
 		var head := Label.new()
@@ -155,8 +157,16 @@ func _show_dev() -> void:
 	_dev_button("Планетезималь → зародыш", func(): _jump(2.9e9, 3))
 	_dev_button("Зародыш: начало", func(): _jump(3.05e9, 4))
 	_dev_button("Зародыш: 1 M⊕", func(): _jump(GameData.mass_for_earths(1.05), 4))
+	_dev_button("Гигант: начало", func():
+		_jump(GameData.mass_for_earths(10.5), 4, false)
+		GameState.embryo_choice = "giant"
+		GameState.start_giant("giant_cold", 7500.0)
+		Fader.go(Fader.GIANT))
 	_dev_button("Газ кончается", func():
-		if GameState.is_embryo() and GameState.gas_left > 20.0:
+		if GameState.is_giant() and float(GameState.giant.gas) > 20.0:
+			GameState.giant.gas = 20.0
+			_dev_say("Газ рассеется через 20 секунд")
+		elif GameState.is_embryo() and GameState.gas_left > 20.0:
 			GameState.gas_left = 20.0
 			_dev_say("Газ рассеется через 20 секунд")
 		else:
@@ -234,7 +244,7 @@ func _dev_say(text: String) -> void:
 
 
 ## Ставит массу и этап, состав растягивается под новую массу, игра перезапускается.
-func _jump(mass: float, stage: int) -> void:
+func _jump(mass: float, stage: int, go := true) -> void:
 	var total := 0.0
 	for key in GameState.materials:
 		total += float(GameState.materials[key])
@@ -259,11 +269,13 @@ func _jump(mass: float, stage: int) -> void:
 	GameState.magma_hits = 0
 	GameState.has_moon = false
 	GameState.ending = ""
+	GameState.giant = {}
 	GameState.tips_seen = []
 	if stage >= 3:
 		_max_tree_before(stage)
 	GameState.save_game()
-	Fader.go(Fader.GAME)
+	if go:
+		Fader.go(Fader.GAME)
 
 
 ## Прокачать всё древо прошлых стадий, как у игрока, дошедшего сюда.

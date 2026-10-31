@@ -54,6 +54,10 @@ var ending := ""         # чем кончился забег (GameData.ENDINGS)
 # Не сбрасываются вместе с забегом: наследие прошлых концовок.
 var legacy := 0
 var endings_seen: Array = []
+## Этап газового гиганта: flavor (гигант по ядру), e (массы Земли), r (орбита),
+## gas (сколько секунд газа осталось), sigma (плотность газа по радиусу),
+## moons, moon_prog. Пусто — этап не начался.
+var giant := {}
 
 
 func _ready() -> void:
@@ -137,6 +141,30 @@ func _add_frozen(gained_mass: float) -> void:
 ## Наследие прошлых концовок и луна: множитель звёздной пыли.
 func value_bonus() -> float:
 	return (1.0 + GameData.LEGACY_BONUS * legacy) * (1.0 + (GameData.MOON_BONUS + Skills.stat("moon_value") if has_moon else 0.0))
+
+
+func is_giant() -> bool:
+	return stage >= GameData.GIANT_STAGE and not giant.is_empty()
+
+
+## Лавина газа: забег продолжается этапом газового гиганта.
+func start_giant(flavor: String, r: float) -> void:
+	stage = GameData.GIANT_STAGE
+	giant = {"flavor": flavor, "e": maxf(earth_masses(), GameData.GIANT_EARTHS), "r": r,
+		"gas": GameData.GIANT_GAS_TIME * (1.0 + Skills.stat("giant_gas")), "sigma": [], "moons": 0, "moon_prog": 0.0}
+	save_game()
+
+
+## Магнитное поле гиганта, 0..1: его раскручивает железное ядро.
+func giant_field() -> float:
+	var core := core_share if is_melted else 0.0
+	return clampf(0.15 + core * 1.6 + Skills.stat("giant_field"), 0.0, 1.0)
+
+
+## Сколько лун удержит магнитное поле: оно расчищает полость у планеты,
+## и луны не падают в неё вместе с газом.
+func giant_moon_cap() -> int:
+	return 1 + int(giant_field() * 4.0)
 
 
 func is_embryo() -> bool:
@@ -426,6 +454,7 @@ func save_game() -> void:
 		"ending": ending,
 		"legacy": legacy,
 		"endings_seen": endings_seen,
+		"giant": giant,
 	}
 	if tree_seen != null:
 		data.tree_seen = tree_seen
@@ -466,6 +495,7 @@ func load_game() -> void:
 	ending = str(data.get("ending", ""))
 	legacy = int(data.get("legacy", 0))
 	endings_seen = Array(data.get("endings_seen", []))
+	giant = Dictionary(data.get("giant", {}))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
@@ -522,6 +552,7 @@ func _reset_values() -> void:
 	magma_hits = 0
 	has_moon = false
 	ending = ""
+	giant = {}
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:

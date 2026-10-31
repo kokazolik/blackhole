@@ -2392,6 +2392,208 @@
 				30
 			],
 			"requires_level": 2
+		},
+		{
+			"id": "g_root",
+			"title": "Газовый гигант",
+			"desc": "Лавина газа сделала тебя гигантом. Газ течёт к тебе на 10% быстрее, звёздной пыли с каждой массы Земли на 25% больше. Начало пути к звезде.",
+			"cost": 60000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				30.0
+			],
+			"requires": [],
+			"requires_stage": 5,
+			"effects": {
+				"giant_acc": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_flow",
+			"title": "Потоки из диска",
+			"desc": "Газ стекает к тебе по спиральным волнам: аккреция +15% за уровень.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 5,
+			"pos": [
+				-3.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_acc": 0.15
+			},
+			"icon": "pebble_swarm",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_reach",
+			"title": "Широкая кормовая зона",
+			"desc": "Твоя гравитация достаёт дальше: газ собирается с полосы на 12% шире за уровень, щель открывается медленнее.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				-1.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_reach": 0.12
+			},
+			"icon": "reach_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_anchor",
+			"title": "Якорь в щели",
+			"desc": "Щель держит тебя на месте: миграция к звезде на 20% слабее за уровень, и сдвигаться по орбите на 10% легче.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				1.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_anchor": 0.2,
+				"giant_speed": 0.1
+			},
+			"icon": "drift_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_dynamo",
+			"title": "Динамо",
+			"desc": "Металлический водород в недрах раскручивает магнитное поле: +10% поля за уровень. Поле держит луны и зажигает сияния. Сильнее всего поле у гиганта с большим железным ядром.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				3.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_field": 0.1
+			},
+			"icon": "pulse",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_glow",
+			"title": "Сияние аккреции",
+			"desc": "Падающий газ раскаляется и светится: множитель ко всей звёздной пыли +0,2 за уровень.",
+			"cost": 250000000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				-3.0,
+				32.5
+			],
+			"requires": [
+				"g_flow"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"value_mul": 0.2
+			},
+			"icon": "geode",
+			"requires_level": 3,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_moons",
+			"title": "Диск спутников",
+			"desc": "Пыль в твоём собственном диске слипается быстрее: луны рождаются на 30% чаще за уровень.",
+			"cost": 250000000,
+			"cost_growth": 1.4,
+			"max_level": 4,
+			"pos": [
+				3.0,
+				32.5
+			],
+			"requires": [
+				"g_dynamo"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_moons": 0.3
+			},
+			"icon": "halo",
+			"requires_level": 2,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_breath",
+			"title": "Долгий диск",
+			"desc": "Легендарный навык. Твоя тень прикрывает внешний диск от света звезды, и он испаряется медленнее: газа на 30% дольше. Только так дорастают до коричневого карлика.",
+			"cost": 1200000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				33.75
+			],
+			"requires": [
+				"g_flow",
+				"g_reach"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_gas": 0.3
+			},
+			"icon": "swarm",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 3,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_runaway",
+			"title": "Убегающая аккреция",
+			"desc": "Легендарный навык. Чем ты тяжелее, тем жаднее тянешь газ: аккреция растёт с массой ещё быстрее. Без него до коричневого карлика не дорасти.",
+			"cost": 3000000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				35.0
+			],
+			"requires": [
+				"g_breath"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_runaway": 0.45
+			},
+			"icon": "combo",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 1,
+			"requires_route": "giant"
 		}
 	]
 }

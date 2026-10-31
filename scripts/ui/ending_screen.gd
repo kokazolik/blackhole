@@ -9,6 +9,8 @@ const PLANET_COLORS := {
 	"giant_dark": [Color(0.42, 0.32, 0.24), Color(0.16, 0.11, 0.08)],
 	"giant_dense": [Color(0.78, 0.76, 0.72), Color(0.44, 0.4, 0.38)],
 	"giant_core": [Color(0.9, 0.78, 0.6), Color(0.62, 0.46, 0.3)],
+	"super_jupiter": [Color(0.98, 0.78, 0.56), Color(0.7, 0.34, 0.2)],
+	"brown_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
 	"super_earth": [Color(0.55, 0.62, 0.7), Color(0.3, 0.34, 0.4)],
 	"planet_rock": [Color(0.66, 0.56, 0.46), Color(0.38, 0.3, 0.24)],
 	"planet_living": [Color(0.36, 0.6, 0.86), Color(0.36, 0.56, 0.3)],
@@ -65,7 +67,12 @@ func _ready() -> void:
 	var core := "железное ядро %d%% массы" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
 	var stats := "%s · %s · %s%s" % [GameData.format_size(GameState.mass), GameData.format_earths(GameState.mass), core,
 		" · есть луна" if GameState.has_moon else ""]
-	if kind.begins_with("giant"):
+	if GameState.is_giant():
+		var e: float = float(GameState.giant.get("e", 10.0))
+		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]
+		stats = "%d масс Земли · %s массы Юпитера · ядро: %s · лун: %d" % [roundi(e), String.num(e / GameData.JUPITER_EARTHS, 2),
+			body.to_lower(), int(GameState.giant.get("moons", 0))]
+	elif kind.begins_with("giant"):
 		# Состав был у ядра: теперь оно в центре, под толщей водорода и гелия.
 		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]
 		stats = "ядро: %s, %s, под толщей газа%s" % [body.to_lower(), GameData.format_earths(GameState.mass),
@@ -128,7 +135,7 @@ func _draw_planet() -> void:
 	var c := _icon.size * 0.5
 	var r := 30.0 if kind == "dwarf_planet" else 52.0  # карлик заметно мельче
 	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
-	var giant := kind.begins_with("giant")
+	var giant := kind.begins_with("giant") or kind == "super_jupiter" or kind == "brown_dwarf"
 	for k in 6:
 		_icon.draw_circle(c, r * (1.0 + 0.05 * (6 - k)), Color(cols[0], 0.04))
 	_icon.draw_circle(c, r, cols[0])

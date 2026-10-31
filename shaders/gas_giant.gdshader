@@ -10,6 +10,10 @@ uniform vec3 storm_col : source_color = vec3(0.82, 0.38, 0.22);
 uniform float spin_speed = 0.02;
 uniform float tilt = 0.32;
 uniform float aspect = 1.0;   // ширина рамки к высоте: тело круглое в любой рамке
+uniform float ring_k = 1.0;   // 0 — без кольца (на этапе гиганта кольцо заменяет свой диск)
+uniform float aurora = 0.0;   // полярные сияния: сила магнитного поля
+uniform float heat = 0.0;
+uniform float ambient = 0.07;  // сколько видно ночную сторону     // жар от падающего газа: раскалённые полосы светятся
 
 const float BODY = 0.34;  // в долях высоты рамки
 
@@ -60,7 +64,7 @@ void fragment() {
 	vec2 p = (UV - 0.5) * vec2(aspect, 1.0) / BODY;
 	float d = length(p);
 	vec4 out_col = vec4(0.0);
-	vec4 rg = ring(p);
+	vec4 rg = ring(p) * ring_k;
 	// Задняя половина кольца — за телом.
 	float c = cos(tilt);
 	float s = sin(tilt);
@@ -90,8 +94,15 @@ void fragment() {
 		// Свет звезды: мягкий терминатор и затемнение к краю.
 		vec3 l = normalize(vec3(light_dir, 0.55));
 		float lit = clamp(dot(n, l), 0.0, 1.0);
-		float shade = 0.07 + 0.93 * smoothstep(-0.05, 0.6, lit);
+		float shade = ambient + (1.0 - ambient) * smoothstep(-0.05, 0.6, lit);
 		col *= shade * (0.72 + 0.28 * z);
+		// Падающий газ греет облака: тёмные полосы тлеют и на ночной стороне.
+		col += vec3(1.0, 0.45, 0.18) * heat * 0.35 * (1.0 - smoothstep(0.25, 0.75, band)) * (1.0 - shade);
+		// Сияния: кольца у магнитных полюсов, мерцающие занавесы.
+		float pole = smoothstep(0.72, 0.9, abs(lat)) * smoothstep(1.0, 0.93, abs(lat));
+		float curtain = 0.55 + 0.45 * sin(lon * 9.0 + TIME * 2.3 + sin(lon * 3.0 - TIME) * 2.0);
+		vec3 aur_col = mix(vec3(0.35, 1.0, 0.6), vec3(0.75, 0.45, 1.0), 0.5 + 0.5 * sin(lon * 2.0 + TIME * 0.7));
+		col += aur_col * pole * curtain * aurora * 1.4;
 		// Дымка атмосферы по краю.
 		float rim = pow(1.0 - z, 3.0);
 		col += vec3(0.55, 0.7, 1.0) * rim * 0.45 * smoothstep(-0.2, 0.5, dot(p / max(d, 1e-4), light_dir));
@@ -103,6 +114,15 @@ void fragment() {
 	}
 	// Ореол атмосферы за краем.
 	float halo = smoothstep(1.12, 1.0, d) * step(1.0, d);
+	// За краем у полюсов сияние поднимается над диском.
+	float ca = cos(tilt);
+	float sa = sin(tilt);
+	float pole_y = abs(-sa * p.x + ca * p.y) / max(d, 1e-4);
+	float aur_halo = smoothstep(1.18, 1.0, d) * step(1.0, d) * smoothstep(0.75, 0.97, pole_y) * aurora;
+	out_col = mix(out_col, vec4(0.5, 1.0, 0.7, 1.0), aur_halo * 0.6 * (1.0 - out_col.a));
+	if (out_col.a < 0.001 && aur_halo > 0.0) {
+		out_col = vec4(0.5, 1.0, 0.7, aur_halo * 0.6);
+	}
 	out_col = mix(out_col, vec4(0.55, 0.72, 1.0, 1.0), halo * 0.35 * (1.0 - out_col.a));
 	if (out_col.a < 0.001 && halo > 0.0) {
 		out_col = vec4(0.55, 0.72, 1.0, halo * 0.35);

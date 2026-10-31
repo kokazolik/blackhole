@@ -493,7 +493,9 @@ func _check_embryo(delta: float) -> void:
 		_collapse_t -= delta
 		_shake = maxf(_shake, 0.25 + 0.5 * pebble_field.collapse_k)
 		if _collapse_t <= 0.0:
-			_finish(_collapse_kind)
+			_collapse_t = -1.0
+			GameState.start_giant(_collapse_kind, player.position.length())
+			Fader.go(Fader.GIANT, 1.2, 1.4)
 		return
 	if GameState.embryo_choice == "":
 		return  # путь ещё не выбран
@@ -505,7 +507,7 @@ func _check_embryo(delta: float) -> void:
 			_finish("dwarf_planet")  # орбиту не расчистил: не планета
 		return
 	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
-		_collapse_kind = GameData.giant_ending(GameState.fate_type(), player.position.length() > GameData.SNOW_LINE)
+		_collapse_kind = GameData.giant_ending(GameState.fate_type(), true)  # горячим делает орбита в конце этапа
 		_collapse_t = PebbleField.COLLAPSE_TIME + 0.6
 		pebble_field.start_collapse()
 		_show_caption("Лавина газа!", "ядро в десять масс Земли: газ диска рушится на тебя")

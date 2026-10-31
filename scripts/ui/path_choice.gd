@@ -38,7 +38,7 @@ func _ready() -> void:
 	box.add_child(row)
 
 	# Гигант помнит ядро: вид и имя — по составу и месту, где сейчас тело.
-	var gk := GameData.giant_ending(GameState.fate_type(), GameState.player_position.length() > GameData.SNOW_LINE)
+	var gk := GameData.giant_ending(GameState.fate_type(), true)
 	var look: Array = GameData.GIANT_LOOK[gk]
 	var giant := ShaderMaterial.new()
 	giant.shader = GIANT_SHADER
@@ -48,8 +48,8 @@ func _ready() -> void:
 	giant.set_shader_parameter("storm_col", look[2])
 	var g: Dictionary = GameData.ENDINGS[gk]
 	row.add_child(_card(giant, 1.0, g["name"],
-		"Гонка с газом: набери %d масс Земли, и газ рухнет на тебя лавиной. Не успеешь — суперземля или каменный мир." % roundi(GameData.GIANT_EARTHS),
-		"Наследие до %d · рискованно" % int(g["legacy"]), "giant", false))
+		"Гонка с газом: набери %d масс Земли, и газ рухнет на тебя лавиной. Дальше новый этап: пей газ диска и расти до Юпитера и больше. Не успеешь — суперземля или карликовая планета." % roundi(GameData.GIANT_EARTHS),
+		"Наследие %d–%d · рискованно" % [int(GameData.ENDINGS["giant_hot"]["legacy"]), int(GameData.ENDINGS["brown_dwarf"]["legacy"])], "giant", false))
 
 	_planet_mat.shader = EMBRYO_SHADER
 	var style := GameData.embryo_style(GameState.fate_type())
