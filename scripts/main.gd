@@ -501,7 +501,7 @@ func _check_embryo(delta: float) -> void:
 			_finish(GameState.composition_ending())
 		return
 	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
-		_collapse_kind = "giant_cold" if player.position.length() > GameData.SNOW_LINE else "giant_hot"
+		_collapse_kind = GameData.giant_ending(GameState.fate_type(), player.position.length() > GameData.SNOW_LINE)
 		_collapse_t = PebbleField.COLLAPSE_TIME + 0.6
 		pebble_field.start_collapse()
 		_show_caption("Лавина газа!", "ядро в десять масс Земли: газ диска рушится на тебя")

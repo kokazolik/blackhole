@@ -5,6 +5,9 @@ extends Control
 const PLANET_COLORS := {
 	"giant_cold": [Color(0.86, 0.72, 0.52), Color(0.6, 0.4, 0.26)],
 	"giant_hot": [Color(1.0, 0.62, 0.36), Color(0.7, 0.28, 0.16)],
+	"giant_ice": [Color(0.55, 0.8, 0.95), Color(0.24, 0.46, 0.76)],
+	"giant_dark": [Color(0.42, 0.32, 0.24), Color(0.16, 0.11, 0.08)],
+	"giant_dense": [Color(0.78, 0.76, 0.72), Color(0.44, 0.4, 0.38)],
 	"giant_core": [Color(0.9, 0.78, 0.6), Color(0.62, 0.46, 0.3)],
 	"super_earth": [Color(0.55, 0.62, 0.7), Color(0.3, 0.34, 0.4)],
 	"planet_rock": [Color(0.66, 0.56, 0.46), Color(0.38, 0.3, 0.24)],

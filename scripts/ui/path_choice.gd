@@ -37,11 +37,17 @@ func _ready() -> void:
 	row.add_theme_constant_override("separation", 28)
 	box.add_child(row)
 
+	# Гигант помнит ядро: вид и имя — по составу и месту, где сейчас тело.
+	var gk := GameData.giant_ending(GameState.fate_type(), GameState.player_position.length() > GameData.SNOW_LINE)
+	var look: Array = GameData.GIANT_LOOK[gk]
 	var giant := ShaderMaterial.new()
 	giant.shader = GIANT_SHADER
 	giant.set_shader_parameter("aspect", ART_SIZE.x / ART_SIZE.y)
-	var g := GameData.ENDINGS["giant_cold"]
-	row.add_child(_card(giant, 1.0, "Газовый гигант",
+	giant.set_shader_parameter("band_light", look[0])
+	giant.set_shader_parameter("band_dark", look[1])
+	giant.set_shader_parameter("storm_col", look[2])
+	var g: Dictionary = GameData.ENDINGS[gk]
+	row.add_child(_card(giant, 1.0, g["name"],
 		"Гонка с газом: набери %d масс Земли, и газ рухнет на тебя лавиной. Не успеешь — суперземля или каменный мир." % roundi(GameData.GIANT_EARTHS),
 		"Наследие до %d · рискованно" % int(g["legacy"]), "giant", false))
 
@@ -53,6 +59,10 @@ func _ready() -> void:
 	_planet_mat.set_shader_parameter("light_dir", Vector2(-0.85, -0.35).normalized())
 	_planet_mat.set_shader_parameter("seed", 0.37)
 	var fate := GameState.composition_ending()
+	if fate == "planet_living":
+		# Живая планета: вода и воздух — плотная голубая дымка.
+		_planet_mat.set_shader_parameter("atmo", 1.0)
+		_planet_mat.set_shader_parameter("atmo_col", Color(0.45, 0.72, 1.0))
 	var p: Dictionary = GameData.ENDINGS[fate]
 	var hint := "Кем станешь, решает состав: сейчас это «%s»." % p["name"]
 	if not GameState.is_melted:
