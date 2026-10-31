@@ -16,6 +16,7 @@ const PLANET_COLORS := {
 	"planet_dark": [Color(0.3, 0.27, 0.26), Color(0.14, 0.12, 0.12)],
 	"planet_ocean": [Color(0.3, 0.56, 0.84), Color(0.14, 0.3, 0.56)],
 	"planet_layered": [Color(0.72, 0.6, 0.5), Color(0.5, 0.42, 0.5)],
+	"dwarf_planet": [Color(0.6, 0.57, 0.54), Color(0.36, 0.34, 0.33)],
 }
 
 var kind := ""
@@ -125,7 +126,7 @@ func _line(text: String, font: Font, size: int, color: Color) -> Label:
 ## Итоговое тело: шар цвета концовки с полосами или материками и тенью.
 func _draw_planet() -> void:
 	var c := _icon.size * 0.5
-	var r := 52.0
+	var r := 30.0 if kind == "dwarf_planet" else 52.0  # карлик заметно мельче
 	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
 	var giant := kind.begins_with("giant")
 	for k in 6:

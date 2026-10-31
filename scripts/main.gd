@@ -480,7 +480,8 @@ func _process(delta: float) -> void:
 
 
 ## Гонка зародыша с газом: 10 масс Земли до его конца — гигант; не успел —
-## каменная планета, а суперземле дают второй шанс нырнуть в молодого гиганта.
+## суперземле дают второй шанс нырнуть в молодого гиганта, а меньше массы Земли —
+## карликовая планета: мелкое тело орбиту не расчищает.
 func _check_embryo(delta: float) -> void:
 	if not GameState.is_embryo() or GameState.ending != "" or player.dead or GameState.gas_left < 0.0:
 		return
@@ -498,8 +499,10 @@ func _check_embryo(delta: float) -> void:
 		return  # путь ещё не выбран
 	if GameState.planet_route():
 		# Путь планеты: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
-		if e >= GameData.SUPER_EARTHS or GameState.gas_left <= 0.0:
+		if e >= GameData.SUPER_EARTHS:
 			_finish(GameState.composition_ending())
+		elif GameState.gas_left <= 0.0:
+			_finish("dwarf_planet")  # орбиту не расчистил: не планета
 		return
 	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
 		_collapse_kind = GameData.giant_ending(GameState.fate_type(), player.position.length() > GameData.SNOW_LINE)
@@ -521,7 +524,7 @@ func _check_embryo(delta: float) -> void:
 		rivals.spawn_giant()
 		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром")
 	else:
-		_finish(GameState.composition_ending())
+		_finish("dwarf_planet")
 
 
 func _finish(kind: String) -> void:

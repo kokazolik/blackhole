@@ -69,8 +69,8 @@ func _ready() -> void:
 	if not GameState.is_melted:
 		hint = "Кем станешь, решает состав, он ещё не застыл: сейчас это «%s»." % p["name"]
 	row.add_child(_card(_planet_mat, 0.5, p["name"],
-		"Спокойный рост: набери массу Земли и расчисти орбиту. " + hint,
-		"Наследие %d · надёжно" % int(p["legacy"]), "planet", true))
+		"Спокойный рост: набери массу Земли и расчисти орбиту, иначе останешься карликовой планетой. " + hint,
+		"Наследие %d" % int(p["legacy"]), "planet", true))
 
 
 func _process(delta: float) -> void:
