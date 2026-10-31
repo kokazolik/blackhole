@@ -688,7 +688,9 @@ func _refresh() -> void:
 		type = GameState.melt_type
 	var body: Dictionary = GameData.BODY_TYPES[type]
 	_body_label.text = body.name + (" · застыло" if GameState.is_melted else "")
-	var body_col: Color = GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else UiTheme.TEXT
+	if type == "neutral":
+		_body_label.text = "Переходное, ведёт %s" % GameData.MATERIALS[GameData.lead_material(GameState.materials)].name.to_lower()
+	var body_col: Color = GameData.MATERIALS[type].color if GameData.MATERIALS.has(type) else body.get("color", UiTheme.TEXT)
 	if body_col != _body_col:
 		# Смена цвета темы пересчитывает стиль подписи: только когда он и правда другой.
 		_body_col = body_col
@@ -696,8 +698,8 @@ func _refresh() -> void:
 	_body_desc.text = "· " + body.desc
 	if GameState.is_planet():
 		_body_desc.text = ("· зародышу: " if GameState.is_embryo() else "· планетезимали: ") + GameData.stage_material(type, GameState.is_embryo()).text
-	elif GameState.is_boulder() and GameData.BOULDER_MATERIAL.has(type):
-		_body_desc.text = "· валуну: " + GameData.BOULDER_MATERIAL[type].text
+	elif GameState.is_boulder() and not GameData.boulder_material(type).is_empty():
+		_body_desc.text = "· валуну: " + GameData.boulder_material(type).text
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()
 	_badge.visible = Skills.any_affordable()

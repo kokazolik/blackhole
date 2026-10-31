@@ -54,6 +54,11 @@ const ORBIT_SPEED_AT_START := 25.0
 const COMPOSITION_MIN_MASS := 0.5
 const SPECIALIZE_SHARE := 0.5  # один материал выше этой доли: специализация
 const MIX_MAX_SHARE := 0.4     # все материалы не выше этой доли: смесь (хондрит)
+const DUO_SHARE := 0.25        # переходное тело: второй материал от этой доли делает двойной тип
+# Двойные типы переходного тела: пара главных материалов даёт особый мир.
+# Лёд с углеродом — метановый мир, как Титан. Камень с углеродом — углекислый
+# газ выходит из пород и запирает тепло, как на Венере.
+const DUO_TYPES := {"titan": ["ice", "carbon"], "venus": ["silicate", "carbon"]}
 
 # Тип тела не даёт сиюминутных бонусов: состав решает, кем тело станет потом.
 # Из металлических планетезималей вырастают железные миры, из каменных —
@@ -61,6 +66,8 @@ const MIX_MAX_SHARE := 0.4     # все материалы не выше это�
 const BODY_TYPES := {
 	"unformed": {"name": "Неоформленное", "desc": "состав ещё не сложился"},
 	"neutral": {"name": "Переходное", "desc": "путь ещё не выбран"},
+	"titan": {"name": "Лёд и углерод", "desc": "путь: метановый мир, как Титан", "color": Color(0.92, 0.62, 0.3)},
+	"venus": {"name": "Камень и углерод", "desc": "путь: парниковый мир, как Венера", "color": Color(0.95, 0.82, 0.5)},
 	"chondrite": {"name": "Хондрит (смесь)", "desc": "путь: строительный астероид, гибкий к любой судьбе"},
 	"silicate": {"name": "Каменное", "desc": "путь: землеподобная планета"},
 	"metal": {"name": "Металлическое", "desc": "путь: железный мир с огромным ядром"},
@@ -127,7 +134,26 @@ static func body_type(materials: Dictionary) -> String:
 		return top_key
 	if shares[top_key] <= MIX_MAX_SHARE:
 		return "chondrite"
+	var second := ""
+	for key in MATERIAL_ORDER:
+		if key != top_key and (second == "" or shares[key] > shares[second]):
+			second = key
+	if shares[second] >= DUO_SHARE:
+		for duo in DUO_TYPES:
+			var pair: Array = DUO_TYPES[duo]
+			if top_key in pair and second in pair:
+				return duo
 	return "neutral"
+
+
+## Ведущий материал тела (у переходного тела его бонусы и судьба).
+static func lead_material(materials: Dictionary) -> String:
+	var shares := composition(materials)
+	var top_key: String = MATERIAL_ORDER[0]
+	for key in MATERIAL_ORDER:
+		if shares[key] > shares[top_key]:
+			top_key = key
+	return top_key
 
 
 ## Средняя плотность пыли на расстоянии от звезды (1.0 на старте).
@@ -415,7 +441,16 @@ const BOULDER_MATERIAL := {
 	"ice": {"effects": {"stick": 0.2, "grip": 0.04}, "text": "лёд липкий: слипание +20%, без дуги прилипает на 4% крупнее"},
 	"carbon": {"effects": {"chip": -0.12, "stick": 0.12}, "text": "пористый углерод гасит удары: сколов −12%, слипание +12%"},
 	"chondrite": {"effects": {"drift": -0.04, "chip": -0.08, "stick": 0.06}, "text": "смесь: снос −4%, сколов −8%, слипание +6%"},
+	"titan": {"effects": {"stick": 0.16, "chip": -0.06, "grip": 0.02}, "text": "лёд с углеродом: слипание +16%, сколов −6%, прилипает на 2% крупнее"},
+	"venus": {"effects": {"chip": -0.18, "stick": 0.06}, "text": "камень с углеродом: сколов −18%, слипание +6%"},
 }
+
+## Бонус вещества валуну; переходное тело получает бонус ведущего материала.
+static func boulder_material(type: String) -> Dictionary:
+	if type == "neutral":
+		type = lead_material(GameState.materials)
+	return BOULDER_MATERIAL.get(type, {})
+
 
 # Ближе к километру валун начинает сам притягивать мелочь: от SELF_GRAV_FROM
 # притяжение растёт и к планетезимали выходит на полную силу.
@@ -567,6 +602,8 @@ const PLANET_MATERIAL := {
 	"ice": {"effects": {"hill": 0.1}, "text": "лёд лёгкий: сфера Хилла +10%", "melt": "подлёдный океан, как у Цереры"},
 	"carbon": {"effects": {"calm": 0.1}, "text": "углерод гасит удары: рой остывает на 10% быстрее", "melt": "вода в порах и органика"},
 	"chondrite": {"effects": {"qstar": 0.08, "heal": 0.05, "calm": 0.04}, "text": "смесь: понемногу всего", "melt": "слоистое тело"},
+	"titan": {"effects": {"hill": 0.06, "calm": 0.06}, "text": "лёд с углеродом: сфера Хилла +6%, рой остывает на 6% быстрее", "melt": "метан и вода под коркой льда"},
+	"venus": {"effects": {"heal": 0.1, "calm": 0.05}, "text": "камень с углеродом: обломки возвращаются +10%, рой остывает на 5% быстрее", "melt": "углекислый газ уходит из пород"},
 }
 
 # Что вещество даёт зародышу. Расплавленное тело (а зародыш почти всегда расплавлен)
@@ -577,6 +614,8 @@ const EMBRYO_MATERIAL := {
 	"metal": {"effects": {"rival_pull": 0.15, "qstar": 0.1}, "text": "металл: тяжёлое тело тянет соседей на 15% сильнее, прочность +10%"},
 	"carbon": {"effects": {"hill": 0.1, "embryo_feed": 0.1}, "text": "углерод: липкая органика ловит гальку, сфера Хилла +10%, рост от гальки +10%"},
 	"chondrite": {"effects": {"merge_keep": 0.04, "embryo_feed": 0.1}, "text": "смесь: понемногу всего"},
+	"titan": {"effects": {"embryo_feed": 0.18, "hill": 0.05}, "text": "лёд с углеродом: рост от гальки +18%, сфера Хилла +5%"},
+	"venus": {"effects": {"merge_keep": 0.05, "hill": 0.05, "embryo_feed": 0.05}, "text": "камень с углеродом: +5% массы соседа, сфера Хилла +5%, рост от гальки +5%"},
 }
 
 
@@ -597,13 +636,22 @@ const EMBRYO_PATHS := {
 
 ## Путь по составу: смесь выбирает по месту — за снеговой линией ледяное ядро.
 ## Тип тела для бонусов планетезимали: несложившийся состав считается смесью.
+## Переходное тело идёт по ведущему материалу.
 static func planet_type(type: String) -> String:
-	return type if PLANET_MATERIAL.has(type) else "chondrite"
+	if PLANET_MATERIAL.has(type):
+		return type
+	if type == "neutral":
+		return lead_material(GameState.materials)
+	return "chondrite"
 
 
 static func embryo_path(type: String, distance: float) -> String:
 	if EMBRYO_PATHS.has(type):
 		return type
+	if type == "titan":
+		return "ice"
+	if type == "venus":
+		return "silicate"
 	return "ice" if distance > SNOW_LINE else "silicate"
 
 
@@ -672,9 +720,13 @@ const LEGACY_BONUS := 0.1    # каждое очко наследия: +10% зв
 
 ## Вид поверхности зародыша (embryo.gdshader): 0 камень, 1 железо, 2 углерод,
 ## 3 лёд, 4 слоистое — по типу тела.
-const EMBRYO_STYLE := {"silicate": 0, "metal": 1, "carbon": 2, "ice": 3, "chondrite": 4}
+const EMBRYO_STYLE := {"silicate": 0, "metal": 1, "carbon": 2, "ice": 3, "chondrite": 4, "titan": 2, "venus": 0}
 # Цвет дымки по виду: азот и пар, металлическая пыль, рыжий смог, водяной пар, смесь.
 const EMBRYO_ATMO := [Color(0.55, 0.75, 1.0), Color(0.85, 0.7, 0.5), Color(0.95, 0.6, 0.35), Color(0.6, 0.85, 1.0), Color(0.8, 0.75, 0.95), Color(0.45, 0.72, 1.0)]
+# Двойные типы прячутся под густой дымкой своего цвета: рыжий азотный смог
+# у Титана, жёлтые облака у парникового мира. [цвет, во сколько раз гуще].
+# Третье число — сплошной облачный покров: у парникового мира поверхности не видно.
+const DUO_ATMO := {"titan": [Color(0.98, 0.62, 0.28), 1.6, 0.55], "venus": [Color(1.0, 0.87, 0.55), 2.2, 0.92]}
 const LIVING_STYLE := 5  # живая планета: океаны, материки, облака
 const MAGMA_COOL := 50.0     # секунд остывает магматический океан после гигантского удара
 
@@ -757,6 +809,10 @@ const ENDINGS := {
 		"desc": "Лёд растаял в глобальный океан глубиной в сотни километров. Ни одного материка."},
 	"planet_layered": {"name": "Слоистый мир", "legacy": 3,
 		"desc": "Пёстрая мантия слоями поверх железного ядра: ты собрал всего понемногу и расплавился, не выбрав одно."},
+	"planet_titan": {"name": "Мир-Титан", "legacy": 3,
+		"desc": "Лёд пополам с углеродом: под рыжей дымкой азота текут метановые реки и плещутся озёра, а под коркой льда прячется водный океан."},
+	"planet_venus": {"name": "Парниковый мир", "legacy": 3,
+		"desc": "Углерод в камне вышел углекислым газом и запер тепло. Под жёлтыми облаками жарче, чем в печи, как на Венере."},
 	"dwarf_planet": {"name": "Карликовая планета", "legacy": 1,
 		"desc": "Газ ушёл раньше, чем ты дорос до массы Земли. Орбиту ты так и не расчистил, и по правилам астрономов ты уже не планета, как Церера и Плутон."},
 }
@@ -766,7 +822,7 @@ const FORK_MAP := [
 	["Пылинка и галька", "где кормишься, то и ешь: у звезды камень и металл, за снеговой линией лёд и углерод"],
 	["Планетезималь", "алюминий греет недра первые минуты: каменное тело в 12–20 км расплавится, и состав застынет навсегда; лёд и углерод уносят тепло водой — ледяное тело останется хондритом"],
 	["Зародыш планеты", "выбор пути: гонка с газом диска до 10 масс Земли — газовый гигант, путь к звезде; или спокойный рост до массы Земли — каменная планета"],
-	["Каменная планета", "тип решает застывший состав: железный, каменный, тёмный, океанский; вода и ядро дают живую планету"],
+	["Каменная планета", "тип решает застывший состав: железный, каменный, тёмный, океанский, слоистый; переходное тело со льдом и углеродом — Мир-Титан, с камнем и углеродом — парниковый мир; вода и ядро дают живую планету"],
 	["Газовый гигант", "газ течёт к тебе из кормовой зоны: выедаешь щель и тянешься к её краям; масса к уходу газа решает, станешь ли ты Юпитером, супер-Юпитером или коричневым карликом; не дай газу утащить тебя к звезде — станешь горячим юпитером; железное ядро даёт магнитное поле, а поле удерживает луны"],
 	["Дальше", "коричневый карлик → звезда → чёрная дыра: эти этапы ещё строятся"],
 ]
@@ -780,7 +836,7 @@ static func giant_ending(type: String, cold: bool) -> String:
 	if not cold:
 		return "giant_hot"
 	match type:
-		"ice":
+		"ice", "titan":
 			return "giant_ice"
 		"carbon":
 			return "giant_dark"
@@ -808,7 +864,12 @@ static func planet_ending(type: String, shares: Dictionary, core: float, water :
 			return "planet_dark"
 		"ice":
 			return "planet_ocean"
+		"titan":
+			return "planet_titan"
+		"venus":
+			return "planet_venus"
 		"silicate":
 			var wet := float(shares.get("ice", 0.0)) + float(shares.get("carbon", 0.0)) * 0.5 + water
 			return "planet_living" if core > 0.05 and wet > 0.08 else "planet_rock"
-	return "planet_layered" if core > 0.0 else "planet_rock"
+	# Смесь массой с Землю непременно переплавлена ударами и собственным весом.
+	return "planet_layered"

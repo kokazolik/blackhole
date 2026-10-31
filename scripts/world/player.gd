@@ -459,8 +459,10 @@ func _update_grain(r: float) -> void:
 		em.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 		em.set_shader_parameter("style", style)
 		em.set_shader_parameter("magma", magma)
-		em.set_shader_parameter("atmo", GameData.embryo_atmo(GameState.mass))
-		em.set_shader_parameter("atmo_col", GameData.EMBRYO_ATMO[style])
+		var duo: Array = GameData.DUO_ATMO.get(GameState.fate_type(), [GameData.EMBRYO_ATMO[style], 1.0, 0.0])
+		em.set_shader_parameter("atmo", minf(GameData.embryo_atmo(GameState.mass) * float(duo[1]), 1.0))
+		em.set_shader_parameter("atmo_col", duo[0])
+		em.set_shader_parameter("veil", float(duo[2]))
 		_embryo.modulate = Color(Color.WHITE * (1.0 + 0.06 * _pulse), embryo_k)
 
 

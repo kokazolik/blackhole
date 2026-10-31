@@ -244,7 +244,7 @@ func _connect_planet() -> void:
 	rivals.grazed.connect(func(at: Vector2) -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.0), "Скол!", Color(1.0, 0.55, 0.4), 22, "graze"))
 	GameState.melted.connect(func() -> void:
-		var info: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(GameState.body_type())]
+		var info: Dictionary = GameData.PLANET_MATERIAL[GameState.melt_type if GameState.melt_type != "" else GameData.planet_type(GameState.body_type())]
 		_shake = maxf(_shake, 0.7)
 		if GameState.is_embryo():
 			_show_caption("Магматический океан", "гигантские удары расплавили тело: железо ушло в ядро, состав застыл")
@@ -607,7 +607,7 @@ func _check_tips() -> void:
 		"gravity": GameState.is_boulder() and GameState.stage < GameData.PLANETESIMAL_STAGE \
 				and GameData.self_gravity(GameState.mass) + Skills.stat("self_grav") > 0.05,
 		"material": GameState.is_boulder() and _intro_time - _boulder_time > 40.0 \
-				and GameData.BOULDER_MATERIAL.has(GameState.body_type()),
+				and not GameData.boulder_material(GameState.body_type()).is_empty(),
 		"clump": pebble_field.clump_left > 3.0 and pebble_field.clump_left < PebbleField.CLUMP_TIME - 1.0,
 		"forks": GameState.body_type() != "unformed" and player.pebble_k >= 1.0,
 	}

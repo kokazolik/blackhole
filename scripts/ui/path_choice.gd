@@ -54,8 +54,10 @@ func _ready() -> void:
 	_planet_mat.shader = EMBRYO_SHADER
 	var style := GameData.embryo_style(GameState.fate_type())
 	_planet_mat.set_shader_parameter("style", style)
-	_planet_mat.set_shader_parameter("atmo", 0.55)
-	_planet_mat.set_shader_parameter("atmo_col", GameData.EMBRYO_ATMO[style])
+	var duo: Array = GameData.DUO_ATMO.get(GameState.fate_type(), [GameData.EMBRYO_ATMO[style], 1.0, 0.0])
+	_planet_mat.set_shader_parameter("atmo", minf(0.55 * float(duo[1]), 1.0))
+	_planet_mat.set_shader_parameter("atmo_col", duo[0])
+	_planet_mat.set_shader_parameter("veil", float(duo[2]))
 	_planet_mat.set_shader_parameter("light_dir", Vector2(-0.85, -0.35).normalized())
 	_planet_mat.set_shader_parameter("seed", 0.37)
 	var fate := GameState.composition_ending()

@@ -9,6 +9,7 @@ uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
 uniform int style = 0;            // 0 камень, 1 железо, 2 углерод, 3 лёд, 4 слоистое, 5 живая
 uniform float magma = 0.0;        // 0..1: свежий магматический океан светится трещинами
 uniform float atmo = 0.0;         // 0..1: толщина дымки
+uniform float veil = 0.0;         // 0..1: сплошной облачный покров (Венера, Титан)
 uniform vec3 atmo_col : source_color = vec3(0.55, 0.75, 1.0);
 uniform float spin = 0.0;
 uniform float tilt = 0.45;
@@ -186,6 +187,15 @@ void fragment() {
 		if (atmo > 0.0) {
 			float limb = pow(1.0 - nv.z, 2.0);
 			col = mix(col, atmo_col * star_light * (0.15 + 1.2 * wrap * wrap), clamp(limb * atmo * 0.9 + atmo * 0.08, 0.0, 1.0));
+		}
+		// Сплошные облака: поверхность скрыта, видны мягкие полосы и шевроны дымки.
+		if (veil > 0.0) {
+			float lat = d.y;
+			float band = fbm(vec3(d.x * 1.5, lat * 9.0, d.z * 1.5) + vec3(fbm(d * 2.0) * 1.5));
+			vec3 cloud = atmo_col * (0.78 + 0.32 * band);
+			float soft = smoothstep(-0.15, 0.9, dot(nv, L));
+			vec3 vc = cloud * star_light * (0.03 + 1.15 * soft) * (0.75 + 0.25 * pow(max(nv.z, 0.0), 0.4));
+			col = mix(col, vc, veil);
 		}
 		alpha = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
 	}

@@ -18,6 +18,8 @@ const PLANET_COLORS := {
 	"planet_dark": [Color(0.3, 0.27, 0.26), Color(0.14, 0.12, 0.12)],
 	"planet_ocean": [Color(0.3, 0.56, 0.84), Color(0.14, 0.3, 0.56)],
 	"planet_layered": [Color(0.72, 0.6, 0.5), Color(0.5, 0.42, 0.5)],
+	"planet_titan": [Color(0.92, 0.62, 0.3), Color(0.42, 0.3, 0.2)],
+	"planet_venus": [Color(0.95, 0.84, 0.55), Color(0.7, 0.55, 0.3)],
 	"dwarf_planet": [Color(0.6, 0.57, 0.54), Color(0.36, 0.34, 0.33)],
 }
 
@@ -139,7 +141,15 @@ func _draw_planet() -> void:
 	for k in 6:
 		_icon.draw_circle(c, r * (1.0 + 0.05 * (6 - k)), Color(cols[0], 0.04))
 	_icon.draw_circle(c, r, cols[0])
-	if giant:
+	var hazy := kind == "planet_titan" or kind == "planet_venus"  # поверхность скрыта облаками
+	if hazy:
+		for k in 4:
+			_icon.draw_circle(c, r * (1.06 + 0.05 * k), Color(cols[0], 0.08))
+		for i in 3:
+			var y := -0.55 + i * 0.5 + 0.05 * sin(_time * 0.3 + i)
+			var w := sqrt(maxf(1.0 - y * y, 0.0)) * r
+			_icon.draw_line(c + Vector2(-w, y * r), c + Vector2(w, y * r), Color(cols[1], 0.22), 12.0, true)
+	elif giant:
 		for i in 5:
 			var y := -0.8 + i * 0.38
 			var w := sqrt(maxf(1.0 - y * y, 0.0)) * r

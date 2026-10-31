@@ -129,7 +129,7 @@ func _current_body() -> String:
 func _body_bonus() -> Dictionary:
 	if GameState.is_planet():
 		return GameData.stage_material(_current_body(), GameState.is_embryo())
-	return GameData.BOULDER_MATERIAL.get(_current_body(), {})
+	return GameData.boulder_material(_current_body())
 
 
 func stat(key: String) -> float:
