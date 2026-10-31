@@ -60,9 +60,10 @@ func _ready() -> void:
 	_planet_mat.set_shader_parameter("seed", 0.37)
 	var fate := GameState.composition_ending()
 	if fate == "planet_living":
-		# Живая планета: вода и воздух — плотная голубая дымка.
-		_planet_mat.set_shader_parameter("atmo", 1.0)
-		_planet_mat.set_shader_parameter("atmo_col", Color(0.45, 0.72, 1.0))
+		# Живая планета: океаны, материки и облака под голубой дымкой.
+		_planet_mat.set_shader_parameter("style", GameData.LIVING_STYLE)
+		_planet_mat.set_shader_parameter("atmo", 0.8)
+		_planet_mat.set_shader_parameter("atmo_col", GameData.EMBRYO_ATMO[GameData.LIVING_STYLE])
 	var p: Dictionary = GameData.ENDINGS[fate]
 	var hint := "Кем станешь, решает состав: сейчас это «%s»." % p["name"]
 	if not GameState.is_melted:

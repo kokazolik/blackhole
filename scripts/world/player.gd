@@ -451,6 +451,8 @@ func _update_grain(r: float) -> void:
 		# Зародыш — уже шар: вид по составу, после удара светится магмой, тяжёлый — в дымке.
 		var em := _embryo.material as ShaderMaterial
 		var style := GameData.embryo_style(GameState.fate_type())
+		if GameState.planet_route() and GameState.composition_ending() == "planet_living":
+			style = GameData.LIVING_STYLE
 		_embryo.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
 		em.set_shader_parameter("light_dir", (-position).normalized())
 		em.set_shader_parameter("spin", _spin)

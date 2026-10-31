@@ -6,7 +6,7 @@ shader_type canvas_item;
 
 uniform vec2 light_dir = vec2(-1.0, 0.0);
 uniform vec3 star_light : source_color = vec3(1.0, 0.9, 0.75);
-uniform int style = 0;            // 0 камень, 1 железо, 2 углерод, 3 лёд, 4 слоистое
+uniform int style = 0;            // 0 камень, 1 железо, 2 углерод, 3 лёд, 4 слоистое, 5 живая
 uniform float magma = 0.0;        // 0..1: свежий магматический океан светится трещинами
 uniform float atmo = 0.0;         // 0..1: толщина дымки
 uniform vec3 atmo_col : source_color = vec3(0.55, 0.75, 1.0);
@@ -77,7 +77,7 @@ float height(vec3 d) {
 	float h = fbm(d * 2.4) * 0.7 + fbm(d * 9.0) * 0.3;
 	vec2 cr = craters(d * 6.0);
 	h += 0.12 * cr.y - 0.1 * cr.x;
-	if (style == 3) h = 0.5 + 0.25 * (h - 0.5);  // лёд сглаживает рельеф
+	if (style == 3 || style == 5) h = 0.5 + 0.25 * (h - 0.5);  // лёд и вода сглаживают рельеф
 	return h;
 }
 
@@ -121,6 +121,16 @@ vec3 albedo_at(vec3 d, float h, out float spec) {
 		float lin = max(ridge(d * 2.2 + 3.0, 0.025), ridge(d * 4.1 + 9.0, 0.018) * 0.7);
 		col = mix(col, vec3(0.62, 0.42, 0.3), lin * 0.75);
 		spec = 0.35;
+	} else if (style == 5) {
+		// Живая: синие океаны с бликом, зелёно-бурые материки, полярные шапки и облака.
+		float land = smoothstep(0.5, 0.54, big + 0.08 * fine);
+		vec3 ocean = mix(vec3(0.03, 0.12, 0.32), vec3(0.07, 0.3, 0.52), smoothstep(0.3, 0.5, big));
+		vec3 ground = mix(vec3(0.18, 0.4, 0.15), vec3(0.56, 0.47, 0.3), smoothstep(0.45, 0.7, fbm(d * 3.0 + 7.0)));
+		col = mix(ocean, ground, land);
+		col = mix(col, vec3(0.92, 0.95, 1.0), smoothstep(0.8, 0.88, abs(d.y) + 0.06 * fine));
+		float cloud = smoothstep(0.52, 0.72, fbm(vec3(d.x * 2.4, d.y * 5.0, d.z * 2.4) + 30.0));
+		col = mix(col, vec3(0.96, 0.97, 1.0), cloud * 0.85);
+		spec = 0.7 * (1.0 - land) * (1.0 - cloud);
 	} else {
 		// Слоистое: пёстрые полосы разных пород, изогнутые течением мантии.
 		float band = sin((d.y + 0.25 * fbm(d * 3.0)) * 14.0 + seed * 6.0) * 0.5 + 0.5;
@@ -152,7 +162,7 @@ void fragment() {
 		vec3 t2 = cross(d, t1);
 		float hx = height(normalize(d + t1 * e)) - h0;
 		float hy = height(normalize(d + t2 * e)) - h0;
-		float bump = style == 3 ? 1.2 : 3.0;
+		float bump = style == 3 || style == 5 ? 1.2 : 3.0;
 		vec3 nb = normalize(d - (t1 * hx + t2 * hy) / e * 0.02 * bump);
 		vec3 n = transpose(mi) * nb;  // обратно в оси экрана
 		float spec_k;
