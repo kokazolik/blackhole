@@ -45,6 +45,7 @@ var core_share := 0.0    # доля металла, ушедшая в ядро �
 var melt_type := ""      # тип тела в момент плавления: дальше состав не меняется
 var zone_eaten := {}     # кольцо диска (GameData.zone_bin) → сколько вещества из него съедено
 var embryo_path := ""    # путь после планетезимали (GameData.EMBRYO_PATHS), записан навсегда
+var embryo_choice := ""  # выбор игрока в начале зародыша: "giant" — гонка с газом, "planet" — до массы Земли
 # Этап «Зародыш планеты»:
 var gas_left := -1.0     # секунд до рассеяния газа диска; <0 — гонка ещё не началась
 var magma_hits := 0      # гигантских ударов: хондрит плавится в магматический океан
@@ -183,12 +184,19 @@ func fate_type() -> String:
 	return melt_type if is_melted and melt_type != "" else GameData.planet_type(body_type())
 
 
-## Чем кончится забег, если остаться планетой сейчас: от массы Земли — суперземля,
-## легче — решает застывший состав.
-func planet_fate() -> String:
-	if earth_masses() >= GameData.SUPER_EARTHS:
-		return "super_earth"
+## Какой каменной планетой кончится забег: решает застывший (или нынешний) состав.
+func composition_ending() -> String:
 	return GameData.planet_ending(fate_type(), GameData.composition(materials), core_share)
+
+
+## Путь каменной планеты: цель — масса Земли, гиганта не будет.
+func planet_route() -> bool:
+	return embryo_choice == "planet"
+
+
+## Сколько масс Земли нужно набрать на выбранном пути.
+func embryo_goal() -> float:
+	return GameData.SUPER_EARTHS if planet_route() else GameData.GIANT_EARTHS
 
 
 ## Забег окончен концовкой: начисляем наследие (за новую концовку — вдвое).
@@ -397,6 +405,7 @@ func save_game() -> void:
 		"melt_type": melt_type,
 		"zone_eaten": zone_eaten,
 		"embryo_path": embryo_path,
+		"embryo_choice": embryo_choice,
 		"gas_left": gas_left,
 		"magma_hits": magma_hits,
 		"has_moon": has_moon,
@@ -436,6 +445,7 @@ func load_game() -> void:
 	melt_type = str(data.get("melt_type", ""))
 	zone_eaten = Dictionary(data.get("zone_eaten", {}))
 	embryo_path = str(data.get("embryo_path", ""))
+	embryo_choice = str(data.get("embryo_choice", ""))
 	gas_left = float(data.get("gas_left", -1.0))
 	magma_hits = int(data.get("magma_hits", 0))
 	has_moon = bool(data.get("has_moon", false))
@@ -493,6 +503,7 @@ func _reset_values() -> void:
 	melt_type = ""
 	zone_eaten = {}
 	embryo_path = ""
+	embryo_choice = ""
 	gas_left = -1.0
 	magma_hits = 0
 	has_moon = false

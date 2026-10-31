@@ -161,7 +161,6 @@ func _ready() -> void:
 
 	hud.tree_requested.connect(_open_tree)
 	hud.menu_requested.connect(_open_pause)
-	pause_menu.orbit_cleared.connect(_clear_orbit)
 	tree_screen.closed.connect(hud.play_purchase_spark)
 	tree_screen.closed.connect(_set_world_visible.bind(true))
 
@@ -186,6 +185,8 @@ func _ready() -> void:
 		_show_ending.call_deferred(GameState.ending, 0)
 	elif GameState.is_embryo() and GameState.gas_left < 0.0:
 		GameState.gas_left = GameData.GAS_TIME  # старое сохранение: гонка начинается сейчас
+	if GameState.ending == "" and GameState.is_embryo() and GameState.embryo_choice == "" and "embryo" in GameState.tips_seen:
+		_ask_path.call_deferred()  # сохранение до выбора пути: спросим сразу
 
 
 ## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
@@ -267,16 +268,48 @@ func _reach_embryo() -> void:
 	if GameState.gas_left < 0.0:
 		GameState.gas_left = GameData.GAS_TIME
 	GameState.save_game()
-	_show_caption("Зародыш планеты", "газ диска уйдёт через %d минут: успей набрать %d масс Земли или расчисти орбиту в меню" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
+	if GameState.embryo_choice == "":
+		get_tree().create_timer(PULL_OUT + PULL_HOLD + PULL_BACK).timeout.connect(_ask_path)
+	else:
+		_start_embryo_route(PULL_OUT + PULL_HOLD + PULL_BACK)
+
+
+## Окно выбора пути зародыша: время стоит, пока игрок не выберет.
+func _ask_path() -> void:
+	if GameState.embryo_choice != "" or GameState.ending != "":
+		return
+	for c in $UI.get_children():
+		if c is PathChoice:
+			return
+	joystick.reset()
+	player.move_input = Vector2.ZERO
+	get_tree().paused = true
+	hud.visible = false
+	var choice := PathChoice.new()
+	choice.chosen.connect(func(route: String) -> void:
+		hud.visible = true
+		GameState.embryo_choice = route
+		GameState.save_game()
+		get_tree().paused = false
+		_start_embryo_route(0.4))
+	$UI.add_child(choice)
+
+
+## Путь выбран: подпись с целью и рассказ Звездочёта о зародыше.
+func _start_embryo_route(delay: float) -> void:
+	if GameState.planet_route():
+		_show_caption("Каменный путь", "набери массу Земли и расчисти орбиту: станешь «%s»" % GameData.ENDINGS[GameState.composition_ending()]["name"])
+	else:
+		_show_caption("Гонка с газом", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
 	if not "embryo" in GameState.tips_seen:
 		for c in $UI.get_children():
 			if c is Tutorial:
 				return
 		var tutorial := Tutorial.new()
 		tutorial.main = self
-		tutorial.steps = Tutorial.EMBRYO_STEPS
+		tutorial.steps = Tutorial.EMBRYO_PLANET_STEPS if GameState.planet_route() else Tutorial.EMBRYO_STEPS
 		tutorial.tip = "embryo"
-		tutorial.start_delay = PULL_OUT + PULL_HOLD + PULL_BACK
+		tutorial.start_delay = delay
 		$UI.add_child(tutorial)
 		guide = tutorial
 		$UI.move_child(pause_menu, -1)
@@ -354,7 +387,6 @@ func _open_pause() -> void:
 		return
 	joystick.reset()
 	player.move_input = Vector2.ZERO
-	pause_menu.can_clear_orbit = GameState.is_embryo() and GameState.ending == "" and _collapse_t < 0.0
 	pause_menu.open()
 
 
@@ -461,6 +493,13 @@ func _check_embryo(delta: float) -> void:
 		if _collapse_t <= 0.0:
 			_finish(_collapse_kind)
 		return
+	if GameState.embryo_choice == "":
+		return  # путь ещё не выбран
+	if GameState.planet_route():
+		# Каменный путь: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
+		if e >= GameData.SUPER_EARTHS or GameState.gas_left <= 0.0:
+			_finish(GameState.composition_ending())
+		return
 	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
 		_collapse_kind = "giant_cold" if player.position.length() > GameData.SNOW_LINE else "giant_hot"
 		_collapse_t = PebbleField.COLLAPSE_TIME + 0.6
@@ -481,17 +520,7 @@ func _check_embryo(delta: float) -> void:
 		rivals.spawn_giant()
 		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром")
 	else:
-		_finish(GameState.planet_fate())
-
-
-## Игрок сам остановил рост: гонка за газом кончилась, концовка по нынешней массе.
-func _clear_orbit() -> void:
-	if GameState.ending != "" or _collapse_t >= 0.0:
-		return
-	if _chance_t >= 0.0:
-		_chance_t = -1.0
-		rivals.remove_giant()
-	_finish(GameState.planet_fate())
+		_finish(GameState.composition_ending())
 
 
 func _finish(kind: String) -> void:

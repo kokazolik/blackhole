@@ -413,8 +413,9 @@ func _set_embryo_text() -> void:
 	if second_chance >= 0.0:
 		_set_core_text("Второй шанс · %s" % _clock(second_chance), "нырни в гиганта", "медленно: он затянет тебя", UiTheme.GOLD)
 	elif GameState.gas_left > 0.0:
+		var goal := "планета — с массы Земли" if GameState.planet_route() else "гигант — с %d масс Земли" % roundi(GameData.GIANT_EARTHS)
 		_set_core_text("Газ диска · %s" % _clock(GameState.gas_left), GameData.format_earths(GameState.mass),
-			"гигант — с %d масс Земли" % roundi(GameData.GIANT_EARTHS), Color(0.6, 0.9, 1.0) if e < GameData.SUPER_EARTHS else UiTheme.GOLD)
+			goal, Color(0.6, 0.9, 1.0) if e < GameData.SUPER_EARTHS else UiTheme.GOLD)
 	else:
 		_set_core_text("Газ рассеялся", GameData.format_earths(GameState.mass), "каменная планета", UiTheme.PARCHMENT)
 
@@ -668,10 +669,13 @@ func _refresh() -> void:
 		else:
 			_stage_progress = clampf(inverse_lerp(stage.mass, next.mass, GameState.mass), 0.0, 1.0)
 	elif GameState.is_embryo():
-		# Гонка с газом: до гиганта — 10 масс Земли, шкала логарифмическая.
-		_stage_label.text = "%s → газовый гигант: %d масс Земли" % [stage.name, roundi(GameData.GIANT_EARTHS)]
+		# Цель пути: гиганту — 10 масс Земли, каменной планете — одна; шкала логарифмическая.
+		if GameState.planet_route():
+			_stage_label.text = "%s → %s: масса Земли" % [stage.name, GameData.ENDINGS[GameState.composition_ending()]["name"].to_lower()]
+		else:
+			_stage_label.text = "%s → газовый гигант: %d масс Земли" % [stage.name, roundi(GameData.GIANT_EARTHS)]
 		var lo := log(GameData.earth_masses(stage.mass))
-		_stage_progress = clampf((log(maxf(GameState.earth_masses(), 1e-6)) - lo) / (log(GameData.GIANT_EARTHS) - lo), 0.0, 1.0)
+		_stage_progress = clampf((log(maxf(GameState.earth_masses(), 1e-6)) - lo) / (log(GameState.embryo_goal()) - lo), 0.0, 1.0)
 	else:
 		_stage_label.text = stage.name
 		_stage_progress = 1.0
