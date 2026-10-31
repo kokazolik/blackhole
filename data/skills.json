@@ -2594,6 +2594,154 @@
 			],
 			"requires_level": 1,
 			"requires_route": "giant"
+		},
+		{
+			"id": "c_root",
+			"title": "Колыбель звёзд",
+			"desc": "Ты в молекулярном облаке. Газ падает на тебя на 10% быстрее, звёздной пыли с каждой массы Юпитера на 25% больше.",
+			"cost": 1000000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				36.5
+			],
+			"requires": [],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_acc": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_reach",
+			"title": "Гравитационная воронка",
+			"desc": "Газ облака падает на тебя с круга на 12% шире за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				-3.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_reach": 0.12
+			},
+			"icon": "reach_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_shield",
+			"title": "Пылевой кокон",
+			"desc": "Плотная пыль вокруг заслоняет от горячих звёзд: ультрафиолет выпаривает тебя на 20% слабее за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				-1.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_shield": 0.2
+			},
+			"icon": "drift_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_speed",
+			"title": "Собственное движение",
+			"desc": "Протозвезда летит между узлами газа на 12% быстрее за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				1.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_speed": 0.12
+			},
+			"icon": "pulse",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_merge",
+			"title": "Конкурентная аккреция",
+			"desc": "От проглоченного соседа в тебе остаётся на 10% больше массы за уровень.",
+			"cost": 2000000000,
+			"cost_growth": 1.7,
+			"max_level": 3,
+			"pos": [
+				3.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_merge": 0.1
+			},
+			"icon": "halo",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_flow",
+			"title": "Аккреционный поток",
+			"desc": "Газ облака падает на тебя на 12% быстрее за уровень.",
+			"cost": 3000000000,
+			"cost_growth": 1.6,
+			"max_level": 5,
+			"pos": [
+				-2.0,
+				39.0
+			],
+			"requires": [
+				"c_reach",
+				"c_shield"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_acc": 0.12
+			},
+			"icon": "pebble_swarm",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_burst",
+			"title": "Чутьё на вспышки",
+			"desc": "Окно, чтобы поймать вспышку FU Ориона, на 30% шире за уровень.",
+			"cost": 3000000000,
+			"cost_growth": 1.6,
+			"max_level": 2,
+			"pos": [
+				2.0,
+				39.0
+			],
+			"requires": [
+				"c_speed",
+				"c_merge"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_burst": 0.3
+			},
+			"icon": "geode",
+			"requires_route": "giant"
 		}
 	]
 }

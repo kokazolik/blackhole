@@ -61,6 +61,8 @@ var giant := {}
 ## Этап молодой планеты: r (орбита), t (секунд прошло), w (вода, океанов Земли),
 ## a (атмосфера, бар). Пусто — этапа нет.
 var young := {}
+# Этап «Облако»: масса в массах Юпитера, позиция, время, зажигание, сетка газа.
+var cloud := {}
 
 
 func _ready() -> void:
@@ -167,7 +169,21 @@ func young_field() -> float:
 
 
 func is_giant() -> bool:
-	return stage >= GameData.GIANT_STAGE and not giant.is_empty()
+	return stage >= GameData.GIANT_STAGE and not giant.is_empty() and cloud.is_empty()
+
+
+func is_cloud() -> bool:
+	return stage >= GameData.CLOUD_STAGE and not cloud.is_empty()
+
+
+## Коричневый карлик или супер-Юпитер выброшен из системы и падает в облако.
+## from — «brown_dwarf» или «super_jupiter»: супер-Юпитеру путь длиннее.
+func start_cloud(from: String) -> void:
+	var e := float(giant.get("e", GameData.BROWN_DWARF))
+	stage = GameData.CLOUD_STAGE
+	cloud = {"mj": e / GameData.JUPITER_EARTHS, "from": from, "t": 0.0, "lit": false, "push": "",
+		"x": -1.0, "y": -1.0, "grid": [], "story": false}
+	save_game()
 
 
 ## Лавина газа: забег продолжается этапом газового гиганта.
@@ -479,6 +495,7 @@ func save_game() -> void:
 		"endings_seen": endings_seen,
 		"giant": giant,
 		"young": young,
+		"cloud": cloud,
 	}
 	if tree_seen != null:
 		data.tree_seen = tree_seen
@@ -521,6 +538,7 @@ func load_game() -> void:
 	endings_seen = Array(data.get("endings_seen", []))
 	giant = Dictionary(data.get("giant", {}))
 	young = Dictionary(data.get("young", {}))
+	cloud = Dictionary(data.get("cloud", {}))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
@@ -579,6 +597,7 @@ func _reset_values() -> void:
 	ending = ""
 	giant = {}
 	young = {}
+	cloud = {}
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:

@@ -78,7 +78,9 @@ func _show_paths() -> void:
 	_clear()
 	_title("Карта путей")
 	var now := mini(GameState.stage, 2) if GameState.stage < 3 else GameState.stage - 2
-	if GameState.is_giant():
+	if GameState.is_cloud():
+		now = 6
+	elif GameState.is_giant():
 		now = 5
 	elif GameState.is_young():
 		now = 4
@@ -171,6 +173,29 @@ func _show_dev() -> void:
 		GameState.core_share = float(GameData.composition(GameState.materials).get("metal", 0.2))
 		GameState.start_young(GameData.AU_UNITS)
 		Fader.go(Fader.YOUNG))
+	_dev_button("Облако: коричневый карлик", func():
+		_jump(GameData.mass_for_earths(10.5), 4, false)
+		GameState.embryo_choice = "giant"
+		GameState.start_giant("giant_cold", 7500.0)
+		GameState.giant.e = GameData.BROWN_DWARF + 10.0
+		GameState.start_cloud("brown_dwarf")
+		Fader.go(Fader.CLOUD))
+	_dev_button("Облако: зажигание", func():
+		if GameState.is_cloud():
+			GameState.cloud.mj = 79.0
+			var sc := get_tree().current_scene
+			if sc and sc.get("mj") != null:
+				sc.mj = 79.0
+			_dev_say("Масса 79 Mj: водород вот-вот загорится")
+		else:
+			_dev_say("Только в облаке"))
+	_dev_button("Облако кончается", func():
+		var sc := get_tree().current_scene
+		if GameState.is_cloud() and sc and sc.get("time") != null:
+			sc.time = maxf(sc.time, GameData.CLOUD_TIME - 20.0)
+			_dev_say("Облако рассеется через 20 секунд")
+		else:
+			_dev_say("Только в облаке"))
 	_dev_button("Газ кончается", func():
 		if GameState.is_giant() and float(GameState.giant.gas) > 20.0:
 			GameState.giant.gas = 20.0
@@ -279,6 +304,7 @@ func _jump(mass: float, stage: int, go := true) -> void:
 	GameState.has_moon = false
 	GameState.ending = ""
 	GameState.giant = {}
+	GameState.cloud = {}
 	GameState.tips_seen = []
 	if stage >= 3:
 		_max_tree_before(stage)

@@ -26,6 +26,7 @@ const PLANET_COLORS := {
 	"planet_titan": [Color(0.92, 0.62, 0.3), Color(0.42, 0.3, 0.2)],
 	"planet_venus": [Color(0.95, 0.84, 0.55), Color(0.7, 0.55, 0.3)],
 	"dwarf_planet": [Color(0.6, 0.57, 0.54), Color(0.36, 0.34, 0.33)],
+	"star_failed": [Color(0.62, 0.24, 0.16), Color(0.3, 0.08, 0.06)],
 }
 
 var kind := ""
@@ -74,7 +75,14 @@ func _ready() -> void:
 	var core := "железное ядро %d%% массы" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
 	var stats := "%s · %s · %s%s" % [GameData.format_size(GameState.mass), GameData.format_earths(GameState.mass), core,
 		" · есть луна" if GameState.has_moon else ""]
-	if GameState.is_giant():
+	if GameState.is_cloud():
+		var c := GameState.cloud
+		var mj := float(c.get("mj", 13.0))
+		var p := GameData.cloud_params(GameState.fate_type())
+		stats = "%s · %s" % [GameData.format_star_mass(mj), str(p["chem"]) if bool(c.get("lit", false)) else "водород так и не загорелся"]
+		if str(c.get("push", "")) == "push":
+			stats += " · дожатый диск"
+	elif GameState.is_giant():
 		var e: float = float(GameState.giant.get("e", 10.0))
 		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]
 		stats = "%d масс Земли · %s массы Юпитера · ядро: %s · лун: %d" % [roundi(e), String.num(e / GameData.JUPITER_EARTHS, 2),
@@ -147,7 +155,10 @@ func _draw_planet() -> void:
 	var c := _icon.size * 0.5
 	var r := 30.0 if kind == "dwarf_planet" else 52.0  # карлик заметно мельче
 	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
-	var giant := kind.begins_with("giant") or kind == "super_jupiter" or kind == "brown_dwarf"
+	if kind.begins_with("star_") and kind != "star_failed":
+		_draw_star(c)
+		return
+	var giant := kind.begins_with("giant") or kind == "super_jupiter" or kind == "brown_dwarf" or kind == "star_failed"
 	for k in 6:
 		_icon.draw_circle(c, r * (1.0 + 0.05 * (6 - k)), Color(cols[0], 0.04))
 	_icon.draw_circle(c, r, cols[0])
@@ -179,3 +190,20 @@ func _draw_planet() -> void:
 		var m := c + Vector2(cos(_time * 0.6) * r * 1.6, sin(_time * 0.6) * r * 0.3)
 		_icon.draw_circle(m, 8.0, Color(0.75, 0.74, 0.72))
 		_icon.draw_circle(m + Vector2(3.0, 0.0), 6.0, Color(0.05, 0.05, 0.08, 0.4))
+
+
+## Звезда: ядро цвета массы, мягкое свечение, лучи дифракции.
+func _draw_star(c: Vector2) -> void:
+	var mj := float(GameState.cloud.get("mj", 1000.0))
+	var col: Color = GameData.star_color(mj) * (GameData.cloud_params(GameState.fate_type())["tint"] as Color)
+	var r := 18.0 + 4.0 * clampf(log(mj / 100.0), 0.0, 4.0)
+	var pulse := 1.0 + 0.04 * sin(_time * 2.0)
+	for k in 14:
+		var f := float(k) / 13.0
+		_icon.draw_circle(c, r * lerpf(2.6, 1.0, f) * pulse, Color(col, 0.03 + 0.05 * f))
+	for a in [0.0, PI * 0.5, PI * 0.25, PI * 0.75]:
+		var d := Vector2.from_angle(a)
+		var long := 2.6 if int(round(a / (PI * 0.25))) % 2 == 0 else 1.7
+		_icon.draw_line(c - d * r * long, c + d * r * long, Color(col, 0.35), 2.0, true)
+	_icon.draw_circle(c, r, col.lerp(Color.WHITE, 0.35))
+	_icon.draw_circle(c, r * 0.6, Color(1.0, 1.0, 1.0, 0.85))

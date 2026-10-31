@@ -307,6 +307,29 @@ func _end(delay: float) -> void:
 func _show_ending() -> void:
 	var kind := GameData.giant_final(str(GameState.giant.get("flavor", "giant_cold")), earths, orbit)
 	GameState.has_moon = moons > 0
+	# Коричневый карлик и супер-Юпитер могут уйти в облако и стать звездой.
+	if kind in ["brown_dwarf", "super_jupiter"]:
+		joystick.visible = false
+		hud.visible = false
+		get_tree().paused = true
+		var choice := preload("res://scripts/cloud/cloud_choice.gd").new()
+		choice.kind = kind
+		choice.chosen.connect(func(route: String) -> void:
+			if route == "cloud":
+				get_tree().paused = false
+				GameState.start_cloud(kind)
+				Fader.go(Fader.CLOUD)
+			else:
+				_finish(kind))
+		$UI.add_child(choice)
+		if use_auto and GameState.giant.has("bot_route"):
+			choice.chosen.emit(str(GameState.giant.get("bot_route", "stay")))
+			choice.queue_free()
+		return
+	_finish(kind)
+
+
+func _finish(kind: String) -> void:
 	var pts := GameState.finish(kind)
 	joystick.visible = false
 	hud.visible = false
