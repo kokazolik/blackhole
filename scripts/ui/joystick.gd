@@ -7,6 +7,13 @@ const KNOB_RADIUS := 38.0
 const DEAD_ZONE := 0.08
 
 var output := Vector2.ZERO
+## Скорость убегания в долях предельной (на этапе планетезимали), иначе < 0.
+## Внутри этого радиуса стика всё, во что врежешься, прилипает.
+var escape_frac := -1.0:
+	set(v):
+		if absf(v - escape_frac) > 0.005:
+			escape_frac = v
+			queue_redraw()
 var _touch_index := -1
 var _base := Vector2.ZERO
 var _knob := Vector2.ZERO
@@ -53,9 +60,11 @@ func _draw() -> void:
 		draw_circle(hint, RADIUS, Color(0.5, 0.65, 1.0, 0.04))
 		draw_arc(hint, RADIUS, 0.0, TAU, 64, Color(0.7, 0.82, 1.0, 0.14), 2.0, true)
 		draw_circle(hint, KNOB_RADIUS, Color(0.7, 0.82, 1.0, 0.08))
+		_draw_escape(hint, 0.5)
 		return
 	draw_circle(_base, RADIUS, Color(0.4, 0.55, 1.0, 0.07))
 	draw_arc(_base, RADIUS, 0.0, TAU, 64, Color(0.7, 0.82, 1.0, 0.3), 2.0, true)
+	_draw_escape(_base, 1.0)
 	# Подсвеченная дуга в сторону движения.
 	if output.length() > 0.0:
 		var a := output.angle()
@@ -64,3 +73,25 @@ func _draw() -> void:
 	draw_circle(_knob, KNOB_RADIUS + 8.0, Color(0.7, 0.82, 1.0, 0.08))
 	draw_circle(_knob, KNOB_RADIUS, Color(0.75, 0.85, 1.0, 0.28))
 	draw_arc(_knob, KNOB_RADIUS, 0.0, TAU, 48, Color(1, 1, 1, 0.45), 2.0, true)
+
+
+## Золотая зона «липнет»: скорость ниже убегания. За ней — красноватое кольцо,
+## где камни уже отскакивают. Когда убегание выше предельной скорости, золотой
+## весь стик.
+func _draw_escape(c: Vector2, alpha: float) -> void:
+	if escape_frac <= 0.0:
+		return
+	var gold := Color(1.0, 0.82, 0.42)
+	var zr := RADIUS * minf(escape_frac, 1.0)
+	for k in 4:
+		var f := 1.0 - k * 0.22
+		draw_circle(c, zr * f, Color(gold, 0.035 * alpha))
+	if escape_frac < 1.0:
+		draw_arc(c, (RADIUS + zr) * 0.5, 0.0, TAU, 64, Color(1.0, 0.4, 0.3, 0.14 * alpha), RADIUS - zr, true)
+		# Пунктир на границе убегания.
+		var n := 28
+		for i in n:
+			var a := TAU * i / n
+			draw_arc(c, zr, a, a + TAU / n * 0.5, 3, Color(gold, 0.85 * alpha), 1.6, true)
+	else:
+		draw_arc(c, RADIUS, 0.0, TAU, 64, Color(gold, 0.75 * alpha), 2.5, true)

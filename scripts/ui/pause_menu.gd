@@ -63,6 +63,7 @@ func _show_main() -> void:
 				_show_dev())
 	_note("Пылинка ждёт. Звезда тоже подождёт.")
 	_button("Продолжить", true, close)
+	_button("Карта путей", false, _show_paths)
 	_button("Главное меню", false, func(): Fader.go(Fader.MENU))
 	_button("Плавность: 120 кадров" if GameState.fps_120 else "Плавность: 60 кадров", false, func():
 		GameState.fps_120 = not GameState.fps_120
@@ -70,6 +71,39 @@ func _show_main() -> void:
 		GameState.save_game()
 		_show_main())
 	_button("Начать заново", false, _show_confirm)
+
+
+## Карта развилок: что на каждом этапе решает судьбу тела. Этап, где ты сейчас, выделен.
+func _show_paths() -> void:
+	_clear()
+	_title("Карта путей")
+	var now := mini(GameState.stage, 2) if GameState.stage < 3 else GameState.stage - 2
+	if GameState.is_cloud():
+		now = 6
+	elif GameState.is_giant():
+		now = 5
+	elif GameState.is_young():
+		now = 4
+	for i in GameData.FORK_MAP.size():
+		var fork: Array = GameData.FORK_MAP[i]
+		var head := Label.new()
+		head.text = ("▸ " if i == now else "") + str(fork[0])
+		head.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+		head.add_theme_font_size_override("font_size", 22)
+		head.add_theme_color_override("font_color", UiTheme.GOLD if i == now else Color(UiTheme.PARCHMENT, 0.85))
+		_box.add_child(head)
+		var l := Label.new()
+		l.text = str(fork[1])
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(640, 0)
+		l.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+		l.add_theme_font_size_override("font_size", 18)
+		l.add_theme_color_override("font_color", UiTheme.PARCHMENT)
+		_box.add_child(l)
+	if GameState.legacy > 0:
+		_note("Наследие %d: звёздной пыли +%d%%. Концовок открыто %d из %d." % [GameState.legacy,
+			roundi(GameState.legacy * GameData.LEGACY_BONUS * 100.0), GameState.endings_seen.size(), GameData.ENDINGS.size()])
+	_button("Назад", true, _show_main)
 
 
 func _show_confirm() -> void:
@@ -120,6 +154,57 @@ func _show_dev() -> void:
 	_dev_button("Галька → валун", func(): _jump(2900.0, 1))
 	_dev_button("Валун: начало", func(): _jump(3001.0, 2))
 	_dev_button("Валун: ~100 000", func(): _jump(100000.0, 2))
+	_dev_button("Валун → планетезималь", func(): _jump(2900000.0, 2))
+	_dev_button("Планетезималь: 1 км", func(): _jump(3100000.0, 3))
+	_dev_button("Планетезималь: 10 км", func(): _jump(3.0e7, 3))
+	_dev_button("Планетезималь: 100 км", func(): _jump(3.0e8, 3))
+	_dev_button("Планетезималь → зародыш", func(): _jump(2.9e9, 3))
+	_dev_button("Зародыш: начало", func(): _jump(3.05e9, 4))
+	_dev_button("Зародыш: 1 M⊕", func(): _jump(GameData.mass_for_earths(1.05), 4))
+	_dev_button("Гигант: начало", func():
+		_jump(GameData.mass_for_earths(10.5), 4, false)
+		GameState.embryo_choice = "giant"
+		GameState.start_giant("giant_cold", 7500.0)
+		Fader.go(Fader.GIANT))
+	_dev_button("Молодая планета: начало", func():
+		_jump(GameData.mass_for_earths(1.02), 4, false)
+		GameState.embryo_choice = "planet"
+		GameState.is_melted = true
+		GameState.core_share = float(GameData.composition(GameState.materials).get("metal", 0.2))
+		GameState.start_young(GameData.AU_UNITS)
+		Fader.go(Fader.YOUNG))
+	_dev_button("Облако: коричневый карлик", func():
+		_jump(GameData.mass_for_earths(10.5), 4, false)
+		GameState.embryo_choice = "giant"
+		GameState.start_giant("giant_cold", 7500.0)
+		GameState.giant.e = GameData.BROWN_DWARF + 10.0
+		GameState.start_cloud("brown_dwarf")
+		Fader.go(Fader.CLOUD))
+	_dev_button("Облако: зажигание", func():
+		if GameState.is_cloud():
+			GameState.cloud.mj = 79.0
+			var sc := get_tree().current_scene
+			if sc and sc.get("mj") != null:
+				sc.mj = 79.0
+			_dev_say("Масса 79 Mj: водород вот-вот загорится")
+		else:
+			_dev_say("Только в облаке"))
+	_dev_button("Облако кончается", func():
+		var sc := get_tree().current_scene
+		if GameState.is_cloud() and sc and sc.get("time") != null:
+			sc.time = maxf(sc.time, GameData.CLOUD_TIME - 20.0)
+			_dev_say("Облако рассеется через 20 секунд")
+		else:
+			_dev_say("Только в облаке"))
+	_dev_button("Газ кончается", func():
+		if GameState.is_giant() and float(GameState.giant.gas) > 20.0:
+			GameState.giant.gas = 20.0
+			_dev_say("Газ рассеется через 20 секунд")
+		elif GameState.is_embryo() and GameState.gas_left > 20.0:
+			GameState.gas_left = 20.0
+			_dev_say("Газ рассеется через 20 секунд")
+		else:
+			_dev_say("Газ есть только у зародыша"))
 	var fps := _dev_button("", func(): pass)
 	var fps_text := func(): fps.text = "FPS: вкл" if Hud.show_fps else "FPS: выкл"
 	fps_text.call()
@@ -193,7 +278,7 @@ func _dev_say(text: String) -> void:
 
 
 ## Ставит массу и этап, состав растягивается под новую массу, игра перезапускается.
-func _jump(mass: float, stage: int) -> void:
+func _jump(mass: float, stage: int, go := true) -> void:
 	var total := 0.0
 	for key in GameState.materials:
 		total += float(GameState.materials[key])
@@ -208,9 +293,42 @@ func _jump(mass: float, stage: int) -> void:
 	# «Галька: начало» — с рассказом Звездочёта, как у нового игрока.
 	GameState.pebble_intro_done = stage >= 1 and mass > 35.0
 	GameState.boulder_intro_done = stage >= 2 and mass > 3100.0
+	# Прыжок посреди этапа планетезимали: недра ещё горячие, полоса не тронута.
+	GameState.planet_time = 0.0
+	GameState.is_melted = false
+	GameState.melt_type = ""
+	GameState.zone_eaten = {}
+	GameState.embryo_path = ""
+	GameState.gas_left = -1.0
+	GameState.magma_hits = 0
+	GameState.has_moon = false
+	GameState.ending = ""
+	GameState.giant = {}
+	GameState.cloud = {}
 	GameState.tips_seen = []
+	if stage >= 3:
+		_max_tree_before(stage)
 	GameState.save_game()
-	Fader.go(Fader.GAME)
+	if go:
+		Fader.go(Fader.GAME)
+
+
+## Прокачать всё древо прошлых стадий, как у игрока, дошедшего сюда.
+## Путь вещества — по главному материалу тела.
+func _max_tree_before(stage: int) -> void:
+	var top := "silicate"
+	for key in GameState.materials:
+		if float(GameState.materials[key]) > float(GameState.materials.get(top, 0.0)):
+			top = key
+	for id in Skills.order:
+		var node: Dictionary = Skills.nodes[id]
+		if int(node.get("requires_stage", 0)) >= stage or node.get("requires_melt", false):
+			continue
+		var path: String = node.get("path", "")
+		if path != "" and path != top:
+			continue
+		GameState.skill_levels[id] = Skills.max_level(id)
+	Skills.recompute()
 
 
 func _clear() -> void:

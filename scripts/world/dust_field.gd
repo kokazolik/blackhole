@@ -79,6 +79,9 @@ var _mm_node := MultiMeshInstance2D.new()
 var _mm := MultiMesh.new()
 var _buf := PackedFloat32Array()
 var _dirty := false
+var cluster_at := Vector2.INF  # последнее скопление (в координатах пыли, без frame_offset)
+var cluster_material := ""
+var cluster_t := 0.0            # сколько секунд ещё показывать стрелку к нему
 
 
 func _ready() -> void:
@@ -124,6 +127,17 @@ func _ready() -> void:
 	GameState.skills_changed.connect(_rewrite_all)
 
 
+## Мировая позиция скопления для стрелки, или INF, если показывать нечего.
+func cluster_world() -> Vector2:
+	if cluster_t <= 0.0 or cluster_at == Vector2.INF:
+		return Vector2.INF
+	var w := cluster_at + frame_offset
+	if w.distance_to(player.position) < view_radius() * 0.35:
+		cluster_t = 0.0  # долетел: стрелка больше не нужна
+		return Vector2.INF
+	return w
+
+
 func view_radius() -> float:
 	var size := get_viewport_rect().size
 	return size.length() * 0.5 / camera.zoom.x
@@ -136,6 +150,7 @@ func world_pos(d: Dust) -> Vector2:
 # Движение считается каждый кадр отрисовки, а не на шаге физики: на экранах
 # 90–120 Гц и при неровных кадрах так нет подёргиваний.
 func _process(delta: float) -> void:
+	cluster_t = maxf(cluster_t - delta, 0.0)
 	# Общий полёт по орбите: сдвигается только узел MultiMesh.
 	frame_offset += player.frame_velocity * delta
 	if frame_offset.length() > REBASE_DISTANCE:
@@ -245,6 +260,8 @@ func _rebase() -> void:
 	for d in dust:
 		d.pos += frame_offset
 		_write_origin(d)
+	if cluster_at != Vector2.INF:
+		cluster_at += frame_offset
 	frame_offset = Vector2.ZERO
 
 
@@ -348,7 +365,9 @@ func _maintain(view_r: float, active_r: float, delta: float) -> void:
 	_cluster_timer -= delta
 	if _cluster_timer <= 0.0:
 		_cluster_timer = CLUSTER_CHECK
-		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster") * ambient:
+		# Хондрит собирает всё подряд: скопления любого материала ему по пути, их чаще.
+		var mix_k := 1.5 if GameState.body_type() == "chondrite" else 1.0
+		if rng.randf() < CLUSTER_CHANCE * Skills.stat("cluster") * ambient * mix_k:
 			_spawn_cluster(_random_point(view_r * 1.15, active_r * 0.95), view_r)
 
 
@@ -416,6 +435,9 @@ func _spawn_cluster(center: Vector2, view_r: float) -> void:
 	var spread := view_r * 0.1
 	var size_k := clampf(Skills.stat("spawn"), 0.3, 1.0)
 	size_k /= lerpf(1.0, (CLOUD_GRAINS.x + CLOUD_GRAINS.y) * 0.5, _cloud_share())
+	cluster_at = center - frame_offset
+	cluster_material = material
+	cluster_t = 40.0
 	for n in maxi(roundi(rng.randi_range(CLUSTER_SIZE.x, CLUSTER_SIZE.y) * size_k), 2):
 		var pos := center + Vector2(rng.randfn(0.0, spread), rng.randfn(0.0, spread))
 		# Части скопления, попавшие на экран, не появляются из воздуха.

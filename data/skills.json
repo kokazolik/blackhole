@@ -1519,6 +1519,1229 @@
 				"thrust": 0.03
 			},
 			"icon": "thrust"
+		},
+		{
+			"id": "t_root",
+			"title": "Собственная гравитация",
+			"desc": "Тебя держит вместе уже не прочность камня, а вес. Круг захвата +10%, а каждая находка приносит на 25% больше звёздной пыли. Первый шаг к планете.",
+			"cost": 1800000,
+			"cost_growth": 1.5,
+			"max_level": 1,
+			"pos": [
+				0,
+				15.5
+			],
+			"requires": [
+				"boulder_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"capture": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1"
+		},
+		{
+			"id": "t_capture",
+			"title": "Гравитационная фокусировка",
+			"desc": "Притяжение загибает пути медленных тел к тебе: круг захвата +6% за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				-3.75,
+				16.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"capture": 0.06
+			},
+			"icon": "reach_1"
+		},
+		{
+			"id": "t_calm",
+			"title": "Тихий рой",
+			"desc": "Ты не расталкиваешь соседей зря: раскачанный рой вокруг остывает на 12% быстрее за уровень, и круг захвата скорее становится широким.",
+			"cost": 9600000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-3.75,
+				17.5
+			],
+			"requires": [
+				"t_capture"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"calm": 0.12
+			},
+			"icon": "drift_1",
+			"requires_level": 3
+		},
+		{
+			"id": "t_still",
+			"title": "Успокоение",
+			"desc": "Способность. Время от времени рой вокруг разом остывает, как будто газ диска погасил все скорости: круг захвата снова во всю ширину. Уровни делают это чаще.",
+			"cost": 30000000,
+			"cost_growth": 1.2,
+			"max_level": 3,
+			"pos": [
+				-5.3,
+				18.3
+			],
+			"requires": [
+				"t_calm"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"still": 1.0
+			},
+			"icon": "pulse",
+			"ability": true,
+			"chondrules": [
+				20,
+				40,
+				70
+			]
+		},
+		{
+			"id": "t_runaway",
+			"title": "Убегающий рост",
+			"desc": "Легендарный навык. Чем ты крупнее, тем сильнее фокусируешь мелочь, и тем быстрее растёшь: каждая добыча прибавляет больше массы, и с каждым порядком размера ещё больше. Так самые крупные планетезимали обгоняли всех.",
+			"cost": 43200000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-3.75,
+				19
+			],
+			"requires": [
+				"t_calm"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"runaway": 1.0
+			},
+			"icon": "swarm",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "t_strength",
+			"title": "Гравитационная прочность",
+			"desc": "Вес держит тело крепче камня: порог раскола Q* +8% за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				-1.25,
+				16.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"qstar": 0.08
+			},
+			"icon": "armor"
+		},
+		{
+			"id": "t_reaccrete",
+			"title": "Повторная аккреция",
+			"desc": "Обломки после удара падают обратно: ещё 10% отколотой массы за уровень прирастает снова.",
+			"cost": 9600000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-1.25,
+				17.5
+			],
+			"requires": [
+				"t_strength"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"heal": 0.1
+			},
+			"icon": "toughness",
+			"requires_level": 3
+		},
+		{
+			"id": "t_iron_core",
+			"title": "Железное сердце",
+			"desc": "Легендарный навык. Доступен после плавления. Железо, стёкшее в центр, делает тебя прочнее в полтора раза, а металл в добыче прирастает вдвое. Так появились металлические миры вроде Психеи.",
+			"cost": 57600000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-1.25,
+				19
+			],
+			"requires": [
+				"t_reaccrete"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"iron_core": 1.0
+			},
+			"icon": "geode",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 1,
+			"requires_melt": true
+		},
+		{
+			"id": "t_zone",
+			"title": "Широкая полоса",
+			"desc": "Ты собираешь вещество с более широкого кольца орбит: кормовой полосы хватает на 10% дольше за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				1.25,
+				16.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"zone": 0.1
+			},
+			"icon": "pebble_swarm"
+		},
+		{
+			"id": "t_sling",
+			"title": "Гравитационная праща",
+			"desc": "Ты умеешь ловить пролёт крупного соседа: праща олигарха уносит тебя на свежую орбиту на 15% дальше за уровень.",
+			"cost": 9600000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				1.25,
+				17.5
+			],
+			"requires": [
+				"t_zone"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"sling": 0.15
+			},
+			"icon": "thrust",
+			"requires_level": 3
+		},
+		{
+			"id": "t_oligarch",
+			"title": "Олигарх",
+			"desc": "Легендарный навык. Ты хозяин своей полосы: соседи больше не заходят в неё и не отбирают твою еду. Так рост сменялся олигархическим — у каждого крупного тела своя зона.",
+			"cost": 48000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				1.25,
+				19
+			],
+			"requires": [
+				"t_sling"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"oligarch": 1.0
+			},
+			"icon": "chain",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "t_hill",
+			"title": "Сфера Хилла",
+			"desc": "Твоё притяжение спорит с приливом звезды на большем расстоянии: сфера Хилла +8% за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				3.75,
+				16.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"hill": 0.08
+			},
+			"icon": "halo"
+		},
+		{
+			"id": "t_flow",
+			"title": "Ловец потока",
+			"desc": "Галька из внешнего диска реже проскакивает мимо: сфера Хилла ловит на 10% больше галечного потока за уровень.",
+			"cost": 9600000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				3.75,
+				17.5
+			],
+			"requires": [
+				"t_hill"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"flow_catch": 0.1
+			},
+			"icon": "pebble_root",
+			"requires_level": 3
+		},
+		{
+			"id": "t_moon",
+			"title": "Спутник",
+			"desc": "Способность. Вокруг тебя кружит маленький спутник и подбирает мелочь, как Дактиль у астероида Ида. Ещё один спутник на втором уровне.",
+			"cost": 30000000,
+			"cost_growth": 1.2,
+			"max_level": 2,
+			"pos": [
+				5.3,
+				18.3
+			],
+			"requires": [
+				"t_flow"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"moons": 1.0,
+				"moon_size": 0.5
+			},
+			"icon": "halo",
+			"ability": true,
+			"chondrules": [
+				25,
+				60
+			]
+		},
+		{
+			"id": "t_tidal",
+			"title": "Приливный разрыв",
+			"desc": "Способность. Сосед, что прошёл слишком близко, рвётся приливом на куски, и их можно собрать.",
+			"cost": 28800000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				3.75,
+				19
+			],
+			"requires": [
+				"t_flow"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"tidal": 1.0
+			},
+			"icon": "combo",
+			"ability": true,
+			"chondrules": [
+				40
+			]
+		},
+		{
+			"id": "t_al",
+			"title": "Горячие недра",
+			"desc": "В тебе больше алюминия-26: он остывает на 10% медленнее за уровень, и расплавиться можно раньше, с меньшего радиуса.",
+			"cost": 2400000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				0,
+				16.8
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"al_slow": 0.1
+			},
+			"icon": "pulse"
+		},
+		{
+			"id": "t_mantle",
+			"title": "Плотная мантия",
+			"desc": "В недрах копятся тяжёлые минералы. Множитель ко всей звёздной пыли: +0,15 за уровень поверх других навыков.",
+			"cost": 14400000,
+			"cost_growth": 1.15,
+			"max_level": 10,
+			"pos": [
+				0,
+				18
+			],
+			"requires": [
+				"t_al"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"value_mul": 0.15
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "t_maneuver",
+			"title": "Орбитальный манёвр",
+			"desc": "Большому телу нужен разгон: скорость +4% и тяга +4% за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				-2.5,
+				16
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"speed": 0.04,
+				"thrust": 0.04
+			},
+			"icon": "thrust"
+		},
+		{
+			"id": "t_facet",
+			"title": "Россыпь находок",
+			"desc": "В обломках роя больше ценного: каждая находка приносит на 12% больше звёздной пыли за уровень.",
+			"cost": 1200000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				2.5,
+				16
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"value": 0.12
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "e_root",
+			"title": "Зародыш планеты",
+			"desc": "Ты тяжелее всех вокруг, и соседи-зародыши сами тянутся к тебе: их притяжение к тебе +10%, а звёздной пыли с каждой добычи на 25% больше. Начало пути к планете.",
+			"cost": 3712500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				20.5
+			],
+			"requires": [
+				"t_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_pull": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1"
+		},
+		{
+			"id": "e_pull",
+			"title": "Притяжение зародыша",
+			"desc": "Соседи-зародыши загибают орбиты к тебе: тянутся на 10% сильнее за уровень, догонять их легче.",
+			"cost": 3712500,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-3.75,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_pull": 0.1
+			},
+			"icon": "reach_1"
+		},
+		{
+			"id": "e_crowd",
+			"title": "Тесная зона",
+			"desc": "Ты собираешь соседей с более широкой полосы орбит: новые зародыши приходят на 10% чаще за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-3.75,
+				22.5
+			],
+			"requires": [
+				"e_pull"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"rival_rate": 0.1
+			},
+			"icon": "chain",
+			"requires_level": 3
+		},
+		{
+			"id": "e_devour",
+			"title": "Пожиратель",
+			"desc": "Легендарный навык. Едва ты поглотил соседа, его возмущения выводят к тебе следующего: новый зародыш появляется через двадцать секунд. Так рос Юпитер — глотая всё на своей орбите.",
+			"cost": 74250000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-3.75,
+				24
+			],
+			"requires": [
+				"e_crowd"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"devour": 1.0
+			},
+			"icon": "swarm",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_keep",
+			"title": "Сращение",
+			"desc": "При слиянии меньше вещества разлетается в обломки: в тебе остаётся ещё 6% массы соседа за уровень. Без навыка гигантский удар расплёскивает почти половину.",
+			"cost": 3712500,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-1.25,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"merge_keep": 0.06
+			},
+			"icon": "toughness"
+		},
+		{
+			"id": "e_magma",
+			"title": "Магматический океан",
+			"desc": "После гигантского удара поверхность жидкая и глотает всё: пока она светится магмой, галька и мелочь дают на 25% больше массы за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-1.25,
+				22.5
+			],
+			"requires": [
+				"e_keep"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"magma_feed": 0.25
+			},
+			"icon": "pulse",
+			"requires_level": 3
+		},
+		{
+			"id": "e_impacts",
+			"title": "Эпоха гигантских ударов",
+			"desc": "Легендарный навык. Крупные соседи сталкиваются с тобой в полтора раза чаще. Каждый такой удар — огромная прибавка массы, если ты сумеешь его смягчить. Так собирались Земля и Венера.",
+			"cost": 81675000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-1.25,
+				24
+			],
+			"requires": [
+				"e_magma"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"impact_more": 0.5
+			},
+			"icon": "combo",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_feed",
+			"title": "Галечная аккреция",
+			"desc": "Газ тормозит гальку у самой твоей поверхности: галька и мелочь дают на 10% больше массы за уровень, а за снеговой линией — на 20%.",
+			"cost": 3712500,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				1.25,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"embryo_feed": 0.1
+			},
+			"icon": "pebble_swarm"
+		},
+		{
+			"id": "e_atmo",
+			"title": "Первичная атмосфера",
+			"desc": "Тонкая оболочка газа вокруг тебя тормозит пролетающую гальку: сфера Хилла ловит на 8% больше за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				1.25,
+				22.5
+			],
+			"requires": [
+				"e_feed"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"hill": 0.08
+			},
+			"icon": "halo",
+			"requires_level": 3
+		},
+		{
+			"id": "e_trap",
+			"title": "Ловушка давления",
+			"desc": "Легендарный навык. Ты встал на горб давления в газе: миграция к звезде остановилась, а дрейфующая галька скапливается рядом с тобой — её рост +30%.",
+			"cost": 77962500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				1.25,
+				24
+			],
+			"requires": [
+				"e_atmo"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"migrate": -1.0,
+				"embryo_feed": 0.3
+			},
+			"icon": "pebble_root",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 1
+		},
+		{
+			"id": "e_trophy",
+			"title": "Трофеи слияний",
+			"desc": "Каждое слияние с соседом приносит на 25% больше звёздной пыли за уровень.",
+			"cost": 3712500,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				3.75,
+				21.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"merge_value": 0.25
+			},
+			"icon": "value_1"
+		},
+		{
+			"id": "e_mantle",
+			"title": "Тяжёлые недра",
+			"desc": "Множитель ко всей звёздной пыли: +0,15 за уровень поверх других навыков.",
+			"cost": 22275000,
+			"cost_growth": 1.15,
+			"max_level": 10,
+			"pos": [
+				3.75,
+				22.5
+			],
+			"requires": [
+				"e_trophy"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"value_mul": 0.15
+			},
+			"icon": "geode",
+			"requires_level": 3
+		},
+		{
+			"id": "e_brake",
+			"title": "Против течения",
+			"desc": "Ты лучше держишь орбиту в потоке газа: миграция к звезде на 15% слабее за уровень.",
+			"cost": 4455000,
+			"cost_growth": 1.35,
+			"max_level": 4,
+			"pos": [
+				2.5,
+				21
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"migrate": -0.15
+			},
+			"icon": "drift_1"
+		},
+		{
+			"id": "e_thrust",
+			"title": "Разгон зародыша",
+			"desc": "Тяжёлому телу нужен разгон: скорость +5% и тяга +5% за уровень.",
+			"cost": 4455000,
+			"cost_growth": 1.35,
+			"max_level": 5,
+			"pos": [
+				-2.5,
+				21
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"effects": {
+				"speed": 0.05,
+				"thrust": 0.05
+			},
+			"icon": "thrust"
+		},
+		{
+			"id": "t_cold",
+			"title": "Холодные недра",
+			"desc": "Вода в порах тела циркулирует и уносит тепло алюминия наружу: порог плавления недр +60 K за уровень. Так углистые хондриты пережили эпоху жара непереплавленными.",
+			"cost": 2400000,
+			"cost_growth": 1.3,
+			"max_level": 5,
+			"pos": [
+				-0.6,
+				17.9
+			],
+			"requires": [
+				"t_al"
+			],
+			"requires_stage": 3,
+			"effects": {
+				"cold_core": 60.0
+			},
+			"icon": "mat_ice"
+		},
+		{
+			"id": "o_root",
+			"title": "Своя орбита",
+			"desc": "Ты выбрал стать планетой. Теперь важно не сколько ты наберёшь, а какой ты станешь. Звёздной пыли +25%, открывается ветка, которая решает судьбу планеты.",
+			"cost": 3712500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				25.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"value": 0.25
+			},
+			"icon": "mat_silicate"
+		},
+		{
+			"id": "o_water",
+			"title": "Кометная вода",
+			"desc": "Кометы из-за снеговой линии падают на тебя и приносят воду: +3% воды к составу планеты за уровень. Каменному миру вода нужна, чтобы стать живым.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 4,
+			"pos": [
+				-3.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"water": 0.03
+			},
+			"icon": "mat_ice"
+		},
+		{
+			"id": "o_heart",
+			"title": "Железное сердце",
+			"desc": "Расплавленное железо стекает глубже: ядро +3% массы за уровень. Только у расплавленного тела. Живой планете нужно ядро: оно даёт магнитное поле.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 4,
+			"pos": [
+				-1.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"core_boost": 0.03
+			},
+			"icon": "geode"
+		},
+		{
+			"id": "o_calm",
+			"title": "Тихая орбита",
+			"desc": "Соседи успокаиваются: гигантские удары приходят на 15% реже за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 3,
+			"pos": [
+				1.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"impact_more": -0.15
+			},
+			"icon": "drift_1"
+		},
+		{
+			"id": "o_moon",
+			"title": "Лунный захват",
+			"desc": "Луна собирается и от менее косого удара, а с ней добыча ценнее ещё на 5% за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 3,
+			"pos": [
+				3.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"moon_slant": 0.05,
+				"moon_value": 0.05
+			},
+			"icon": "halo"
+		},
+		{
+			"id": "o_garden",
+			"title": "Сад",
+			"desc": "Легендарный навык. Вода, ядро и магнитное поле сошлись: живая планета приносит вдвое больше наследия.",
+			"cost": 77962500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				28.25
+			],
+			"requires": [
+				"o_water",
+				"o_heart"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"garden": 1.0
+			},
+			"icon": "pulse",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 2
+		},
+		{
+			"id": "g_root",
+			"title": "Газовый гигант",
+			"desc": "Лавина газа сделала тебя гигантом. Газ течёт к тебе на 10% быстрее, звёздной пыли с каждой массы Земли на 25% больше. Начало пути к звезде.",
+			"cost": 60000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				30.0
+			],
+			"requires": [],
+			"requires_stage": 5,
+			"effects": {
+				"giant_acc": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_flow",
+			"title": "Потоки из диска",
+			"desc": "Газ стекает к тебе по спиральным волнам: аккреция +15% за уровень.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 5,
+			"pos": [
+				-3.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_acc": 0.15
+			},
+			"icon": "pebble_swarm",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_reach",
+			"title": "Широкая кормовая зона",
+			"desc": "Твоя гравитация достаёт дальше: газ собирается с полосы на 12% шире за уровень, щель открывается медленнее.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				-1.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_reach": 0.12
+			},
+			"icon": "reach_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_anchor",
+			"title": "Якорь в щели",
+			"desc": "Щель держит тебя на месте: миграция к звезде на 20% слабее за уровень, и сдвигаться по орбите на 10% легче.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				1.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_anchor": 0.2,
+				"giant_speed": 0.1
+			},
+			"icon": "drift_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_dynamo",
+			"title": "Динамо",
+			"desc": "Металлический водород в недрах раскручивает магнитное поле: +10% поля за уровень. Поле держит луны и зажигает сияния. Сильнее всего поле у гиганта с большим железным ядром.",
+			"cost": 100000000,
+			"cost_growth": 1.5,
+			"max_level": 4,
+			"pos": [
+				3.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_field": 0.1
+			},
+			"icon": "pulse",
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_glow",
+			"title": "Сияние аккреции",
+			"desc": "Падающий газ раскаляется и светится: множитель ко всей звёздной пыли +0,2 за уровень.",
+			"cost": 250000000,
+			"cost_growth": 1.35,
+			"max_level": 6,
+			"pos": [
+				-3.0,
+				32.5
+			],
+			"requires": [
+				"g_flow"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"value_mul": 0.2
+			},
+			"icon": "geode",
+			"requires_level": 3,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_moons",
+			"title": "Диск спутников",
+			"desc": "Пыль в твоём собственном диске слипается быстрее: луны рождаются на 30% чаще за уровень.",
+			"cost": 250000000,
+			"cost_growth": 1.4,
+			"max_level": 4,
+			"pos": [
+				3.0,
+				32.5
+			],
+			"requires": [
+				"g_dynamo"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_moons": 0.3
+			},
+			"icon": "halo",
+			"requires_level": 2,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_breath",
+			"title": "Долгий диск",
+			"desc": "Легендарный навык. Твоя тень прикрывает внешний диск от света звезды, и он испаряется медленнее: газа на 30% дольше. Только так дорастают до коричневого карлика.",
+			"cost": 1200000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				33.75
+			],
+			"requires": [
+				"g_flow",
+				"g_reach"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_gas": 0.3
+			},
+			"icon": "swarm",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 3,
+			"requires_route": "giant"
+		},
+		{
+			"id": "g_runaway",
+			"title": "Убегающая аккреция",
+			"desc": "Легендарный навык. Чем ты тяжелее, тем жаднее тянешь газ: аккреция растёт с массой ещё быстрее. Без него до коричневого карлика не дорасти.",
+			"cost": 3000000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				35.0
+			],
+			"requires": [
+				"g_breath"
+			],
+			"requires_stage": 5,
+			"effects": {
+				"giant_runaway": 0.45
+			},
+			"icon": "combo",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 1,
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_root",
+			"title": "Колыбель звёзд",
+			"desc": "Ты в молекулярном облаке. Газ падает на тебя на 10% быстрее, звёздной пыли с каждой массы Юпитера на 25% больше.",
+			"cost": 1000000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				36.5
+			],
+			"requires": [],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_acc": 0.1,
+				"value": 0.25
+			},
+			"icon": "gravity_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_reach",
+			"title": "Гравитационная воронка",
+			"desc": "Газ облака падает на тебя с круга на 12% шире за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				-3.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_reach": 0.12
+			},
+			"icon": "reach_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_shield",
+			"title": "Пылевой кокон",
+			"desc": "Плотная пыль вокруг заслоняет от горячих звёзд: ультрафиолет выпаривает тебя на 20% слабее за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				-1.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_shield": 0.2
+			},
+			"icon": "drift_1",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_speed",
+			"title": "Собственное движение",
+			"desc": "Протозвезда летит между узлами газа на 12% быстрее за уровень.",
+			"cost": 1500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				1.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_speed": 0.12
+			},
+			"icon": "pulse",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_merge",
+			"title": "Конкурентная аккреция",
+			"desc": "От проглоченного соседа в тебе остаётся на 10% больше массы за уровень.",
+			"cost": 2000000000,
+			"cost_growth": 1.7,
+			"max_level": 3,
+			"pos": [
+				3.0,
+				37.75
+			],
+			"requires": [
+				"c_root"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_merge": 0.1
+			},
+			"icon": "halo",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_flow",
+			"title": "Аккреционный поток",
+			"desc": "Газ облака падает на тебя на 12% быстрее за уровень.",
+			"cost": 3000000000,
+			"cost_growth": 1.6,
+			"max_level": 5,
+			"pos": [
+				-2.0,
+				39.0
+			],
+			"requires": [
+				"c_reach",
+				"c_shield"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_acc": 0.12
+			},
+			"icon": "pebble_swarm",
+			"requires_route": "giant"
+		},
+		{
+			"id": "c_burst",
+			"title": "Чутьё на вспышки",
+			"desc": "Окно, чтобы поймать вспышку FU Ориона, на 30% шире за уровень.",
+			"cost": 3000000000,
+			"cost_growth": 1.6,
+			"max_level": 2,
+			"pos": [
+				2.0,
+				39.0
+			],
+			"requires": [
+				"c_speed",
+				"c_merge"
+			],
+			"requires_stage": 6,
+			"effects": {
+				"cloud_burst": 0.3
+			},
+			"icon": "geode",
+			"requires_route": "giant"
 		}
 	]
 }

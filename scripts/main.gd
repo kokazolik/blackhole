@@ -5,6 +5,7 @@ const SCREEN_RADIUS_AT_START := 10.0  # радиус пылинки на экр�
 const ZOOM_GROWTH_EXP := 0.75         # <1: камера отдаляется медленнее, чем растёт тело
 const INTRO_ZOOM := 0.55              # на входе камера дальше и плавно приближается
 const BOULDER_ZOOM := 0.99            # валун: камера дальше — гальки вокруг стали мелочью
+const EMBRYO_ZOOM := 1.9  # зародыш — почти планета: камера ближе, ты крупный на экране
 const PEBBLE_ZOOM := 1.65             # на этапе «Галька» камера чуть ближе: тело крупнее и заметнее
 # Новый этап — отъезд, как в «Степенях десяти»: камера улетает далеко, ты
 # сжимаешься в точку среди того, что вокруг, и возвращается.
@@ -22,6 +23,7 @@ var tree_screen: SkillTreeScreen
 var _hidden_world: Array[Node] = []
 var pause_menu: PauseMenu
 var pebble_field: PebbleField
+var rivals: Rivals
 var drifters: DustDrifters
 var fx: AbsorbFx
 var sky_events: Node2D
@@ -41,6 +43,9 @@ var _geode_pos := Vector2.ZERO
 var _chondrule_time := -10.0
 var _chondrule_pos := Vector2.ZERO
 var _swarm_pos := Vector2.ZERO
+var _chance_t := -1.0  # второй шанс суперземли: секунд, чтобы нырнуть в гиганта
+var _collapse_t := -1.0  # финальный обвал гальки перед концовкой гиганта
+var _collapse_kind := ""
 
 
 func _ready() -> void:
@@ -85,6 +90,12 @@ func _ready() -> void:
 	pebble_field.dust_field = dust_field
 	pebble_field.camera = camera
 	add_child(pebble_field)
+	rivals = Rivals.new()
+	rivals.player = player
+	rivals.pebble_field = pebble_field
+	rivals.dust_field = dust_field
+	rivals.camera = camera
+	add_child(rivals)
 	var wind := WindFx.new()
 	wind.player = player
 	wind.dust_field = dust_field
@@ -111,14 +122,9 @@ func _ready() -> void:
 	pebble_field.geode_found.connect(func(at: Vector2, value: float) -> void:
 		_geode_time = _intro_time
 		_geode_pos = at
-		fx.popup(at + Vector2(0, -player.radius * 2.0), "Жеода! +%s" % GameData.format_number(value), GameData.GEODE_GLOW, 26))
-	pebble_field.swarm_started.connect(func(at: Vector2) -> void:
-		_swarm_pos = at
-		if "swarm" in GameState.tips_seen:
-			_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
-	pebble_field.eddy_started.connect(func(_at: Vector2) -> void:
-		if "eddy" in GameState.tips_seen:
-			_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
+		var label := "Осколок железного ядра +%s" if GameState.is_planet() else "Жеода! +%s"
+		fx.popup(at + Vector2(0, -player.radius * 2.0), label % GameData.format_number(value), GameData.GEODE_GLOW, 26))
+	pebble_field.swarm_started.connect(func(at: Vector2) -> void: _swarm_pos = at)
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
 	pebble_field.pebble_split.connect(func(at: Vector2) -> void:
@@ -130,18 +136,9 @@ func _ready() -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
 	pebble_field.crash_burst.connect(func(at: Vector2) -> void:
-		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26)
-		if "crash" in GameState.tips_seen:
-			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
-	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
-		if "giant" in GameState.tips_seen:
-			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а мелочь вокруг он не трогает"))
-	drifters.appeared.connect(func(kind: String, _at: Vector2) -> void:
-		if kind in GameState.tips_seen:
-			_show_caption("Галька", "в тысячу раз крупнее тебя: её край — стена, о неё отскакиваешь"))
-	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
-		if "clump" in GameState.tips_seen:
-			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
+		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26))
+
+	_connect_planet()
 
 	camera.position = player.position
 	camera.zoom = Vector2.ONE * _target_zoom()
@@ -178,15 +175,23 @@ func _ready() -> void:
 		ui.move_child(pause_menu, -1)
 	elif GameState.is_boulder() and not GameState.boulder_intro_done:
 		_start_pebble_intro(2.5, true)
+	elif GameState.stage >= GameData.EMBRYO_STAGE and not "embryo" in GameState.tips_seen:
+		_reach_embryo()
 	elif GameState.stage >= GameData.PLANETESIMAL_STAGE and not "planetesimal" in GameState.tips_seen:
 		_start_finale(2.5)
 	elif GameState.is_pebble() and not GameState.pebble_intro_done:
 		_start_pebble_intro(2.5)
+	if GameState.ending != "":
+		_show_ending.call_deferred(GameState.ending, 0)
+	elif GameState.is_embryo() and GameState.gas_left < 0.0:
+		GameState.gas_left = GameData.GAS_TIME  # старое сохранение: гонка начинается сейчас
+	if GameState.ending == "" and GameState.is_embryo() and GameState.embryo_choice == "" and "embryo" in GameState.tips_seen:
+		_ask_path.call_deferred()  # сохранение до выбора пути: спросим сразу
 
 
 ## Пылинка доросла до гальки: вспышка, подпись и рассказ Звездочёта.
 func _on_stage_reached(index: int) -> void:
-	if index < GameData.PEBBLE_STAGE or index > GameData.PLANETESIMAL_STAGE:
+	if index < GameData.PEBBLE_STAGE or index > GameData.EMBRYO_STAGE:
 		return
 	var flash := ColorRect.new()
 	flash.color = Color(1.0, 0.92, 0.75, 0.0)
@@ -205,6 +210,9 @@ func _on_stage_reached(index: int) -> void:
 		_pull_mark.z_index = 3
 		_pull_mark.draw.connect(_draw_pull_mark)
 		add_child(_pull_mark)
+	if index == GameData.EMBRYO_STAGE:
+		_reach_embryo()
+		return
 	if index == GameData.PLANETESIMAL_STAGE:
 		_show_caption("Планетезималь", "тело в километр: его держит собственная гравитация")
 		if not "planetesimal" in GameState.tips_seen:
@@ -219,6 +227,96 @@ func _on_stage_reached(index: int) -> void:
 	_show_caption("Галька", "камешек размером с горошину")
 	if not GameState.pebble_intro_done:
 		_start_pebble_intro(PULL_OUT + PULL_HOLD + PULL_BACK)
+
+
+## Этап «Планетезималь»: соседи, удары, плавление, события — подписи и всплывашки.
+func _connect_planet() -> void:
+	rivals.merged.connect(func(at: Vector2, kind: String) -> void:
+		var label := "Контактная пара!" if kind == "twin" else "Слияние!"
+		fx.popup(at + Vector2(0, -player.radius * 2.4), label, Color(1.0, 0.85, 0.5), 26)
+		_shake = maxf(_shake, 0.5))
+	rivals.shattered.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.4), "Раскол соседа", Color(1.0, 0.7, 0.4), 24)
+		_shake = maxf(_shake, 0.6))
+	rivals.broken.connect(func(_at: Vector2) -> void:
+		_shake = 1.0
+		_show_caption("Тебя раскололо", "ты — крупнейший осколок: обломки вокруг ещё можно собрать обратно"))
+	rivals.grazed.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.0), "Скол!", Color(1.0, 0.55, 0.4), 22, "graze"))
+	GameState.melted.connect(func() -> void:
+		var info: Dictionary = GameData.PLANET_MATERIAL[GameState.melt_type if GameState.melt_type != "" else GameData.planet_type(GameState.body_type())]
+		_shake = maxf(_shake, 0.7)
+		if GameState.is_embryo():
+			_show_caption("Магматический океан", "гигантские удары расплавили тело: железо ушло в ядро, состав застыл")
+		elif "melt" in GameState.tips_seen:
+			_show_caption("Тело расплавилось", "алюминий-26 нагрел недра: железо ушло в ядро, %s" % info["melt"]))
+	GameState.moon_formed.connect(func(at: Vector2) -> void:
+		fx.popup(at + Vector2(0, -player.radius * 2.6), "Луна!", Color(0.85, 0.88, 0.95), 28)
+		_show_caption("Луна из обломков", "косой удар выбросил диск обломков, из него собралась луна: добыча ценнее на 10%"))
+	GameState.gas_gone.connect(func() -> void: _shake = maxf(_shake, 0.3))
+	rivals.giant_captured.connect(func(_at: Vector2) -> void:
+		if GameState.ending == "":
+			_finish("giant_core"))
+
+
+## Тело выросло до тысячи километров: путь дальше решает состав и место в диске.
+## Начинается гонка с газом диска.
+func _reach_embryo() -> void:
+	if GameState.embryo_path == "":
+		var type := GameState.melt_type if GameState.is_melted and GameState.melt_type != "" else GameState.body_type()
+		GameState.embryo_path = GameData.embryo_path(type, player.position.length())
+	if GameState.gas_left < 0.0:
+		GameState.gas_left = GameData.GAS_TIME
+	GameState.save_game()
+	if GameState.embryo_choice == "":
+		get_tree().create_timer(PULL_OUT + PULL_HOLD + PULL_BACK).timeout.connect(_ask_path)
+	else:
+		_start_embryo_route(PULL_OUT + PULL_HOLD + PULL_BACK)
+
+
+## Окно выбора пути зародыша: время стоит, пока игрок не выберет.
+func _ask_path() -> void:
+	if GameState.embryo_choice != "" or GameState.ending != "":
+		return
+	for c in $UI.get_children():
+		if c is PathChoice:
+			return
+	joystick.reset()
+	player.move_input = Vector2.ZERO
+	get_tree().paused = true
+	hud.visible = false
+	# Подпись этапа не должна просвечивать сквозь карточки выбора.
+	if is_instance_valid(_caption):
+		_caption.queue_free()
+	var choice := PathChoice.new()
+	choice.chosen.connect(func(route: String) -> void:
+		hud.visible = true
+		GameState.embryo_choice = route
+		GameState.save_game()
+		GameState.skills_changed.emit()  # в книге открывается ветка выбранного пути
+		get_tree().paused = false
+		_start_embryo_route(0.4))
+	$UI.add_child(choice)
+
+
+## Путь выбран: подпись с целью и рассказ Звездочёта о зародыше.
+func _start_embryo_route(delay: float) -> void:
+	if GameState.planet_route():
+		_show_caption("Путь планеты", "набери массу Земли и расчисти орбиту: дальше судьбу решат климат, вода и небо")
+	else:
+		_show_caption("Гонка с газом", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
+	if not "embryo" in GameState.tips_seen:
+		for c in $UI.get_children():
+			if c is Tutorial:
+				return
+		var tutorial := Tutorial.new()
+		tutorial.main = self
+		tutorial.steps = Tutorial.EMBRYO_PLANET_STEPS if GameState.planet_route() else Tutorial.EMBRYO_STEPS
+		tutorial.tip = "embryo"
+		tutorial.start_delay = delay
+		$UI.add_child(tutorial)
+		guide = tutorial
+		$UI.move_child(pause_menu, -1)
 
 
 ## Финал этапа «Валун»: Звездочёт рассказывает о планетезимали.
@@ -348,7 +446,8 @@ func _set_world_visible(on: bool) -> void:
 func _target_zoom() -> float:
 	var start_zoom := SCREEN_RADIUS_AT_START / GameData.BASE_RADIUS
 	var z := start_zoom * pow(GameData.BASE_RADIUS / player.radius, ZOOM_GROWTH_EXP)
-	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k) * lerpf(1.0, BOULDER_ZOOM, player.boulder_k)
+	return z * lerpf(1.0, PEBBLE_ZOOM, player.pebble_k) * lerpf(1.0, BOULDER_ZOOM, player.boulder_k) \
+		* lerpf(1.0, EMBRYO_ZOOM, player.embryo_k)
 
 
 func _process(delta: float) -> void:
@@ -372,11 +471,90 @@ func _process(delta: float) -> void:
 		var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
 		camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
+	var cw := dust_field.cluster_world()
+	hud.cluster_screen_pos = Vector2.INF if cw == Vector2.INF or GameState.stage > 2 else get_viewport().get_canvas_transform() * cw
+	hud.cluster_material = dust_field.cluster_material
 	hud.set_temperature(player.temperature)
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
 	hud.set_wind(player.drift_velocity, player.position, player.pebble_k, player.shadow)
+	hud.set_planet(GameState.is_planet() and player.planet_k > 0.5, pebble_field.heat, player.capture_k(), GameState.zone_depletion(player.position.length()))
+	joystick.escape_frac = player.escape_speed() / player.max_speed() if GameState.is_planet() and player.planet_k > 0.5 else -1.0
+	_check_embryo(delta)
+	hud.second_chance = _chance_t
 	_check_tips()
+
+
+## Гонка зародыша с газом: 10 масс Земли до его конца — гигант; не успел —
+## суперземле дают второй шанс нырнуть в молодого гиганта, а меньше массы Земли —
+## карликовая планета: мелкое тело орбиту не расчищает.
+func _check_embryo(delta: float) -> void:
+	if not GameState.is_embryo() or GameState.ending != "" or player.dead or GameState.gas_left < 0.0:
+		return
+	if is_instance_valid(guide):
+		return  # Звездочёт рассказывает: время стоит
+	var e := GameState.earth_masses()
+	if _collapse_t >= 0.0:
+		# Лавина газа: кольцо гальки и всё вокруг обрушивается в тебя, потом — концовка.
+		_collapse_t -= delta
+		_shake = maxf(_shake, 0.25 + 0.5 * pebble_field.collapse_k)
+		if _collapse_t <= 0.0:
+			_collapse_t = -1.0
+			GameState.start_giant(_collapse_kind, player.position.length())
+			Fader.go(Fader.GIANT, 1.2, 1.4)
+		return
+	if GameState.embryo_choice == "":
+		return  # путь ещё не выбран
+	if GameState.planet_route():
+		# Путь планеты: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
+		if e >= GameData.SUPER_EARTHS:
+			# Масса Земли: орбита расчищена, дальше — молодая планета, своя у каждого состава.
+			if not GameState.is_young():
+				GameState.start_young(player.position.length())
+				_show_caption("Масса Земли!", "орбита расчищена: начинается поздняя бомбардировка")
+				Fader.go(Fader.YOUNG, 1.6, 1.4)
+		elif GameState.gas_left <= 0.0:
+			_finish("dwarf_planet")  # орбиту не расчистил: не планета
+		return
+	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
+		_collapse_kind = GameData.giant_ending(GameState.fate_type(), true)  # горячим делает орбита в конце этапа
+		_collapse_t = PebbleField.COLLAPSE_TIME + 0.6
+		pebble_field.start_collapse()
+		_show_caption("Лавина газа!", "ядро в десять масс Земли: газ диска рушится на тебя")
+		return
+	if _chance_t >= 0.0:
+		_chance_t -= delta
+		if _chance_t <= 0.0:
+			_chance_t = -1.0
+			rivals.remove_giant()
+			_finish(GameData.super_earth_ending(GameState.fate_type()))
+		return
+	if GameState.gas_left > 0.0:
+		return
+	if e >= GameData.SUPER_EARTHS:
+		_chance_t = GameData.SECOND_CHANCE_TIME
+		rivals.spawn_giant()
+		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром; иначе останешься «%s»" % GameData.ENDINGS[GameData.super_earth_ending(GameState.fate_type())]["name"])
+	else:
+		_finish("dwarf_planet")
+
+
+func _finish(kind: String) -> void:
+	if GameState.ending != "":
+		return
+	var pts := GameState.finish(kind)
+	_shake = 0.8
+	_show_ending(kind, pts)
+
+
+func _show_ending(kind: String, pts: int) -> void:
+	joystick.reset()
+	joystick.visible = false
+	hud.visible = false
+	player.move_input = Vector2.ZERO
+	get_tree().paused = true
+	var screen := EndingScreen.new(kind, pts)
+	$UI.add_child(screen)
 
 
 ## Множитель приближения при отъезде: плавно в логарифмах туда, пауза, обратно.
@@ -439,9 +617,29 @@ func _check_tips() -> void:
 		"gravity": GameState.is_boulder() and GameState.stage < GameData.PLANETESIMAL_STAGE \
 				and GameData.self_gravity(GameState.mass) + Skills.stat("self_grav") > 0.05,
 		"material": GameState.is_boulder() and _intro_time - _boulder_time > 40.0 \
-				and GameData.BOULDER_MATERIAL.has(GameState.body_type()),
+				and not GameData.boulder_material(GameState.body_type()).is_empty(),
 		"clump": pebble_field.clump_left > 3.0 and pebble_field.clump_left < PebbleField.CLUMP_TIME - 1.0,
+		"forks": GameState.body_type() != "unformed" and player.pebble_k >= 1.0,
 	}
+	if GameState.is_planet():
+		# На этапе планетезимали свои явления; прежние подсказки там не к месту.
+		if not "planetesimal" in GameState.tips_seen or player.planet_k < 0.95:
+			return
+		var km := GameData.planet_km(GameState.mass)
+		found = {
+			"rival": rivals.nearest_spot("rival") != Vector2.INF,
+			"twin": rivals.nearest_spot("twin") != Vector2.INF,
+			"heat": pebble_field.heat > 0.6,
+			"zone": GameState.zone_depletion(player.position.length()) > 0.6,
+			"hill": km >= 100.0,
+			"al_warm": not GameState.is_melted and GameState.core_temp() > 800.0,
+			"melt": GameState.is_melted,
+		}
+		for kind in found:
+			if found[kind] and not kind in GameState.tips_seen:
+				_start_tip(kind, {"rival": rivals.nearest_spot("rival"), "twin": rivals.nearest_spot("twin")}.get(kind, Vector2.INF))
+				return
+		return
 	for kind in found:
 		if found[kind] and not kind in GameState.tips_seen:
 			_start_tip(kind, {"geode": _geode_pos, "chondrule": _chondrule_pos, "swarm": _swarm_pos, "chunks": pebble_field.chunk_center(),

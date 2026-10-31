@@ -599,10 +599,20 @@ func _refresh() -> void:
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
 		if _selected == "boulder_root":
-			var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(GameState.body_type(), {})
+			var bonus: Dictionary = GameData.boulder_material(GameState.body_type())
 			_info_desc.text += "\n\nВещество продолжает путь. " + (
 				"Твоё тело — %s: %s." % [GameData.BODY_TYPES[GameState.body_type()].name.to_lower(), bonus.text] if not bonus.is_empty()
 				else "Состав ещё не сложился, и бонуса от вещества нет: металл, камень, лёд и углерод дают валуну каждый своё.")
+		elif _selected == "t_root":
+			var type := GameState.body_type()
+			var bonus: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(type)]
+			var path: Dictionary = GameData.EMBRYO_PATHS.get(GameData.embryo_path(type, GameState.player_position.length()), {})
+			if not bonus.is_empty():
+				_info_desc.text += "\n\nТвоё тело — %s: %s." % [GameData.BODY_TYPES[type].name.to_lower(), bonus.text]
+			if not path.is_empty():
+				_info_desc.text += "\nЕсли так и останется, на тысяче километров тебя ждёт путь «%s»: %s." % [path.name, path.desc]
+		elif _selected == "t_iron_core" and not GameState.is_melted:
+			_info_desc.text += "\n\nСначала нужно расплавиться: вырасти до 20 км, пока алюминий-26 ещё греет."
 		_info_change.text = _change_text(_selected)
 		_info_change.visible = _info_change.text != ""
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]

@@ -10,8 +10,8 @@ const QUAD_EXTENT := 1.8  # квад шейдера в радиусах звез
 const HALO_EXTENT := 3.0  # свечение короны только рядом со звездой, в радиусах звезды
 const HALO_COLOR := Color(1.0, 0.45, 0.12)
 # Вид звезды: запечённая поверхность + живая анимация.
-# Исходник поверхности: shaders/young_star_procedural.gdshader (тяжёлый, только для запекания
-# через tools/bake_star.tscn). Рельефный вариант: shaders/young_star_relief.gdshader.
+
+
 const STAR_SHADER := preload("res://shaders/young_star.gdshader")
 const HALO_SHADER := preload("res://shaders/star_halo.gdshader")
 const SURFACE_TEX := preload("res://assets/star/star_surface.png")

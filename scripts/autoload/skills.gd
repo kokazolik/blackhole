@@ -39,6 +39,53 @@ const BASE_STATS := {
 	"grav_focus": 1.0,   # скорость, до которой притяжение разгоняет тела
 	"debris_value": 1.0, # ценность обломков столкновений и мелочи сгустка
 	"collapse": 0.0,  # сгусток схлопывается в тебя («Гравитационный коллапс»)
+	# Этап «Планетезималь»:
+	"capture": 1.0,   # круг захвата (гравитационная фокусировка)
+	"calm": 1.0,      # как быстро остывает рой вокруг
+	"hill": 1.0,      # сфера Хилла
+	"qstar": 1.0,     # прочность тела к удару Q*
+	"al_slow": 1.0,   # алюминий-26 остывает медленнее, плавление с меньшего радиуса
+	"cold_core": 0.0, # «Холодные недра»: на столько K выше порог плавления
+	"zone": 1.0,      # ширина кормовой полосы: вещества в ней больше
+	"sling": 1.0,     # сила гравитационной пращи при пролёте олигарха
+	"flow_catch": 1.0,  # сколько галечного потока ловит сфера Хилла
+	"runaway": 0.0,   # убегающий рост: прирост растёт с размером
+	"oligarch": 0.0,  # соперники не заходят в твою полосу
+	"iron_core": 0.0, # железное ядро (только после плавления)
+	"tidal": 0.0,     # приливный разрыв близко прошедших соседей
+	"still": 0.0,     # «Успокоение»: рой время от времени разом остывает
+	# Этап «Зародыш планеты»:
+	"rival_pull": 1.0,   # как сильно соседи-зародыши тянутся к тебе
+	"rival_rate": 1.0,   # как часто приходят новые соседи
+	"merge_keep": 0.0,   # прибавка к доле массы соседа, что остаётся в тебе при слиянии
+	"merge_value": 1.0,  # звёздная пыль за слияние с соседом
+	"impact_more": 1.0,  # как часто приходят гигантские удары
+	"magma_feed": 0.0,   # прибавка к росту от гальки, пока поверхность — магматический океан
+	"embryo_feed": 1.0,  # рост зародыша от гальки и мелочи
+	"migrate": 1.0,      # сила миграции к звезде
+	"devour": 0.0,       # «Пожиратель»: после слияния следующий сосед приходит сразу
+	# Ветка «Своя орбита» (путь планеты):
+	"water": 0.0,        # вода комет: прибавка к доле воды в составе планеты
+	"core_boost": 0.0,   # прибавка к доле железного ядра расплавленного тела
+	"moon_slant": 0.0,   # насколько менее косой удар уже собирает луну
+	"moon_value": 0.0,   # прибавка к бонусу добычи от луны
+	"garden": 0.0,       # «Сад»: живая планета даёт вдвое больше наследия
+	# Этап «Газовый гигант»:
+	"giant_acc": 1.0,    # скорость аккреции газа
+	"giant_reach": 1.0,  # ширина кормовой зоны
+	"giant_anchor": 0.0, # насколько слабее миграция к звезде
+	"giant_field": 0.0,  # прибавка к магнитному полю
+	"giant_moons": 1.0,  # как быстро в своём диске собираются луны
+	"giant_gas": 0.0,    # насколько дольше живёт газ диска
+	"giant_speed": 1.0,  # как быстро гигант меняет орбиту
+	"giant_runaway": 0.0, # «Убегающая аккреция»: рост аккреции с массой
+	# Этап «Облако»:
+	"cloud_acc": 1.0,    # скорость аккреции газа облака
+	"cloud_reach": 1.0,  # радиус захвата газа
+	"cloud_shield": 0.0, # насколько слабее выпаривает ультрафиолет
+	"cloud_speed": 1.0,  # скорость протозвезды
+	"cloud_merge": 0.0,  # прибавка к доле массы проглоченного соседа
+	"cloud_burst": 0.0,  # насколько шире окно, чтобы поймать вспышку FU Ориона
 	# Способности:
 	"moons": 0.0,     # облачков пылевого гало: кружат вокруг и подбирают мелочь
 	"moon_size": 1.0, # размер и орбита облачков гало
@@ -56,6 +103,9 @@ var order: Array[String] = []
 var stats := {}
 var _body := ""  # тип тела, чей бонус валуну учтён в stats
 var _body_check := 0.0
+var _melt_seen := false
+var _planet_seen := false
+var _embryo_seen := false
 
 
 func _ready() -> void:
@@ -72,12 +122,21 @@ func _process(delta: float) -> void:
 	if _body_check > 0.0:
 		return
 	_body_check = 0.5
-	if _current_body() != _body:
+	if _current_body() != _body or (GameState.is_melted and not _melt_seen) or GameState.is_planet() != _planet_seen or GameState.is_embryo() != _embryo_seen:
 		recompute()
 
 
 func _current_body() -> String:
+	if GameState.is_melted and GameState.melt_type != "":
+		return GameState.melt_type  # расплавленное тело: состав застыл
 	return GameState.body_type() if GameState.is_boulder() else ""
+
+
+## Бонус вещества этому этапу: валуну свой, планетезимали свой.
+func _body_bonus() -> Dictionary:
+	if GameState.is_planet():
+		return GameData.stage_material(_current_body(), GameState.is_embryo())
+	return GameData.boulder_material(_current_body())
 
 
 func stat(key: String) -> float:
@@ -125,6 +184,13 @@ func is_unlocked(id: String) -> bool:
 		return false
 	# Ветви следующих стадий открываются, когда тело до них доросло.
 	if GameState.stage < int(nodes[id].get("requires_stage", 0)):
+		return false
+	# Ветка пути зародыша видна только на этом пути.
+	var route: String = nodes[id].get("requires_route", "")
+	if route != "" and GameState.embryo_choice != route:
+		return false
+	# Железное ядро бывает только у расплавленного тела.
+	if nodes[id].get("requires_melt", false) and not GameState.is_melted:
 		return false
 	var reqs: Array = nodes[id].get("requires", [])
 	if reqs.is_empty():
@@ -198,6 +264,9 @@ func recompute() -> void:
 		if level(id) > max_level(id):
 			GameState.skill_levels[id] = max_level(id)
 	_body = _current_body()
+	_melt_seen = GameState.is_melted
+	_planet_seen = GameState.is_planet()
+	_embryo_seen = GameState.is_embryo()
 	stats = compute(GameState.skill_levels)
 	stats_changed.emit()
 
@@ -216,9 +285,17 @@ func compute(levels: Dictionary) -> Dictionary:
 			else:
 				out[key] = float(out.get(key, 1.0)) + float(effects[key]) * lvl
 	# Вещество продолжает путь: выбранный на гальке состав даёт валуну свой бонус.
-	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_current_body(), {}).get("effects", {})
+	var bonus: Dictionary = _body_bonus().get("effects", {})
+	# Расплавленное тело разделилось на ядро, мантию и кору: вещество работает вдвое.
+	var melt_k := 2.0 if GameState.is_melted else 1.0
 	for key in bonus:
-		out[key] = float(out.get(key, 1.0)) + float(bonus[key])
+		out[key] = float(out.get(key, 1.0)) + float(bonus[key]) * melt_k
+	# Расплавленное тело крепче: обломки спеклись в цельную мантию.
+	if GameState.is_melted:
+		out.qstar = float(out.qstar) + 0.3
+		if float(out.iron_core) > 0.0:
+			out.qstar = float(out.qstar) * 1.5
+			out.mass_metal = float(out.mass_metal) + 1.0
 	# Скидки складываются, но совсем убрать сколы и ветер нельзя.
 	out.chip = maxf(out.chip, 0.1)
 	out.drift = maxf(out.drift, 0.2)
@@ -241,7 +318,7 @@ func contributions(key: String) -> Array:
 		var effects: Dictionary = nodes[id].get("effects", {})
 		if lvl > 0 and effects.has(key):
 			out.append([nodes[id].title, lvl, float(effects[key]) * lvl if key != "dust_level" else float(effects[key])])
-	var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(_current_body(), {}).get("effects", {})
+	var bonus: Dictionary = _body_bonus().get("effects", {})
 	if bonus.has(key):
 		out.append(["Вещество: " + GameData.BODY_TYPES[_current_body()].name.to_lower(), 0, float(bonus[key])])
 	return out

@@ -25,6 +25,7 @@ const BURN_RATE := 0.9     # скорость испарения при макс
 # Внутри снеговой линии лёд гальки медленно сублимирует: в долях льда за секунду
 # на полной глубине (за 2000 ед. от линии). Ледяному пути лучше держаться снаружи.
 const ICE_SUBLIMATION := 0.004
+const RADIAL_K := 0.3  # планетезималь: доля скорости, с которой меняешь орбиту
 
 var velocity := Vector2.ZERO        # собственное движение относительно окружающей пыли
 var frame_velocity := Vector2.ZERO  # орбитальное движение вокруг звезды вместе с пылью
@@ -32,6 +33,8 @@ var drift_velocity := Vector2.ZERO  # снос встречным ветром �
 var pebble_k := 0.0                 # 0 — пылинка, 1 — галька (плавная смена облика)
 var boulder_k := 0.0                # 0 — галька, 1 — валун
 var planet_k := 0.0                 # 0 — валун, 1 — планетезималь
+var embryo_k := 0.0                 # 0 — планетезималь, 1 — зародыш-шар
+var migration := Vector2.ZERO       # снос зародыша к звезде газом диска
 var shadow := 0.0                   # 0..1: насколько ты в ветровой тени крупного тела
 var pebble_field: PebbleField       # для ветровой тени; ставит main
 var move_input := Vector2.ZERO  # задаётся стиком, длина 0..1
@@ -47,17 +50,25 @@ var _grain := Sprite2D.new()  # сам комок: отдельный спрай
 var _pebble := Sprite2D.new()  # процедурная галька, проступает при переходе
 var _planet := Sprite2D.new()  # планетезималь: объёмный шар по запечённому рельефу
 var _planet_bake: PlanetBake   # печётся заранее, ещё на позднем валуне
+var _embryo := Sprite2D.new()  # зародыш: шар с поверхностью по составу, магмой и атмосферой
 var _mix := Vector4(0.25, 0.25, 0.25, 0.25)  # сглаженные доли состава для шейдера
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
 var ice_vapor := 0.0 # сколько льда в секунду уходит в пар (только у гальки)
 var dead := false
+# Этап «Планетезималь»:
+var planet_world := 1.0  # мир мельчает ещё (GameData.planet_world), плавно
+var kick := Vector2.ZERO # гравитационная праща: орбиту сносит, гаснет за секунды
+var yorp := 0.0          # 0..1 раскрутка светом: тело вращается всё быстрее
+var melt_glow := 0.0     # 1 в миг плавления, гаснет
+var magma := 0.0         # 1 сразу после гигантского удара: магматический океан, остывает
 
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	position = GameState.player_position
-	GameData.world_k = GameData.BOULDER_WORLD if GameState.is_boulder() else 1.0
+	planet_world = GameData.planet_world(GameState.mass) if GameState.is_planet() else 1.0
+	GameData.world_k = (GameData.BOULDER_WORLD if GameState.is_boulder() else 1.0) * planet_world
 	radius = target_radius()
 	_update_color()
 	GameState.absorbed.connect(_on_absorbed)
@@ -84,12 +95,23 @@ func _ready() -> void:
 	_planet.texture = _pebble.texture
 	_planet.visible = false
 	add_child(_planet)
+	var embryo := ShaderMaterial.new()
+	embryo.shader = preload("res://shaders/embryo.gdshader")
+	embryo.set_shader_parameter("seed", planet.get_shader_parameter("seed"))
+	embryo.set_shader_parameter("tilt", planet.get_shader_parameter("tilt"))
+	_embryo.material = embryo
+	_embryo.texture = _pebble.texture
+	_embryo.visible = false
+	add_child(_embryo)
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	boulder_k = 1.0 if GameState.is_boulder() else 0.0
 	planet_k = 1.0 if GameState.stage >= GameData.PLANETESIMAL_STAGE else 0.0
-	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
+	embryo_k = 1.0 if GameState.is_embryo() else 0.0
+	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k) * planet_world
 	GameState.stage_reached.connect(_on_stage_reached)
+	GameState.melted.connect(func() -> void: melt_glow = 1.0)
+	GameState.giant_hit.connect(func(rel: float) -> void: magma = minf(magma + 0.5 + rel, 1.0))
 
 
 func _on_stage_reached(index: int) -> void:
@@ -100,6 +122,8 @@ func _on_stage_reached(index: int) -> void:
 	elif index == GameData.PLANETESIMAL_STAGE:
 		_start_planet_bake()
 		create_tween().tween_property(self, "planet_k", 1.0, 2.5).set_trans(Tween.TRANS_SINE)
+	elif index == GameData.EMBRYO_STAGE:
+		create_tween().tween_property(self, "embryo_k", 1.0, 3.0).set_trans(Tween.TRANS_SINE)
 
 
 ## Рельеф планетезимали печётся полосами за десяток кадров. Начинаем загодя,
@@ -137,12 +161,45 @@ func target_radius() -> float:
 
 func pull_radius() -> float:
 	var r := radius * 7.0 * Skills.stat("reach") * sqrt(Skills.stat("gravity"))
+	if planet_k > 0.0:
+		r = lerpf(r, radius * capture_k(), planet_k)
 	# С навыками на максимуме радиус уходил за край экрана, и пыль с гальками
 	# летели в тебя из невидимого. Тянем не дальше 70% половины высоты экрана.
 	var cam := get_viewport().get_camera_2d()
 	if cam:
 		r = minf(r, get_viewport_rect().size.y * 0.5 / cam.zoom.y * 0.7)
 	return r
+
+
+## Гравитационная фокусировка: тело ловит всё, что проходит ближе R·√(1 + v_esc²/v²).
+## v — случайные скорости роя: спокойный рой ловится издалека, возбуждённый — едва.
+func capture_k() -> float:
+	var heat := pebble_field.heat if pebble_field else 0.0
+	var v := 0.22 + 0.78 * heat  # в долях скорости убегания
+	return clampf(sqrt(1.0 + 1.0 / (v * v)), 1.3, 6.0) * Skills.stat("capture")
+
+
+## Сфера Хилла на экране: где твоё притяжение сильнее прилива звезды.
+func hill_radius() -> float:
+	var r := radius * GameData.HILL_SCREEN * GameData.hill_ratio(position.length()) * Skills.stat("hill")
+	r = maxf(r, pull_radius() * 1.4)
+	# Крупный зародыш близко к камере: сфера Хилла не уходит за край экрана.
+	var cam := get_viewport().get_camera_2d()
+	if cam and GameState.is_embryo():
+		r = minf(r, get_viewport_rect().size.y * 0.5 / cam.zoom.y * 0.92)
+	return r
+
+
+## Скорость убегания: медленнее неё всё слипается, оно не может отскочить.
+func escape_speed() -> float:
+	return GameData.escape_game(GameState.mass)
+
+
+## Рельеф планетезимали готов: соперники рисуются тем же рельефом.
+func planet_surface() -> Array:
+	if not (_planet_bake and _planet_bake.done):
+		return []
+	return [_planet_bake.get_texture(), _planet_bake.normals.get_texture()]
 
 
 func pull_strength() -> float:
@@ -165,8 +222,10 @@ func max_speed() -> float:
 func stick_speed() -> float:
 	var ice: float = GameData.composition(GameState.materials).get("ice", 0.0)
 	var wk := GameData.world_k
-	return GameData.STICK_SPEED * pow(radius / wk / GameData.PEBBLE_REF_RADIUS, 0.4) * GameData.speed_k() \
+	var stick := GameData.STICK_SPEED * pow(radius / wk / GameData.PEBBLE_REF_RADIUS, 0.4) * GameData.speed_k() \
 		* Skills.stat("stick") * (1.0 + 0.6 * ice)
+	# Планетезималь держит всё, что медленнее второй космической: липкость больше не решает.
+	return lerpf(stick, escape_speed(), planet_k) if planet_k > 0.0 else stick
 
 
 ## Скорость относительно окружающей пыли и газа: своё движение плюс снос ветром.
@@ -185,17 +244,35 @@ func _process(delta: float) -> void:
 	dir = dir.limit_length(1.0)
 	var top := max_speed()
 	var accel := lerpf(ACCEL_FACTOR, PEBBLE_ACCEL_FACTOR * Skills.stat("thrust"), pebble_k)
-	velocity = velocity.move_toward(dir * top, top * accel * delta)
+	var want := dir * top
+	if planet_k > 0.0:
+		# Планетезималь идёт по своей орбите: вдоль неё двигаться легко, а сменить
+		# орбиту (к звезде или от неё) тяжело — для этого нужен большой разгон.
+		var out := position.normalized()
+		var radial := want.dot(out)
+		want -= out * radial * (1.0 - lerpf(1.0, RADIAL_K, planet_k))
+	velocity = velocity.move_toward(want, top * accel * delta)
 	# Игрок вместе со всей пылью вокруг летит по орбите, стик добавляет своё движение.
 	frame_velocity = GameData.orbit_velocity(position)
 	# У валуна снос сильнее: метровый барьер. С ростом он слабеет.
 	var barrier := lerpf(1.0, GameData.barrier_drift(GameState.mass), boulder_k)
-	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * Skills.stat("drift_mul") * pebble_k * barrier
+	drift_velocity = GameData.gas_drift(position, radius) * Skills.stat("drift") * Skills.stat("drift_mul") * pebble_k * barrier * (1.0 - planet_k)
 	if pebble_field:
 		shadow = pebble_field.shadow_at(position)
 		drift_velocity *= 1.0 - PebbleField.SHADOW_CALM * shadow
-	position += (velocity + drift_velocity + frame_velocity) * delta
-	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k)
+	kick *= exp(-0.45 * delta)
+	# Миграция зародыша: газ диска тянет тяжёлое тело к звезде, пока не рассеется.
+	migration = Vector2.ZERO
+	if GameState.is_embryo() and GameState.gas_left > 0.0 and GameState.ending == "":
+		migration = -position.normalized() * max_speed() * GameData.MIGRATE * maxf(Skills.stat("migrate"), 0.0) \
+			* clampf(sqrt(GameState.earth_masses()), 0.15, 2.0) * GameState.gas_frac()
+	position += (velocity + drift_velocity + frame_velocity + kick + migration) * delta
+	if GameState.is_planet():
+		GameState.tick_planet(delta)
+		planet_world = lerpf(planet_world, GameData.planet_world(GameState.mass), 1.0 - exp(-1.5 * delta))
+	GameData.world_k = lerpf(1.0, GameData.BOULDER_WORLD, boulder_k) * planet_world
+	melt_glow = maxf(0.0, melt_glow - delta / 9.0)
+	magma = maxf(0.0, magma - delta / GameData.MAGMA_COOL)
 	GameState.regrow(delta)
 
 	_update_heat(delta)
@@ -203,7 +280,7 @@ func _process(delta: float) -> void:
 		return
 
 	radius = lerpf(radius, target_radius(), 1.0 - exp(-4.0 * delta))
-	_spin += (SPIN_SPEED + velocity.length() / maxf(radius, 1.0) * 0.05) * delta
+	_spin += (SPIN_SPEED * (1.0 + 14.0 * yorp * yorp) + velocity.length() / maxf(radius, 1.0) * 0.05) * delta
 	if not _planet_bake and (planet_k > 0.0 or (GameState.is_boulder() and GameState.mass > PLANET_BAKE_MASS)):
 		_start_planet_bake()
 	_update_trail(delta)
@@ -222,10 +299,14 @@ func _update_heat(delta: float) -> void:
 	if burn > 0.0:
 		GameState.ablate(BURN_RATE * pow(GameState.mass, 2.0 / 3.0) * burn * burn * delta)
 	ice_vapor = 0.0
-	var inside := GameData.SNOW_LINE - GameData.SNOW_LINE_WIDTH * 0.5 - dist
-	if pebble_k > 0.5 and inside > 0.0:
+	# Вспышка звезды отодвигает снеговую линию: лёд тает и чуть дальше неё.
+	var inside := GameData.SNOW_LINE * (1.0 + 0.25 * Star.flare) - GameData.SNOW_LINE_WIDTH * 0.5 - dist
+	if pebble_k > 0.5 and inside > 0.0 and not GameState.is_melted:
 		var ice: float = GameState.materials.get("ice", 0.0)
 		ice_vapor = ice * ICE_SUBLIMATION * clampf(inside / 2000.0, 0.15, 1.0)
+		# У планетезимали тает только поверхность: лёд в недрах прячется под коркой,
+		# как у Цереры. Чем крупнее тело, тем меньше его доля на поверхности.
+		ice_vapor /= 1.0 + planet_k * GameData.planet_km(GameState.mass)
 		if ice_vapor > 0.0001:
 			GameState.sublimate_ice(ice_vapor * delta)
 		else:
@@ -239,9 +320,11 @@ func die() -> void:
 		return
 	dead = true
 	velocity = Vector2.ZERO
+	GameState.burned_embryo = GameState.is_embryo()
 	GameState.burned_up = true
 	_grain.visible = false
 	_pebble.visible = false
+	_embryo.visible = false
 	_planet.visible = false
 	queue_redraw()
 	burned_up.emit()
@@ -325,6 +408,11 @@ func _draw() -> void:
 func _update_grain(r: float) -> void:
 	var to_star := (-position).normalized().rotated(-_spin)
 	var heat_col := GameData.thermal_color(temperature)
+	if melt_glow > 0.0:
+		# Алюминий-26 расплавил недра: тело светится изнутри тёмно-оранжевым.
+		var glow := Color(1.0, 0.42, 0.1, 0.75 * sin(PI * minf(melt_glow * 1.15, 1.0)))
+		if glow.a > heat_col.a:
+			heat_col = glow
 	for sprite in [_grain, _pebble]:
 		sprite.rotation = _spin
 		# Галька рисуется ровно в свой радиус, как и чужие гальки, — иначе на глаз
@@ -346,17 +434,36 @@ func _update_grain(r: float) -> void:
 		body.set_shader_parameter("growth", clampf(log(maxf(GameState.mass, 30.0) / 30.0) / log(100.0), 0.0, 1.0))
 		body.set_shader_parameter("boulder", boulder_k * clampf(0.75 + 0.25 * log(maxf(GameState.mass, 3000.0) / 3000.0) / log(1000.0), 0.0, 1.0))
 		_pebble.modulate = Color(Color.WHITE * (1.1 + 0.12 * _pulse), pebble_k * (1.0 - _planet_shown()))
-	_planet.visible = _planet_shown() > 0.0
+	_planet.visible = _planet_shown() > 0.0 and embryo_k < 1.0
 	if _planet.visible:
 		# Шар поворачивается в шейдере вокруг своей наклонной оси, а свет — с экрана.
 		var mat := _planet.material as ShaderMaterial
 		_planet.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
 		mat.set_shader_parameter("light_dir", (-position).normalized())
 		mat.set_shader_parameter("spin", _spin)
+		mat.set_shader_parameter("round_k", GameData.roundness(GameState.mass))
 		mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 		mat.set_shader_parameter("emission", Vector4(heat_col.r, heat_col.g, heat_col.b, heat_col.a))
 		mat.set_shader_parameter("mix_w", _mix)
-		_planet.modulate = Color(Color.WHITE * (1.05 + 0.1 * _pulse), _planet_shown())
+		_planet.modulate = Color(Color.WHITE * (1.05 + 0.1 * _pulse), _planet_shown() * (1.0 - embryo_k))
+	_embryo.visible = embryo_k > 0.0
+	if _embryo.visible:
+		# Зародыш — уже шар: вид по составу, после удара светится магмой, тяжёлый — в дымке.
+		var em := _embryo.material as ShaderMaterial
+		var style := GameData.embryo_style(GameState.fate_type())
+		if GameState.planet_route() and GameState.composition_ending() == "planet_living":
+			style = GameData.LIVING_STYLE
+		_embryo.scale = Vector2.ONE * r * PEBBLE_SCALE / GRAIN_TEX.get_width()
+		em.set_shader_parameter("light_dir", (-position).normalized())
+		em.set_shader_parameter("spin", _spin)
+		em.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
+		em.set_shader_parameter("style", style)
+		em.set_shader_parameter("magma", magma)
+		var duo: Array = GameData.DUO_ATMO.get(GameState.fate_type(), [GameData.EMBRYO_ATMO[style], 1.0, 0.0])
+		em.set_shader_parameter("atmo", minf(GameData.embryo_atmo(GameState.mass) * float(duo[1]), 1.0))
+		em.set_shader_parameter("atmo_col", duo[0])
+		em.set_shader_parameter("veil", float(duo[2]))
+		_embryo.modulate = Color(Color.WHITE * (1.0 + 0.06 * _pulse), embryo_k)
 
 
 ## Насколько видна планетезималь: пока рельеф не испечён, остаётся валун.
