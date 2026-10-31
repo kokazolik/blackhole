@@ -468,6 +468,9 @@ func _process(delta: float) -> void:
 		var z := exp(lerpf(log(camera.zoom.x), log(_target_zoom()), 1.0 - exp(-rate * delta)))
 		camera.zoom = Vector2(z, z)
 	hud.star_screen_pos = get_viewport().get_canvas_transform() * Vector2.ZERO
+	var cw := dust_field.cluster_world()
+	hud.cluster_screen_pos = Vector2.INF if cw == Vector2.INF or GameState.stage > 2 else get_viewport().get_canvas_transform() * cw
+	hud.cluster_material = dust_field.cluster_material
 	hud.set_temperature(player.temperature)
 	hud.set_ice_vapor(player.ice_vapor)
 	hud.set_zone(GameData.zone_at(player.position.length()))
@@ -521,14 +524,14 @@ func _check_embryo(delta: float) -> void:
 		if _chance_t <= 0.0:
 			_chance_t = -1.0
 			rivals.remove_giant()
-			_finish("super_earth")
+			_finish(GameData.super_earth_ending(GameState.fate_type()))
 		return
 	if GameState.gas_left > 0.0:
 		return
 	if e >= GameData.SUPER_EARTHS:
 		_chance_t = GameData.SECOND_CHANCE_TIME
 		rivals.spawn_giant()
-		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром")
+		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром; иначе останешься «%s»" % GameData.ENDINGS[GameData.super_earth_ending(GameState.fate_type())]["name"])
 	else:
 		_finish("dwarf_planet")
 

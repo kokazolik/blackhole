@@ -10,6 +10,8 @@ const TOP_WIDTH := 380.0
 const BOOK_ICON := preload("res://assets/ui/book.png")
 
 var star_screen_pos := Vector2.ZERO
+var cluster_screen_pos := Vector2.INF  # скопление пыли за краем экрана (ставит main)
+var cluster_material := ""
 static var show_fps := false  # включается в меню разработчика
 var _fps_label: Label
 var _fps_t := 0.0
@@ -940,10 +942,49 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
-## Указатель у края экрана в сторону звезды, пока её не видно, с расстоянием.
 func _draw() -> void:
-	if not _arrow_visible:
+	if _arrow_visible:
+		_draw_star_arrow()
+	_draw_cluster_arrow()
+
+
+## Скопление пыли за краем экрана: стрелка цвета его материала. Если материал
+## тот же, что ведёт твоё тело, подпись говорит «твой» — состав решает, лететь ли.
+func _draw_cluster_arrow() -> void:
+	if cluster_screen_pos == Vector2.INF or size.x < 100.0:
 		return
+	var rect := Rect2(Vector2.ZERO, size).grow(-60.0)
+	if rect.has_point(cluster_screen_pos):
+		return
+	var center := size * 0.5
+	var dir := (cluster_screen_pos - center).normalized()
+	var t := INF
+	if absf(dir.x) > 0.001:
+		t = minf(t, (rect.size.x * 0.5) / absf(dir.x))
+	if absf(dir.y) > 0.001:
+		t = minf(t, (rect.size.y * 0.5) / absf(dir.y))
+	var tip := center + dir * t
+	# Слева вверху карта зон и строки HUD: стрелку опускаем под них.
+	if tip.x < 330.0 and tip.y < 220.0:
+		tip.y = 220.0
+	var info: Dictionary = GameData.MATERIALS.get(cluster_material, {"name": "пыль", "color": Color.WHITE})
+	var mc: Color = info["color"]
+	var k := 0.5 + 0.5 * sin(_time * 3.0)
+	draw_circle(tip - dir * 12.0, 20.0, Color(mc, 0.10 + 0.08 * k))
+	var side := dir.orthogonal()
+	draw_colored_polygon(PackedVector2Array([tip, tip - dir * 20.0 + side * 10.0, tip - dir * 13.0, tip - dir * 20.0 - side * 10.0]), Color(mc, 0.7 + 0.25 * k))
+	var own := GameState.body_type() != "unformed" and GameData.lead_material(GameState.materials) == cluster_material
+	var text := "скопление: %s%s" % [str(info["name"]).to_lower(), " · твой" if own else ""]
+	var font := UiTheme.FONT_SEMI
+	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var tp := tip - dir * 44.0 + Vector2(-tw * 0.5, 5.0)
+	tp.x = clampf(tp.x, 8.0, size.x - tw - 8.0)
+	draw_string_outline(font, tp, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 3, Color(0, 0, 0, 0.65))
+	draw_string(font, tp, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(mc.lerp(Color.WHITE, 0.3), 0.92))
+
+
+## Указатель у края экрана в сторону звезды, пока её не видно, с расстоянием.
+func _draw_star_arrow() -> void:
 	var rect := Rect2(Vector2.ZERO, size).grow(-50.0)
 	var center := size * 0.5
 	var dir := (star_screen_pos - center).normalized()
@@ -953,6 +994,9 @@ func _draw() -> void:
 	if absf(dir.y) > 0.001:
 		t = minf(t, (rect.size.y * 0.5) / absf(dir.y))
 	var tip := center + dir * t
+	# Слева вверху карта зон и строки HUD: стрелку опускаем под них.
+	if tip.x < 330.0 and tip.y < 220.0:
+		tip.y = 220.0
 	var k := 0.5 + 0.5 * sin(_time * 2.5)
 	var glow := Color(1.0, 0.6, 0.25, 0.10 + 0.08 * k)
 	draw_circle(tip - dir * 12.0, 22.0, glow)

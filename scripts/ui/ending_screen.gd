@@ -12,6 +12,11 @@ const PLANET_COLORS := {
 	"super_jupiter": [Color(0.98, 0.78, 0.56), Color(0.7, 0.34, 0.2)],
 	"brown_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
 	"super_earth": [Color(0.55, 0.62, 0.7), Color(0.3, 0.34, 0.4)],
+	"super_iron": [Color(0.62, 0.64, 0.7), Color(0.36, 0.38, 0.44)],
+	"super_neptune": [Color(0.5, 0.74, 0.9), Color(0.3, 0.5, 0.74)],
+	"super_diamond": [Color(0.24, 0.22, 0.24), Color(0.6, 0.66, 0.78)],
+	"super_titan": [Color(0.9, 0.6, 0.3), Color(0.5, 0.34, 0.2)],
+	"super_venus": [Color(0.95, 0.8, 0.5), Color(0.72, 0.52, 0.28)],
 	"planet_rock": [Color(0.66, 0.56, 0.46), Color(0.38, 0.3, 0.24)],
 	"planet_living": [Color(0.36, 0.6, 0.86), Color(0.36, 0.56, 0.3)],
 	"planet_iron": [Color(0.7, 0.72, 0.78), Color(0.4, 0.42, 0.48)],
@@ -146,7 +151,7 @@ func _draw_planet() -> void:
 	for k in 6:
 		_icon.draw_circle(c, r * (1.0 + 0.05 * (6 - k)), Color(cols[0], 0.04))
 	_icon.draw_circle(c, r, cols[0])
-	var hazy := kind == "planet_titan" or kind == "planet_venus"  # поверхность скрыта облаками
+	var hazy := kind in ["planet_titan", "planet_venus", "super_neptune", "super_titan", "super_venus"]  # поверхность скрыта облаками
 	if hazy:
 		for k in 4:
 			_icon.draw_circle(c, r * (1.06 + 0.05 * k), Color(cols[0], 0.08))

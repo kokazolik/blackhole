@@ -37,7 +37,7 @@ const MAX_SINKING := 16       # сколько съеденных тел одн�
 const SHADOW_LEN := 7.0     # длина тени в радиусах тела
 const SHADOW_WIDTH := 1.25  # полуширина у самого тела, в радиусах
 const SHADOW_CALM := 0.85   # насколько тень гасит снос в середине
-const BASE_COUNT := 5               # галек в округе при плотности 1 (вне колец)
+const BASE_COUNT := 8               # галек в округе при плотности 1 (вне колец)
 const RING_BOOST := 2.5               # в кольце-ловушке галек больше
 # Радиусы чужих галек в долях радиуса игрока. Мелких обломков больше, чем крупных
 # (распределение как после дробления), но встречаются и тела крупнее тебя.
@@ -689,7 +689,7 @@ func _spawn(at: Vector2) -> void:
 	if dist < GameData.sublimation_distance() * 1.1:
 		return
 	# Вне колец часть мест пустует: там ветер уносит гальки.
-	if rng.randf() > 0.35 + 0.65 * GameData.trap_strength(dist):
+	if rng.randf() > 0.5 + 0.5 * GameData.trap_strength(dist):
 		return
 	var p := Pebble.new()
 	p.pos = at - dust_field.frame_offset
