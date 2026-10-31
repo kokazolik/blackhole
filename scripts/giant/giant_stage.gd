@@ -9,6 +9,7 @@ extends Node2D
 const GasDisk := preload("res://scripts/giant/gas_disk.gd")
 const GiantBody := preload("res://scripts/giant/giant_body.gd")
 const GiantHud := preload("res://scripts/giant/giant_hud.gd")
+const GiantEvents := preload("res://scripts/giant/giant_events.gd")
 const SAVE_EVERY := 3.0
 const STAR_SCALE := 0.18    # звезда меньше, чем на ранних этапах: она далеко
 const STAR_GLOW := 3400.0   # радиус свечения вокруг звезды
@@ -20,6 +21,7 @@ var camera := Camera2D.new()
 var disk: GasDisk
 var body: GiantBody
 var hud: GiantHud
+var events: GiantEvents
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
 var pause_menu: PauseMenu
@@ -39,6 +41,7 @@ var _time := 0.0
 var _said := {}
 var _ending_t := -1.0
 var _inflate := 0.35
+var value_boost := 0.0      # секунд звёздной пыли ×1,5 (событие парникового мира)
 
 
 func _ready() -> void:
@@ -79,6 +82,9 @@ func _ready() -> void:
 	star.scale = Vector2.ONE * STAR_SCALE
 	add_child(star)
 	star.get_child(0).visible = false  # тёмное кольцо короны на светлом газе лишнее
+	events = GiantEvents.new()
+	events.stage = self
+	add_child(events)
 	body = GiantBody.new()
 	body.sigma_at = func(x: float) -> float: return disk.at(orbit + x * body.hill)
 	add_child(body)
@@ -165,13 +171,13 @@ func _process(delta: float) -> void:
 	if _feed0 < 0.0:
 		_feed0 = maxf(feed, 0.05)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
-	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")
+	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * events.acc_mul()
 	var gained := mdot * delta
 	earths += gained
 	# Широкая кормовая зона расталкивает газ медленнее: щель открывается позже.
 	var torque := GameData.GIANT_TORQUE * earths / 100.0 / Skills.stat("giant_reach")
 	disk.step(delta, orbit, width, h, gained * GameData.GIANT_EAT, torque)
-	_pay(gained)
+	pay(gained)
 
 	# Орбита: стик к звезде или от неё, газ тянет внутрь (миграция II типа).
 	var input := auto_input if use_auto else joystick.output.x
@@ -186,6 +192,8 @@ func _process(delta: float) -> void:
 
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
 	_moons_step(delta)
+	value_boost = maxf(value_boost - delta, 0.0)
+	events.step(delta)
 	_update_view(delta)
 	_tell(feed, gk)
 
@@ -204,10 +212,10 @@ func _process(delta: float) -> void:
 		save()
 
 
-func _pay(gained: float) -> void:
+func pay(gained: float) -> void:
 	if gained <= 0.0:
 		return
-	var value := gained * GameData.GIANT_VALUE * Skills.stat("value") * Skills.stat("value_mul") \
+	var value := (1.5 if value_boost > 0.0 else 1.0) * gained * GameData.GIANT_VALUE * Skills.stat("value") * Skills.stat("value_mul") \
 		* GameState.value_bonus() * (1.0 + 0.08 * moons)
 	GameState.add_currency(value)
 

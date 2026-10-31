@@ -79,6 +79,8 @@ func _show_paths() -> void:
 	_title("Карта путей")
 	var now := mini(GameState.stage, 2) if GameState.stage < 3 else GameState.stage - 2
 	if GameState.is_giant():
+		now = 5
+	elif GameState.is_young():
 		now = 4
 	for i in GameData.FORK_MAP.size():
 		var fork: Array = GameData.FORK_MAP[i]
@@ -162,6 +164,13 @@ func _show_dev() -> void:
 		GameState.embryo_choice = "giant"
 		GameState.start_giant("giant_cold", 7500.0)
 		Fader.go(Fader.GIANT))
+	_dev_button("Молодая планета: начало", func():
+		_jump(GameData.mass_for_earths(1.02), 4, false)
+		GameState.embryo_choice = "planet"
+		GameState.is_melted = true
+		GameState.core_share = float(GameData.composition(GameState.materials).get("metal", 0.2))
+		GameState.start_young(GameData.AU_UNITS)
+		Fader.go(Fader.YOUNG))
 	_dev_button("Газ кончается", func():
 		if GameState.is_giant() and float(GameState.giant.gas) > 20.0:
 			GameState.giant.gas = 20.0

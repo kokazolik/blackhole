@@ -74,6 +74,11 @@ func _ready() -> void:
 		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]
 		stats = "%d масс Земли · %s массы Юпитера · ядро: %s · лун: %d" % [roundi(e), String.num(e / GameData.JUPITER_EARTHS, 2),
 			body.to_lower(), int(GameState.giant.get("moons", 0))]
+	elif GameState.is_young():
+		var y := GameState.young
+		stats = "%s · %d °C · вода: %s океана Земли · атмосфера %s бар" % [GameData.format_earths(GameState.mass),
+			roundi(float(y.get("temp", 288.0)) - 273.0), String.num(float(y.get("w", 0.0)), 1).replace(".", ","),
+			String.num(float(y.get("a", 0.0)), 1).replace(".", ",")]
 	elif kind.begins_with("giant"):
 		# Состав был у ядра: теперь оно в центре, под толщей водорода и гелия.
 		var body: String = GameData.BODY_TYPES[GameState.fate_type()]["name"]

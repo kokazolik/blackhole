@@ -13,6 +13,7 @@ uniform float snow = 0.0;         // близость к снеговой лин
 uniform float flare = 0.0;        // вспышка на звезде подсвечивает потоки
 uniform vec2 view_size = vec2(1280.0, 720.0);
 uniform vec2 offset;  // положение камеры в пикселях экрана
+uniform float star_dim = 1.0;    // на мелких этапах звёзды тише: еду не спутать со звездой
 uniform vec3 base_color : source_color = vec3(0.004, 0.005, 0.009);  // космос почти чёрный
 
 const float NEBULA_PARALLAX = 0.02;
@@ -45,6 +46,8 @@ void fragment() {
 	float lit = 0.55 + 0.45 * dot(from_center, star_dir);
 	stream.a *= lit * (1.0 + 0.8 * flare);
 
+	far.a *= star_dim;
+	near.a *= star_dim;
 	vec3 col = base_color + neb.rgb * neb.a + far.rgb * far.a;
 	col = mix(col, stream.rgb, stream.a);
 	col += near.rgb * near.a;

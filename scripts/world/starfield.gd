@@ -31,3 +31,10 @@ func _process(_delta: float) -> void:
 		var d := center.length()
 		_mat.set_shader_parameter("snow", exp(-pow((d - GameData.SNOW_LINE) / GameData.SNOW_LINE_WIDTH, 2.0)))
 	_mat.set_shader_parameter("flare", Star.flare)
+	# Пока игрок с пылинку или гальку, еда размером со звезду: фон приглушаем.
+	var dim := 1.0
+	if GameState.stage <= 1:
+		dim = 0.4
+	elif GameState.stage == 2:
+		dim = 0.65
+	_mat.set_shader_parameter("star_dim", dim)

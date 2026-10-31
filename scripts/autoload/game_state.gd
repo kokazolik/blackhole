@@ -58,6 +58,9 @@ var endings_seen: Array = []
 ## gas (сколько секунд газа осталось), sigma (плотность газа по радиусу),
 ## moons, moon_prog. Пусто — этап не начался.
 var giant := {}
+## Этап молодой планеты: r (орбита), t (секунд прошло), w (вода, океанов Земли),
+## a (атмосфера, бар). Пусто — этапа нет.
+var young := {}
 
 
 func _ready() -> void:
@@ -141,6 +144,26 @@ func _add_frozen(gained_mass: float) -> void:
 ## Наследие прошлых концовок и луна: множитель звёздной пыли.
 func value_bonus() -> float:
 	return (1.0 + GameData.LEGACY_BONUS * legacy) * (1.0 + (GameData.MOON_BONUS + Skills.stat("moon_value") if has_moon else 0.0))
+
+
+func is_young() -> bool:
+	return stage >= GameData.YOUNG_STAGE and not young.is_empty() and giant.is_empty()
+
+
+## Масса Земли набрана на пути планеты: начинается поздняя бомбардировка.
+## Воду и атмосферу на старте даёт состав: лёд — вода, углерод — дымка.
+func start_young(r: float) -> void:
+	stage = GameData.YOUNG_STAGE
+	var sh := GameData.composition(materials)
+	var water := 4.0 * float(sh.get("ice", 0.0)) + 0.4 * float(sh.get("carbon", 0.0)) + Skills.stat("water")
+	young = {"r": r, "t": 0.0, "w": water, "a": 0.2 + 1.5 * float(sh.get("carbon", 0.0))}
+	save_game()
+
+
+## Магнитное поле молодой планеты, 0..1: железное ядро и сам состав.
+func young_field() -> float:
+	var core := core_share + Skills.stat("core_boost") if is_melted else 0.0
+	return clampf(0.1 + core * 1.8 + float(GameData.young_params(fate_type())["field"]), 0.0, 1.0)
 
 
 func is_giant() -> bool:
@@ -455,6 +478,7 @@ func save_game() -> void:
 		"legacy": legacy,
 		"endings_seen": endings_seen,
 		"giant": giant,
+		"young": young,
 	}
 	if tree_seen != null:
 		data.tree_seen = tree_seen
@@ -496,6 +520,7 @@ func load_game() -> void:
 	legacy = int(data.get("legacy", 0))
 	endings_seen = Array(data.get("endings_seen", []))
 	giant = Dictionary(data.get("giant", {}))
+	young = Dictionary(data.get("young", {}))
 	# В старых сохранениях не знаем, что игрок видел: книга откроется без показа.
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
@@ -553,6 +578,7 @@ func _reset_values() -> void:
 	has_moon = false
 	ending = ""
 	giant = {}
+	young = {}
 	player_position = Vector2(GameData.START_DISTANCE, 0.0)
 	materials = {}
 	for key in GameData.MATERIAL_ORDER:

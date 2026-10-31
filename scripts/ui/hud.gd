@@ -61,6 +61,8 @@ var menu_button: Button
 var _last_currency := 0.0
 var _bump_tween: Tween
 var _time := 0.0
+var _desc_key := ""      # тип тела и этап: при смене бонус показываем заново
+var _desc_until := 0.0
 var _arrow_visible := false
 var _shown_currency := 0.0   # число на экране плавно догоняет настоящее
 var _shown_progress := 0.0   # так же плавно растёт полоса стадии
@@ -154,7 +156,7 @@ func _build() -> void:
 	zone_pad.add_child(zone_box)
 	_zone_label = _label(17, UiTheme.TEXT, UiTheme.FONT_SEMI)
 	zone_box.add_child(_zone_label)
-	_zone_desc = _label(13, UiTheme.TEXT_DIM)
+	_zone_desc = _label(14, UiTheme.TEXT_DIM)
 	zone_box.add_child(_zone_desc)
 	var map_pad := MarginContainer.new()
 	map_pad.add_theme_constant_override("margin_top", 8)
@@ -196,9 +198,9 @@ func _build() -> void:
 	core_text.add_child(_core_title)
 	_core_value = _label(24, UiTheme.GOLD, UiTheme.FONT_NUMBERS)
 	core_text.add_child(_core_value)
-	_core_sub = _label(12, UiTheme.TEXT_DIM, UiTheme.FONT_SEMI)
+	_core_sub = _label(14, UiTheme.TEXT_DIM, UiTheme.FONT_SEMI)
 	core_text.add_child(_core_sub)
-	_planet_label = _label(12, Color(0.85, 0.9, 1.0), UiTheme.FONT_SEMI)
+	_planet_label = _label(14, Color(0.85, 0.9, 1.0), UiTheme.FONT_SEMI)
 	_planet_label.visible = false
 	core_text.add_child(_planet_label)
 
@@ -215,7 +217,7 @@ func _build() -> void:
 	top.add_theme_constant_override("separation", 4)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
-	_stage_label = _label(15, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	_stage_label = _label(17, UiTheme.TEXT, UiTheme.FONT_SEMI)
 	_stage_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(_stage_label)
 	_stage_bar = Control.new()
@@ -240,7 +242,7 @@ func _build() -> void:
 	mats.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(mats)
 	for key in GameData.MATERIAL_ORDER:
-		var l := _label(12, GameData.MATERIALS[key].color)
+		var l := _label(15, GameData.MATERIALS[key].color)
 		mats.add_child(l)
 		_material_labels[key] = l
 	var body_row := HBoxContainer.new()
@@ -248,9 +250,9 @@ func _build() -> void:
 	body_row.add_theme_constant_override("separation", 6)
 	body_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(body_row)
-	_body_label = _label(13, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	_body_label = _label(16, UiTheme.TEXT, UiTheme.FONT_SEMI)
 	body_row.add_child(_body_label)
-	_body_desc = _label(12, UiTheme.TEXT_DIM)
+	_body_desc = _label(14, UiTheme.TEXT_DIM)
 	body_row.add_child(_body_desc)
 
 	# Нагрев у звезды: видно только в горячей зоне.
@@ -259,7 +261,7 @@ func _build() -> void:
 	_heat_label.visible = false
 	top.add_child(_heat_label)
 	# Испарение льда — своя строка: при нагреве обе видны сразу.
-	_ice_label = _label(13, Color(0.6, 0.82, 1.0), UiTheme.FONT_SEMI)
+	_ice_label = _label(15, Color(0.6, 0.82, 1.0), UiTheme.FONT_SEMI)
 	_ice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ice_label.visible = false
 	top.add_child(_ice_label)
@@ -600,10 +602,10 @@ func set_temperature(temp: float) -> void:
 ## Отдельная строка: лёд тает внутри снеговой линии.
 func set_ice_vapor(rate: float) -> void:
 	var pct := rate * 60.0 / maxf(GameState.materials.get("ice", 0.0), 0.001) * 100.0
-	_ice_label.visible = pct >= 0.05
+	_ice_label.visible = pct >= 1.0  # мелкие потери не стоят строки на экране
 	if not _ice_label.visible:
 		return
-	_ice_label.text = "Лёд испаряется: −%.1f%% льда в минуту · за снеговую линию" % pct
+	_ice_label.text = "Лёд тает: −%.0f%% в минуту · уйди за снеговую линию" % pct
 
 
 func _label(font_size: int, color: Color, font: Font = null) -> Label:
@@ -700,6 +702,13 @@ func _refresh() -> void:
 		_body_desc.text = ("· зародышу: " if GameState.is_embryo() else "· планетезимали: ") + GameData.stage_material(type, GameState.is_embryo()).text
 	elif GameState.is_boulder() and not GameData.boulder_material(type).is_empty():
 		_body_desc.text = "· валуну: " + GameData.boulder_material(type).text
+	# Бонус вещества — подсказка, а не постоянная строка: видна 10 с после смены
+	# типа или этапа, дальше остаётся только название типа (полностью — в книге).
+	var key := "%s/%d/%s" % [type, GameState.stage, GameState.is_melted]
+	if key != _desc_key:
+		_desc_key = key
+		_desc_until = _time + 10.0
+	_body_desc.visible = _time < _desc_until
 	_comp_bar.queue_redraw()
 	_stage_bar.queue_redraw()
 	_badge.visible = Skills.any_affordable()
@@ -890,6 +899,8 @@ func _process(delta: float) -> void:
 	_refresh_t -= delta
 	if _refresh_pending and _refresh_t <= 0.0:
 		_refresh()
+	if _body_desc.visible and _time >= _desc_until:
+		_body_desc.visible = false
 	_fps_label.visible = show_fps
 	if show_fps:
 		_fps_worst = maxf(_fps_worst, delta)

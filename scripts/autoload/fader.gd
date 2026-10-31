@@ -5,6 +5,7 @@ const MENU := "res://scenes/menu.tscn"
 const PROLOGUE := "res://scenes/prologue.tscn"
 const GAME := "res://scenes/main.tscn"
 const GIANT := "res://scenes/giant.tscn"
+const YOUNG := "res://scenes/young.tscn"
 
 var _rect := ColorRect.new()
 var _busy := false
@@ -29,6 +30,8 @@ func go(path: String, out_time := 0.6, in_time := 0.9) -> void:
 	# Этап гиганта — своя сцена: продолжение забега ведёт туда.
 	if path == GAME and GameState.is_giant() and GameState.ending == "":
 		path = GIANT
+	elif path == GAME and GameState.is_young() and GameState.ending == "":
+		path = YOUNG
 	_busy = true
 	_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	_rect.visible = true

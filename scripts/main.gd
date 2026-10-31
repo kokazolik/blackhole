@@ -299,7 +299,7 @@ func _ask_path() -> void:
 ## Путь выбран: подпись с целью и рассказ Звездочёта о зародыше.
 func _start_embryo_route(delay: float) -> void:
 	if GameState.planet_route():
-		_show_caption("Путь планеты", "набери массу Земли и расчисти орбиту: станешь «%s»" % GameData.ENDINGS[GameState.composition_ending()]["name"])
+		_show_caption("Путь планеты", "набери массу Земли и расчисти орбиту: дальше судьбу решат климат, вода и небо")
 	else:
 		_show_caption("Гонка с газом", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
 	if not "embryo" in GameState.tips_seen:
@@ -502,7 +502,11 @@ func _check_embryo(delta: float) -> void:
 	if GameState.planet_route():
 		# Путь планеты: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
 		if e >= GameData.SUPER_EARTHS:
-			_finish(GameState.composition_ending())
+			# Масса Земли: орбита расчищена, дальше — молодая планета, своя у каждого состава.
+			if not GameState.is_young():
+				GameState.start_young(player.position.length())
+				_show_caption("Масса Земли!", "орбита расчищена: начинается поздняя бомбардировка")
+				Fader.go(Fader.YOUNG, 1.6, 1.4)
 		elif GameState.gas_left <= 0.0:
 			_finish("dwarf_planet")  # орбиту не расчистил: не планета
 		return

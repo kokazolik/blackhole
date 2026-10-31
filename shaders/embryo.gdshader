@@ -11,6 +11,9 @@ uniform float magma = 0.0;        // 0..1: свежий магматически
 uniform float atmo = 0.0;         // 0..1: толщина дымки
 uniform float veil = 0.0;         // 0..1: сплошной облачный покров (Венера, Титан)
 uniform vec3 atmo_col : source_color = vec3(0.55, 0.75, 1.0);
+uniform float ocean = 0.0;        // 0..1: вода в низинах (у живой планеты моря свои)
+uniform float frost = 0.0;        // 0..1: холод: моря замерзают, растут полярные шапки
+uniform float clouds = 0.0;       // 0..1: облака водяного пара над тёплым океаном
 uniform float spin = 0.0;
 uniform float tilt = 0.45;
 uniform float seed = 0.37;
@@ -125,9 +128,9 @@ vec3 albedo_at(vec3 d, float h, out float spec) {
 	} else if (style == 5) {
 		// Живая: синие океаны с бликом, зелёно-бурые материки, полярные шапки и облака.
 		float land = smoothstep(0.5, 0.54, big + 0.08 * fine);
-		vec3 ocean = mix(vec3(0.03, 0.12, 0.32), vec3(0.07, 0.3, 0.52), smoothstep(0.3, 0.5, big));
+		vec3 deep = mix(vec3(0.03, 0.12, 0.32), vec3(0.07, 0.3, 0.52), smoothstep(0.3, 0.5, big));
 		vec3 ground = mix(vec3(0.18, 0.4, 0.15), vec3(0.56, 0.47, 0.3), smoothstep(0.45, 0.7, fbm(d * 3.0 + 7.0)));
-		col = mix(ocean, ground, land);
+		col = mix(deep, ground, land);
 		col = mix(col, vec3(0.92, 0.95, 1.0), smoothstep(0.8, 0.88, abs(d.y) + 0.06 * fine));
 		float cloud = smoothstep(0.52, 0.72, fbm(vec3(d.x * 2.4, d.y * 5.0, d.z * 2.4) + 30.0));
 		col = mix(col, vec3(0.96, 0.97, 1.0), cloud * 0.85);
@@ -168,6 +171,28 @@ void fragment() {
 		vec3 n = transpose(mi) * nb;  // обратно в оси экрана
 		float spec_k;
 		vec3 alb = albedo_at(d, h0, spec_k);
+		// Вода молодой планеты: заполняет низины, на холоде замерзает.
+		if (ocean > 0.0 && style != 5) {
+			float lvl = fbm(d * 1.3 + vec3(seed * 5.0 + 3.0));
+			float th = mix(0.36, 0.62, ocean);
+			float sea = 1.0 - smoothstep(th - 0.012, th + 0.012, lvl);
+			float depth = clamp((th - lvl) * 6.0, 0.0, 1.0);
+			vec3 water = mix(vec3(0.06, 0.24, 0.42), vec3(0.02, 0.08, 0.22), depth);
+			vec3 ice = mix(vec3(0.78, 0.86, 0.92), vec3(0.92, 0.95, 0.98), fbm(d * 14.0));
+			water = mix(water, ice, smoothstep(0.35, 0.7, frost));
+			alb = mix(alb, water, sea);
+			spec_k = mix(spec_k, 0.75 * (1.0 - frost), sea);
+			n = normalize(mix(n, nv, sea * 0.85));
+		}
+		if (frost > 0.0) {
+			float cap = smoothstep(1.0 - 0.45 * frost, 1.0 - 0.45 * frost + 0.05, abs(d.y) + 0.06 * fbm(d * 8.0));
+			alb = mix(alb, vec3(0.9, 0.94, 0.98), cap);
+		}
+		if (clouds > 0.0) {
+			float cl = smoothstep(0.55 - 0.12 * clouds, 0.75, fbm(vec3(d.x * 2.4, d.y * 5.0, d.z * 2.4) + 30.0 + spin * 0.3));
+			alb = mix(alb, vec3(0.95, 0.96, 0.98), cl * 0.85 * clouds);
+			spec_k *= 1.0 - cl * clouds;
+		}
 		float diff = max(dot(n, L), 0.0);
 		float wrap = max(dot(nv, L) * 0.5 + 0.5, 0.0);
 		col = alb * star_light * (0.04 + 1.5 * diff);
