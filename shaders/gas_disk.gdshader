@@ -98,6 +98,7 @@ void fragment() {
 	vec3 hot = vec3(0.86, 0.56, 0.32);
 	vec3 col = mix(cold, mid, smoothstep(0.65, 1.2, temp));
 	col = mix(col, hot, smoothstep(1.35, 2.2, temp));
+	col *= mix(1.0, 0.75, smoothstep(2.2, 4.0, temp));  // у звезды не выжигать картинку
 	// Тёмные пылевые прожилки.
 	float lanes = smoothstep(0.5, 0.75, fbm(vec2(r * 0.011, th * rp * 0.0025) + n));
 	col *= 1.0 - 0.45 * lanes;

@@ -25,7 +25,8 @@ func _ready() -> void:
 	_mat.set_shader_parameter("snow_line", GameData.SNOW_LINE)
 
 
-## Плотность из сохранения или нетронутый диск: Σ ∝ 1/r.
+## Плотность из сохранения или нетронутый диск: Σ ∝ 1/r, у звезды газ
+## выметен её магнитным полем.
 func setup(saved: Array) -> void:
 	sigma.resize(GameData.GIANT_BINS)
 	if saved.size() == GameData.GIANT_BINS:
@@ -33,7 +34,8 @@ func setup(saved: Array) -> void:
 			sigma[i] = float(saved[i])
 	else:
 		for i in sigma.size():
-			sigma[i] = GameData.SNOW_LINE / bin_r(i)
+			var r := bin_r(i)
+			sigma[i] = GameData.SNOW_LINE / maxf(r, 2200.0) * smoothstep(700.0, 1600.0, r)
 	_img = Image.create_from_data(sigma.size(), 1, false, Image.FORMAT_RF, sigma.to_byte_array())
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter("sigma_tex", _tex)

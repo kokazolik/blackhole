@@ -10,6 +10,8 @@ const GasDisk := preload("res://scripts/giant/gas_disk.gd")
 const GiantBody := preload("res://scripts/giant/giant_body.gd")
 const GiantHud := preload("res://scripts/giant/giant_hud.gd")
 const SAVE_EVERY := 3.0
+const STAR_SCALE := 0.18    # звезда меньше, чем на ранних этапах: она далеко
+const STAR_GLOW := 3400.0   # радиус свечения вокруг звезды
 const MOON_TIME := 75.0     # секунд на луну при обычном притоке газа
 const MOON_FALL_GAIN := 0.6 # масс Земли, если луна упала в гиганта
 const MOON_CHONDRULES := 6  # луна слиплась из пыли: в ней хондры
@@ -61,7 +63,22 @@ func _ready() -> void:
 	bg.add_child(disk)
 	disk.setup(Array(g.get("sigma", [])))
 
-	add_child(preload("res://scripts/world/star.gd").new())
+	# Звезда здесь в честном масштабе: горячие юпитеры кружат примерно в десяти
+	# её радиусах, а не у самой поверхности. Широкое свечение заменяет корону.
+	var glow := Node2D.new()
+	var add := CanvasItemMaterial.new()
+	add.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	glow.material = add
+	glow.draw.connect(func() -> void:
+		for k in 60:
+			var f := float(k) / 59.0
+			glow.draw_circle(Vector2.ZERO, lerpf(STAR_GLOW, GameData.STAR_RADIUS * STAR_SCALE * 1.1, f),
+				Color(1.0, 0.62 + 0.3 * f, 0.3 + 0.5 * f, 0.003 + 0.012 * f * f)))
+	add_child(glow)
+	var star := preload("res://scripts/world/star.gd").new()
+	star.scale = Vector2.ONE * STAR_SCALE
+	add_child(star)
+	star.get_child(0).visible = false  # тёмное кольцо короны на светлом газе лишнее
 	body = GiantBody.new()
 	body.sigma_at = func(x: float) -> float: return disk.at(orbit + x * body.hill)
 	add_child(body)
