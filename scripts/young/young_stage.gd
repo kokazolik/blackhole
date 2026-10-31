@@ -290,7 +290,9 @@ func _update_view(_delta: float) -> void:
 	var light := clampf(pow(1.0 / maxf(au(), 0.3), 0.5), 0.45, 1.5)
 	_mat.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * light)
 	_mat.set_shader_parameter("spin", _spin)
-	_mat.set_shader_parameter("magma", 0.8 * clampf(1.0 - time / 50.0, 0.0, 1.0))
+	# Корка остывает тем дольше, чем ближе звезда; у венеры парник держит жар.
+	var cool := 30.0 * clampf(1.0 / maxf(au(), 0.3), 0.7, 2.6) * (1.5 if type == "venus" else 1.0)
+	_mat.set_shader_parameter("magma", 0.8 * clampf(1.0 - time / cool, 0.0, 1.0) + 0.3 * smoothstep(500.0, 900.0, temp))
 	_mat.set_shader_parameter("atmo", clampf(log(1.0 + atmo) / log(21.0), 0.0, 1.0))
 	var veil := smoothstep(8.0, 40.0, atmo)
 	if type in ["titan", "carbon"]:

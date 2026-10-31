@@ -285,6 +285,9 @@ func _ask_path() -> void:
 	player.move_input = Vector2.ZERO
 	get_tree().paused = true
 	hud.visible = false
+	# Подпись этапа не должна просвечивать сквозь карточки выбора.
+	if is_instance_valid(_caption):
+		_caption.queue_free()
 	var choice := PathChoice.new()
 	choice.chosen.connect(func(route: String) -> void:
 		hud.visible = true
