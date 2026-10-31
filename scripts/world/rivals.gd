@@ -465,7 +465,7 @@ func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 	# Гигантский удар зародыша: косой выбрасывает диск обломков, он летит рядом,
 	# а из его части собирается луна.
 	if GameState.is_embryo() and rel_m >= GameData.IMPACT_REL:
-		if slant >= GameData.MOON_SLANT:
+		if slant >= GameState.moon_slant():
 			pebble_field.spawn_fragments(at, (at - player.position).normalized().orthogonal(), 10, rv.mass * (1.0 - keep), "", 0.25, true)
 		GameState.giant_impact(rel_m, slant, at)
 	if GameState.is_embryo() and Skills.stat("devour") > 0.0 and rv.kind == "rival":
@@ -725,7 +725,7 @@ func outcome_text(rv: Rival) -> String:
 			if rv.kind == "giant":
 				return "он затянет тебя"
 			if GameState.is_embryo() and not GameState.has_moon and rv.mass / GameState.mass >= GameData.IMPACT_REL:
-				return "слияние · луна" if slant(rv) >= GameData.MOON_SLANT else "слияние · зайди вскользь для луны"
+				return "слияние · луна" if slant(rv) >= GameState.moon_slant() else "слияние · зайди вскользь для луны"
 			return "слияние"
 		"crater":
 			return "скол: сбавь скорость"

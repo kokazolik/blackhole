@@ -753,7 +753,7 @@ const GIANT_LOOK := {
 
 
 ## Какой концовкой кончается каменная ветка: решает застывший состав и вода.
-static func planet_ending(type: String, shares: Dictionary, core: float) -> String:
+static func planet_ending(type: String, shares: Dictionary, core: float, water := 0.0) -> String:
 	match type:
 		"metal":
 			return "planet_iron"
@@ -762,6 +762,6 @@ static func planet_ending(type: String, shares: Dictionary, core: float) -> Stri
 		"ice":
 			return "planet_ocean"
 		"silicate":
-			var wet := float(shares.get("ice", 0.0)) + float(shares.get("carbon", 0.0)) * 0.5
+			var wet := float(shares.get("ice", 0.0)) + float(shares.get("carbon", 0.0)) * 0.5 + water
 			return "planet_living" if core > 0.05 and wet > 0.08 else "planet_rock"
 	return "planet_layered" if core > 0.0 else "planet_rock"

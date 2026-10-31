@@ -136,7 +136,7 @@ func _add_frozen(gained_mass: float) -> void:
 
 ## Наследие прошлых концовок и луна: множитель звёздной пыли.
 func value_bonus() -> float:
-	return (1.0 + GameData.LEGACY_BONUS * legacy) * (1.0 + (GameData.MOON_BONUS if has_moon else 0.0))
+	return (1.0 + GameData.LEGACY_BONUS * legacy) * (1.0 + (GameData.MOON_BONUS + Skills.stat("moon_value") if has_moon else 0.0))
 
 
 func is_embryo() -> bool:
@@ -165,7 +165,7 @@ func giant_impact(rel: float, slant: float, at: Vector2) -> void:
 	giant_hit.emit(rel)
 	if not is_melted and magma_hits >= GameData.MAGMA_IMPACTS:
 		_melt()
-	if not has_moon and slant >= GameData.MOON_SLANT:
+	if not has_moon and slant >= moon_slant():
 		has_moon = true
 		moon_formed.emit(at)
 	save_game()
@@ -186,7 +186,13 @@ func fate_type() -> String:
 
 ## Какой каменной планетой кончится забег: решает застывший (или нынешний) состав.
 func composition_ending() -> String:
-	return GameData.planet_ending(fate_type(), GameData.composition(materials), core_share)
+	var core := core_share + Skills.stat("core_boost") if is_melted else 0.0
+	return GameData.planet_ending(fate_type(), GameData.composition(materials), core, Skills.stat("water"))
+
+
+## Насколько косым должен быть гигантский удар, чтобы собралась луна.
+func moon_slant() -> float:
+	return GameData.MOON_SLANT - Skills.stat("moon_slant")
 
 
 ## Путь каменной планеты: цель — масса Земли, гиганта не будет.
@@ -207,6 +213,8 @@ func finish(kind: String) -> int:
 	var pts := int(GameData.ENDINGS[kind]["legacy"])
 	if not kind in endings_seen:
 		endings_seen.append(kind)
+		pts *= 2
+	if kind == "planet_living" and Skills.stat("garden") > 0.0:
 		pts *= 2
 	legacy += pts
 	save_game()

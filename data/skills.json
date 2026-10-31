@@ -2259,6 +2259,139 @@
 				"cold_core": 60.0
 			},
 			"icon": "mat_ice"
+		},
+		{
+			"id": "o_root",
+			"title": "Своя орбита",
+			"desc": "Ты выбрал стать планетой. Теперь важно не сколько ты наберёшь, а какой ты станешь. Звёздной пыли +25%, открывается ветка, которая решает судьбу планеты.",
+			"cost": 3712500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				25.5
+			],
+			"requires": [
+				"e_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"value": 0.25
+			},
+			"icon": "mat_silicate"
+		},
+		{
+			"id": "o_water",
+			"title": "Кометная вода",
+			"desc": "Кометы из-за снеговой линии падают на тебя и приносят воду: +3% воды к составу планеты за уровень. Каменному миру вода нужна, чтобы стать живым.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 4,
+			"pos": [
+				-3.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"water": 0.03
+			},
+			"icon": "mat_ice"
+		},
+		{
+			"id": "o_heart",
+			"title": "Железное сердце",
+			"desc": "Расплавленное железо стекает глубже: ядро +3% массы за уровень. Только у расплавленного тела. Живой планете нужно ядро: оно даёт магнитное поле.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 4,
+			"pos": [
+				-1.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"core_boost": 0.03
+			},
+			"icon": "geode"
+		},
+		{
+			"id": "o_calm",
+			"title": "Тихая орбита",
+			"desc": "Соседи успокаиваются: гигантские удары приходят на 15% реже за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 3,
+			"pos": [
+				1.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"impact_more": -0.15
+			},
+			"icon": "drift_1"
+		},
+		{
+			"id": "o_moon",
+			"title": "Лунный захват",
+			"desc": "Луна собирается и от менее косого удара, а с ней добыча ценнее ещё на 5% за уровень.",
+			"cost": 14850000,
+			"cost_growth": 1.3,
+			"max_level": 3,
+			"pos": [
+				3.0,
+				26.75
+			],
+			"requires": [
+				"o_root"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"moon_slant": 0.05,
+				"moon_value": 0.05
+			},
+			"icon": "halo"
+		},
+		{
+			"id": "o_garden",
+			"title": "Сад",
+			"desc": "Легендарный навык. Вода, ядро и магнитное поле сошлись: живая планета приносит вдвое больше наследия.",
+			"cost": 77962500,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				0,
+				28.25
+			],
+			"requires": [
+				"o_water",
+				"o_heart"
+			],
+			"requires_stage": 4,
+			"requires_route": "planet",
+			"effects": {
+				"garden": 1.0
+			},
+			"icon": "pulse",
+			"legendary": true,
+			"chondrules": [
+				30
+			],
+			"requires_level": 2
 		}
 	]
 }

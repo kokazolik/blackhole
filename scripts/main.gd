@@ -290,6 +290,7 @@ func _ask_path() -> void:
 		hud.visible = true
 		GameState.embryo_choice = route
 		GameState.save_game()
+		GameState.skills_changed.emit()  # в книге открывается ветка выбранного пути
 		get_tree().paused = false
 		_start_embryo_route(0.4))
 	$UI.add_child(choice)
@@ -298,7 +299,7 @@ func _ask_path() -> void:
 ## Путь выбран: подпись с целью и рассказ Звездочёта о зародыше.
 func _start_embryo_route(delay: float) -> void:
 	if GameState.planet_route():
-		_show_caption("Каменный путь", "набери массу Земли и расчисти орбиту: станешь «%s»" % GameData.ENDINGS[GameState.composition_ending()]["name"])
+		_show_caption("Путь планеты", "набери массу Земли и расчисти орбиту: станешь «%s»" % GameData.ENDINGS[GameState.composition_ending()]["name"])
 	else:
 		_show_caption("Гонка с газом", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
 	if not "embryo" in GameState.tips_seen:
@@ -496,7 +497,7 @@ func _check_embryo(delta: float) -> void:
 	if GameState.embryo_choice == "":
 		return  # путь ещё не выбран
 	if GameState.planet_route():
-		# Каменный путь: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
+		# Путь планеты: масса Земли — орбита расчищена; газ ушёл раньше — тоже планета.
 		if e >= GameData.SUPER_EARTHS or GameState.gas_left <= 0.0:
 			_finish(GameState.composition_ending())
 		return
