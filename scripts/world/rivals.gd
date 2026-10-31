@@ -350,9 +350,17 @@ func _move(rv: Rival, delta: float) -> void:
 			var turn := clampf(rv.vel.angle_to(to), -IMPACT_TURN * delta, IMPACT_TURN * delta)
 			rv.vel = rv.vel.rotated(turn)
 	elif rv.kind == "giant":
-		# Гигант на соседней орбите медленно сходится с тобой: нырнуть в него — твоя забота.
+		# Гигант идёт своей орбитой рядом и сам к тебе не идёт: нырнуть — твой выбор.
+		# Только вплотную (ближе двух его радиусов) тяжесть гиганта слегка подтягивает.
 		var to := player.position - world_pos(rv)
-		rv.vel = rv.vel.lerp(to.normalized() * player.max_speed() * WANDER * 0.5 * clampf(to.length() / (rv.r * 4.0), 0.0, 1.0), 1.0 - exp(-0.5 * delta))
+		var pull := Vector2.ZERO
+		if to.length() < rv.r * 2.0:
+			pull = to.normalized() * player.max_speed() * WANDER * 0.25
+		# Только сдвиг орбит, без притяжения соседей к тебе.
+		var axes := _orbit_axes()
+		var dr := -to.dot(axes[0])
+		var shear := axes[1] * -clampf(dr / (SHEAR_SPAN * dust_field.view_radius()), -1.5, 1.5) * player.max_speed() * WANDER
+		rv.vel = rv.vel.lerp(shear + pull, 1.0 - exp(-0.5 * delta))
 	rv.r = screen_r(rv.mass)
 	rv.pos += rv.vel * delta
 	if rv.kind == "oligarch":
@@ -614,7 +622,9 @@ func spawn_giant() -> Vector2:
 	var ahead := 1.0 if rng.randf() < 0.5 else -1.0
 	var mass := GameData.mass_for_earths(30.0)
 	var r := screen_r(mass)
-	var at: Vector2 = player.position + axes[1] * ahead * (dust_field.view_radius() + r) + axes[0] * r * 0.3
+	# На соседней орбите, на 2,6 своих радиуса в сторону: сдвиг орбит проносит
+	# его мимо тебя, а не сквозь. Чтобы нырнуть, надо самому сойти к нему.
+	var at: Vector2 = player.position + axes[1] * ahead * (dust_field.view_radius() + r) + axes[0] * ahead * r * 2.6
 	giant = _add("giant", at, mass)
 	giant.name = "Молодой гигант"
 	giant.vel = Vector2.ZERO
@@ -904,7 +914,9 @@ func _draw_giant_arrow(px: float) -> void:
 	if absf(to.x) < view.x + giant.r * 0.5 and absf(to.y) < view.y + giant.r * 0.5:
 		return
 	var dir := to.normalized()
-	var edge := minf((view.x - 60.0 * px) / maxf(absf(dir.x), 0.001), (view.y - 60.0 * px) / maxf(absf(dir.y), 0.001))
+	# Сверху шкала состава и заголовок этапа: туда стрелку не ставим.
+	var inset_y := (150.0 if dir.y < 0.0 else 60.0) * px
+	var edge := minf((view.x - 60.0 * px) / maxf(absf(dir.x), 0.001), (view.y - inset_y) / maxf(absf(dir.y), 0.001))
 	var p := player.position + dir * edge
 	var s := 22.0 * px
 	var col := Color(1.0, 0.85, 0.55, 0.6 + 0.3 * sin(Time.get_ticks_msec() * 0.006))

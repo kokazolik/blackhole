@@ -415,7 +415,7 @@ var second_chance := -1.0  # секунд второго шанса суперз
 func _set_embryo_text() -> void:
 	var e := GameState.earth_masses()
 	if second_chance >= 0.0:
-		_set_core_text("Второй шанс · %s" % _clock(second_chance), "нырни в гиганта", "медленно: он затянет тебя", UiTheme.GOLD)
+		_set_core_text("Второй шанс · %s" % _clock(second_chance), "нырни в гиганта", "или останься: %s" % GameData.ENDINGS[GameData.super_earth_ending(GameState.fate_type())]["name"], UiTheme.GOLD)
 	elif GameState.gas_left > 0.0:
 		var goal := "планета — с массы Земли" if GameState.planet_route() else "гигант — с %d масс Земли" % roundi(GameData.GIANT_EARTHS)
 		_set_core_text("Газ диска · %s" % _clock(GameState.gas_left), GameData.format_earths(GameState.mass),
