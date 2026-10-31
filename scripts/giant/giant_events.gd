@@ -56,6 +56,7 @@ var _base := 0.0             # центр колебаний блуждающе�
 var _next := FIRST
 var _time := 0.0
 var _rng := RandomNumberGenerator.new()
+var _view: MoonView = null
 
 
 func _ready() -> void:
@@ -251,6 +252,8 @@ func _flare_end() -> void:
 # --- Вид ---
 
 func _draw() -> void:
+	if _view != null:
+		_view.visible = false
 	if not active() or stage == null:
 		return
 	var zoom: float = stage.camera.zoom.x
@@ -283,12 +286,12 @@ func _draw() -> void:
 					draw_line(q + tail * f, q + tail * (f + 1.0 / 6.0), Color(0.7, 0.88, 1.0, 0.22 * (1.0 - f)), (3.0 - 2.4 * f) * px, true)
 				_ball(q, (2.5 + (i % 3)) * px, Color(0.82, 0.9, 1.0), light)
 		"rival":
-			_ball(p, 14.0 * px, Color(0.62, 0.5, 0.4), light)
+			_moon(p, 14.0 * px, MoonView.style_for_type(GameState.body_type()), light)
 		"stray":
 			# Вытянутая орбита: тело качается туда-сюда поперёк орбит.
 			draw_arc(Vector2.ZERO, _base - 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
 			draw_arc(Vector2.ZERO, _base + 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
-			_ball(p, 9.0 * px, Color(0.6, 0.6, 0.62), light)
+			_moon(p, 9.0 * px, 4, light)
 		"cloud":
 			for i in 26:
 				var f := float(i) / 26.0
@@ -306,3 +309,11 @@ func _ball(c: Vector2, rad: float, col: Color, light: Vector2) -> void:
 		var f := float(k) / steps
 		var lum := 0.07 + 0.93 * pow(f, 0.7)
 		draw_circle(c + light * rad * 0.5 * f, rad * (1.0 - f * 0.85), Color(col.r * lum, col.g * lum, col.b * lum))
+
+
+## Тело события шейдером, а не кружками.
+func _moon(c: Vector2, rad: float, style: int, light: Vector2) -> void:
+	if _view == null:
+		_view = MoonView.new()
+		add_child(_view)
+	_view.put(c, rad, style, light, 2.3, _time * 0.2)

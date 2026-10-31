@@ -78,13 +78,32 @@ func _ready() -> void:
 	var add := CanvasItemMaterial.new()
 	add.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	glow.material = add
-	glow.draw.connect(func() -> void:
-		for k in 60:
-			var f := float(k) / 59.0
-			glow.draw_circle(Vector2.ZERO, lerpf(STAR_GLOW, GameData.STAR_RADIUS * STAR_SCALE * 1.1, f),
-				Color(1.0, 0.62 + 0.3 * f, 0.3 + 0.5 * f, 0.003 + 0.012 * f * f)))
+	# Свечение одним квадом с радиальным градиентом: раньше было 60 кругов на весь
+	# экран друг на друге, и это был самый тяжёлый слой этапа.
+	var grad := Gradient.new()
+	var core := GameData.STAR_RADIUS * STAR_SCALE * 1.1 / STAR_GLOW
+	grad.set_offset(0, 0.0)
+	grad.set_color(0, Color(1.0, 0.92, 0.8, 0.5))
+	grad.set_offset(1, 1.0)
+	grad.set_color(1, Color(1.0, 0.62, 0.3, 0.0))
+	grad.add_point(core, Color(1.0, 0.9, 0.75, 0.42))
+	grad.add_point(lerpf(core, 1.0, 0.25), Color(1.0, 0.8, 0.55, 0.12))
+	grad.add_point(lerpf(core, 1.0, 0.6), Color(1.0, 0.7, 0.42, 0.035))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 256
+	tex.height = 256
+	var spr := Sprite2D.new()
+	spr.texture = tex
+	spr.scale = Vector2.ONE * STAR_GLOW * 2.0 / 256.0
+	glow.add_child(spr)
+	spr.material = add
 	add_child(glow)
 	var star := preload("res://scripts/world/star.gd").new()
+	star.show_zones = false
 	star.scale = Vector2.ONE * STAR_SCALE
 	add_child(star)
 	star.get_child(0).visible = false  # тёмное кольцо короны на светлом газе лишнее
@@ -97,6 +116,7 @@ func _ready() -> void:
 	body = GiantBody.new()
 	body.sigma_at = func(x: float) -> float: return disk.at(orbit + x * body.hill)
 	add_child(body)
+	clumps.bind(body.gas)
 	body.set_look(str(g.get("flavor", "giant_cold")))
 	body.moons = moons
 	# Только что после лавины: оболочка раздувается на глазах.
@@ -200,11 +220,14 @@ func _process(delta: float) -> void:
 	input = input.limit_length(1.0)
 	var speed := GameData.GIANT_SPEED * pow(earths / 10.0, -0.25) * Skills.stat("giant_speed")
 	vel = vel.lerp(input * speed, minf(delta * 2.2, 1.0))
+	var was := Vector2(orbit, ang)
 	orbit += vel.x * delta
 	ang = wrapf(ang + vel.y * delta / orbit, -PI, PI)
 	var mig := GameData.GIANT_MIGRATE * disk.at(orbit) * gk * maxf(1.0 - Skills.stat("giant_anchor"), 0.0)
 	orbit -= mig * delta
 	orbit = clampf(orbit, GameData.GIANT_ORBIT_MIN, GameData.GIANT_DISK.y - 600.0)
+	# Газ лежит в диске, а не едет с гигантом: сдвигаем частицы навстречу.
+	body.gas.shift(Vector2(orbit - was.x, wrapf(ang - was.y, -PI, PI) * orbit))
 
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
 	clumps.step(delta)

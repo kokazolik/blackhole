@@ -27,6 +27,8 @@ var _flare_timer := 0.0
 var _flare_t := -1.0
 
 
+var show_zones := true  # пунктир зон; на этапе гиганта звезда в другом масштабе, он там лишний
+
 func _ready() -> void:
 	# Дальнее свечение: простой квад, яркость считается формулой в шейдере.
 	var halo_quad := QuadMesh.new()
@@ -99,6 +101,8 @@ func _make_noise() -> NoiseTexture2D:
 
 
 func _draw() -> void:
+	if not show_zones:
+		return
 	# Границы зон: внутренняя (металл) и снеговая линия (лёд).
 	_draw_dashed_ring(GameData.INNER_ZONE, Color(1.0, 0.7, 0.4, 0.10))
 	_draw_dashed_ring(GameData.SNOW_LINE, Color(0.6, 0.9, 1.0, 0.14))

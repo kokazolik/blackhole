@@ -1,37 +1,43 @@
 extends Node2D
 ## Сгустки газа в диске: их можно догнать и всосать самому.
 ##
-## Сгустки плывут по сдвиговому течению: внутренние обгоняют гиганта снизу
-## вверх, внешние отстают сверху вниз. Где газа больше, там и сгустков больше,
-## поэтому в выеденной щели их почти нет, а на её краях густо. Подойди ближе
-## сферы Хилла, и гравитация гиганта утянет сгусток по спирали в свой диск.
+## Сам газ — частицы в задаче Хилла (gas_particles.gd): сгусток течёт по
+## сдвигу, а подойдёшь ближе, и гравитация гиганта сама растянет его приливом
+## в струю, закрутит и уронит в свой диск. Здесь только учёт: что за сгустки
+## у этого ядра, сколько их, что даёт каждая севшая частица.
+## Где газа больше, там и сгустков больше: в выеденной щели их почти нет.
 ## У каждого ядра свои сгустки: лёд строит луны, углеродные тучи дают пыль,
 ## тяжёлые несут хондры, у горячего гиганта газ раскалён и гуще у звезды.
 
-const SHADER := preload("res://shaders/gas_clump.gdshader")
-const PULL_TIME := 1.8       # секунд на спираль всасывания
-const DRIFT := 0.3           # сгустки плывут медленнее рисунка газа, чтобы их можно было догнать
+const DRIFT := 0.3           # мелкие тела плывут медленнее газа: их можно догнать
 const SECONDS := 3.0         # сгусток стоит стольких секунд аккреции при полном газе
+const PARTS := 46            # частиц в сгустке
 
 const KINDS := {
-	"giant_cold": {"name": "сгусток водорода", "col": Color(0.86, 0.76, 0.62), "mass": 1.0, "n": 8},
-	"giant_ice": {"name": "ледяной сгусток", "col": Color(0.66, 0.84, 1.0), "mass": 1.0, "n": 7, "ice": 1.0},
-	"giant_dark": {"name": "углеродная туча", "col": Color(0.55, 0.4, 0.27), "mass": 0.9, "n": 8, "dark": 0.65},
-	"giant_dense": {"name": "тяжёлый сгусток", "col": Color(0.8, 0.8, 0.84), "mass": 1.6, "n": 5},
-	"giant_hot": {"name": "раскалённый сгусток", "col": Color(1.0, 0.68, 0.42), "mass": 1.2, "n": 7, "hot": 0.7},
+	"giant_cold": {"name": "сгусток водорода", "col": Color(0.86, 0.78, 0.66), "mass": 1.0, "n": 5},
+	"giant_ice": {"name": "ледяной сгусток", "col": Color(0.7, 0.86, 1.0), "mass": 1.0, "n": 5, "ice": 1.0},
+	"giant_dark": {"name": "углеродная туча", "col": Color(0.3, 0.22, 0.16), "mass": 0.9, "n": 5, "dark": 0.65},
+	"giant_dense": {"name": "тяжёлый сгусток", "col": Color(0.8, 0.8, 0.86), "mass": 1.6, "n": 4},
+	"giant_hot": {"name": "раскалённый сгусток", "col": Color(1.0, 0.62, 0.36), "mass": 1.2, "n": 5, "hot": 0.7},
 }
 
 var stage                    # giant_stage.gd
-var clumps: Array = []
+var clumps := {}             # id -> {mass, left, eaten, said}
 var eaten := 0
+var _next_id := 0
 var _rng := RandomNumberGenerator.new()
 var _time := 0.0
 var _kind: Dictionary = {}
 var _flavor := ""
+var _spawn_t := 1.0
 
 
 func _ready() -> void:
 	_rng.randomize()
+
+
+func bind(gas: GasParticles) -> void:
+	gas.particle_eaten.connect(_on_eaten)
 
 
 func kind() -> Dictionary:
@@ -42,100 +48,62 @@ func kind() -> Dictionary:
 	return _kind
 
 
-func world_pos(c: Dictionary) -> Vector2:
-	return Vector2.from_angle(float(c.a)) * float(c.r)
-
-
 func capture_r() -> float:
 	return 1.25 * stage.hill() * Skills.stat("giant_reach")
 
 
-## Ближайший свободный сгусток: для бота и подсказок.
+## Ближайший сгусток в мировых координатах (для бота); {} — нет.
 func nearest() -> Dictionary:
 	var best := {}
 	var bd := INF
-	for c in clumps:
-		if float(c.pull) >= 0.0:
+	var gas: GasParticles = stage.body.gas
+	for id in clumps.keys():
+		var c := gas.clump_center(id)
+		if c.x == INF:
 			continue
-		var d: float = world_pos(c).distance_to(stage.body.position)
+		var d := c.length()
 		if d < bd:
 			bd = d
-			best = c
+			best = {"id": id, "hill": c}
 	return best
+
+
+func world_pos(c: Dictionary) -> Vector2:
+	var h: Vector2 = c.hill
+	return stage.body.to_global(Vector2(h.x, -h.y) * stage.hill())
 
 
 func step(delta: float) -> void:
 	_time += delta
 	var k := kind()
+	var gas: GasParticles = stage.body.gas
 	var gk: float = clampf(stage.gas / stage.gas_total, 0.0, 1.0)
-	var vp := get_viewport_rect().size
-	var zoom: float = stage.camera.zoom.x
-	var half_h := vp.y * 0.5 / zoom
-	var orbit: float = stage.orbit
-	var ang: float = stage.ang
-	var gpos: Vector2 = stage.body.position
+	# Уплывшие и съеденные сгустки забываем.
+	for id in clumps.keys():
+		if gas.count_of(id) == 0:
+			clumps.erase(id)
 	var want := roundi(float(k["n"]) * (0.4 + 0.6 * gk))
-	var tries := 0
-	while clumps.size() < want and tries < 4:
-		tries += 1
-		_spawn(k, orbit, ang, half_h, false)
-	var cap := capture_r()
-	var keep := []
-	for c in clumps:
-		var node: ColorRect = c.node
-		var mat: ShaderMaterial = node.material
-		if float(c.pull) >= 0.0:
-			c.pull = float(c.pull) + delta / PULL_TIME
-			var e := smoothstep(0.0, 1.0, float(c.pull))
-			var rel: Vector2 = (c.rel0 as Vector2).rotated(-2.2 * e) * pow(1.0 - e, 1.2)
-			var wp := gpos + rel
-			c.r = wp.length()
-			c.a = wp.angle()
-			mat.set_shader_parameter("pull", minf(float(c.pull) * 1.4, 1.0))
-			# Газ струями уходит в свой диск гиганта.
-			c.inj = float(c.inj) + delta * 14.0
-			while float(c.inj) >= 1.0:
-				c.inj = float(c.inj) - 1.0
-				stage.body.inject(rel.rotated(-ang))
-			if float(c.pull) >= 1.0:
-				_eat(c, k)
-				node.queue_free()
-				continue
-		else:
-			# Течение: внутренний газ обгоняет гиганта, внешний отстаёт.
-			var x := float(c.r) / orbit
-			var dom := 0.35 * (pow(x, -1.5) - 1.0) * DRIFT
-			c.a = float(c.a) - dom * delta
-			var wp := world_pos(c)
-			var to := gpos - wp
-			var d := to.length()
-			# Гравитация гиганта подтягивает сгусток, когда тот близко.
-			if d < cap * 2.2:
-				wp += to.normalized() * delta * 160.0 * smoothstep(cap * 2.2, cap, d)
-				c.r = wp.length()
-				c.a = wp.angle()
-			if d < cap:
-				c.pull = 0.0
-				c.rel0 = wp - gpos
-				c.inj = 0.0
-			var da := absf(wrapf(float(c.a) - ang, -PI, PI)) * orbit
-			if da > half_h * 3.2 or float(c.r) < GameData.GIANT_STAR_R * 1.15 or float(c.r) > GameData.GIANT_DISK.y - 300.0:
-				node.queue_free()
-				continue
-		_place(c)
-		mat.set_shader_parameter("time", _time)
-		keep.append(c)
-	clumps = keep
-	_step_rocks(delta, k, orbit, ang, half_h, gpos, cap)
+	_spawn_t -= delta
+	if _spawn_t <= 0.0 and clumps.size() < want:
+		_spawn_t = _rng.randf_range(1.5, 3.5)
+		_spawn(k, gas)
+	var orbit: float = stage.orbit
+	var vp := get_viewport_rect().size
+	var half_h: float = vp.y * 0.5 / stage.camera.zoom.x
+	_step_rocks(delta, k, orbit, stage.ang, half_h, stage.body.position, capture_r())
 	queue_redraw()
 
 
-func _spawn(k: Dictionary, orbit: float, ang: float, half_h: float, anywhere: bool) -> void:
+func _spawn(k: Dictionary, gas: GasParticles) -> void:
 	var h: float = stage.hill()
+	var orbit: float = stage.orbit
 	for attempt in 6:
-		var side := 1.0 if _rng.randf() < 0.5 else -1.0
-		var dx := side * _rng.randf_range(0.9, 5.0) * h
-		var r := orbit + dx
+		# Сам газ падает на гиганта только из полосы 1.25–2.1 радиуса Хилла
+		# (задача Хилла). Сгустки рождаются вне её: чтобы съесть, надо подъехать.
+		# Навык «длинные руки» расширяет полосу, и часть сгустков падает сама.
+		var off := _rng.randf_range(2.4, 3.8) if _rng.randf() < 0.75 else _rng.randf_range(0.3, 1.0)
+		var x := (1.0 if _rng.randf() < 0.5 else -1.0) * off
+		var r := orbit + x * h
 		if r < GameData.GIANT_STAR_R * 1.25 or r > GameData.GIANT_DISK.y - 600.0:
 			continue
 		var s: float = stage.disk.at(r)
@@ -145,56 +113,40 @@ func _spawn(k: Dictionary, orbit: float, ang: float, half_h: float, anywhere: bo
 			s *= 1.8 if r < GameData.HOT_ORBIT + 2000.0 else 0.6
 		if _rng.randf() > clampf(s, 0.0, 1.5) / 1.5:
 			continue
-		# Внутренние приходят снизу (сзади), внешние сверху: навстречу по течению.
-		var off := half_h * _rng.randf_range(1.1, 1.6) if not anywhere else _rng.randf_range(-1.0, 1.0) * half_h
-		var a := ang + (off if dx < 0.0 else -off) / orbit
-		var c := {"r": r, "a": a, "seed": _rng.randf() * 10.0, "size": h * _rng.randf_range(0.4, 0.65) * (1.25 if k["mass"] > 1.3 else 1.0),
-			"pull": -1.0, "rel0": Vector2.ZERO, "inj": 0.0}
-		var node := ColorRect.new()
-		node.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var mat := ShaderMaterial.new()
-		mat.shader = SHADER
-		mat.set_shader_parameter("col", k["col"])
-		mat.set_shader_parameter("seed", c.seed)
-		mat.set_shader_parameter("dark", float(k.get("dark", 0.0)))
-		mat.set_shader_parameter("hot", float(k.get("hot", 0.0)))
-		mat.set_shader_parameter("ice", float(k.get("ice", 0.0)))
-		mat.set_shader_parameter("light", Vector2(0.0, 1.0))
-		node.material = mat
-		add_child(node)
-		c["node"] = node
-		clumps.append(c)
-		_place(c)
+		# Внешние приходят сверху, внутренние снизу: навстречу по течению.
+		var y := signf(x) * _rng.randf_range(4.5, 6.0)
+		var id := _next_id
+		_next_id += 1
+		var count := PARTS if k["mass"] < 1.3 else PARTS + 14
+		var gain: float = maxf(stage.clump_gain(s) * float(k["mass"]) * SECONDS, 0.05)
+		clumps[id] = {"mass": gain / count, "left": count, "eaten": 0, "said": false}
+		gas.spawn_clump(id, x, y, _rng.randf_range(0.35, 0.55), count, k["col"])
 		return
 
 
-## Квад сгустка: ось x вдоль орбиты, размер сжимается при всасывании.
-func _place(c: Dictionary) -> void:
-	var node: ColorRect = c.node
-	var sz := float(c.size) * 2.0
-	if float(c.pull) >= 0.0:
-		sz *= 1.0 - 0.55 * smoothstep(0.0, 1.0, float(c.pull))
-	node.size = Vector2(sz * 1.6, sz)
-	node.pivot_offset = node.size * 0.5
-	var wp := world_pos(c)
-	node.position = wp - node.pivot_offset
-	var rot := float(c.a) + PI * 0.5
-	node.rotation = rot
-	var mat: ShaderMaterial = node.material
-	var tide: Vector2 = (stage.body.position - wp).rotated(-rot)
-	mat.set_shader_parameter("tide_dir", tide.normalized() if tide.length() > 1.0 else Vector2(-1, 0))
-
-
-func _eat(c: Dictionary, k: Dictionary) -> void:
-	eaten += 1
-	var gain: float = stage.clump_gain(float(stage.disk.at(float(c.r)) if c.has("r") else 1.0)) * float(k["mass"]) * SECONDS
-	gain = maxf(gain, 0.05)
+## Частица сгустка села в свой диск гиганта: масса и пыль приходят по частям.
+func _on_eaten(id: int) -> void:
+	if not clumps.has(id):
+		return
+	var c: Dictionary = clumps[id]
+	var k := kind()
+	c.eaten = int(c.eaten) + 1
+	var gain: float = c.mass
 	stage.earths += gain
-	var type := GameState.body_type()
-	var pay_k := 1.0
+	var pay_k := 2.5 if k.has("dark") else 1.0
+	if GameState.body_type() == "venus":
+		pay_k *= 1.3
+	stage.pay(gain * pay_k)
+	stage.body.flash()
+	if not c.said and int(c.eaten) >= int(c.left) / 2:
+		c.said = true
+		eaten += 1
+		_reward(k, float(c.mass) * float(c.left))
+
+
+func _reward(k: Dictionary, total: float) -> void:
 	var extra := ""
 	if k.has("dark"):
-		pay_k = 2.5
 		extra = " · пыль ×2,5"
 	elif k.has("ice"):
 		stage.moon_prog += 0.15
@@ -202,14 +154,9 @@ func _eat(c: Dictionary, k: Dictionary) -> void:
 	elif float(k["mass"]) > 1.3:
 		GameState.add_chondrules(1, stage.body.position)
 		extra = " · хондры +1"
-	if type == "venus":
-		pay_k *= 1.3
-	if type == "chondrite" and _rng.randf() < 0.25:
+	if GameState.body_type() == "chondrite" and _rng.randf() < 0.25:
 		GameState.add_chondrules(1, stage.body.position)
-	stage.pay(gain * pay_k)
-	stage.body.flash()
-	stage.body.flash()
-	stage.hud.toast("Всосан %s: +%s масс Земли%s" % [k["name"], String.num(gain, 1).replace(".", ","), extra], (k["col"] as Color).lerp(Color.WHITE, 0.3))
+	stage.hud.toast("Всасываешь %s: +%s масс Земли%s" % [k["name"], String.num(total, 1).replace(".", ","), extra], (k["col"] as Color).lerp(Color.WHITE, 0.4))
 
 
 # --- Мелкие тела: всё, что было до тебя ---
@@ -230,6 +177,9 @@ const SHRED_TIME := 2.2
 var rocks: Array = []
 var _flares: Array = []
 var _rock_t := 2.0
+var _views: Array = []   # MoonView для крупных тел и кусков
+var _used := 0
+const MAT_STYLE := {"rock": 0, "metal": 4, "ice": 1, "carbon": 3}
 
 
 func _material_at(r: float) -> String:
@@ -374,6 +324,7 @@ func _draw() -> void:
 	var h: float = stage.hill()
 	var px := 1.0 / maxf(stage.camera.zoom.x, 0.01)
 	var light_dir := -gpos.normalized()
+	_used = 0
 	for b in rocks:
 		var size: float = h * float(ROCKS[b.kind]["size"])
 		var col: Color = ROCK_COL[b.mat]
@@ -388,7 +339,10 @@ func _draw() -> void:
 			if e > 0.3:
 				var back: Vector2 = (c - gpos).rotated(0.5).normalized() * rad * (3.0 + 6.0 * heat)
 				draw_line(c, c + back, Color(1.0, 0.7, 0.45, 0.25 + 0.4 * heat), rad * 0.8, true)
-			_ball(c, rad, col.lerp(Color(1.0, 0.55, 0.25), heat * 0.8), light_dir)
+			if rad / px > 3.5:
+				_view(c, rad, int(MAT_STYLE[b.mat]), light_dir, float(b.seed) + float(part[1]), heat)
+			else:
+				_ball(c, rad, col.lerp(Color(1.0, 0.55, 0.25), heat * 0.8), light_dir)
 			if heat > 0.0:
 				draw_circle(c, rad * (1.3 + heat), Color(1.0, 0.6, 0.3, 0.25 * heat))
 		if float(b.pull) < 0.0 and b.kind == "embryo":
@@ -397,6 +351,8 @@ func _draw() -> void:
 			for j in 6:
 				var f := float(j) / 6.0
 				draw_circle(ec, size * (1.2 + 1.2 * f), Color(col, 0.025 * (1.0 - f)))
+	for j in range(_used, _views.size()):
+		(_views[j] as MoonView).visible = false
 	var r: float = stage.body.body_r * stage.body.inflate
 	for f in _flares:
 		var k := 1.0 - float(f.t) / 0.9
@@ -412,3 +368,14 @@ func _ball(c: Vector2, rad: float, col: Color, light: Vector2) -> void:
 		var f := float(k) / steps
 		var lum := 0.08 + 0.92 * pow(f, 0.7)
 		draw_circle(c + light * rad * 0.5 * f, rad * (1.0 - f * 0.85), Color(col.r * lum, col.g * lum, col.b * lum))
+
+
+## Крупное тело шейдером: кратеры, лёд, железо — по веществу.
+func _view(c: Vector2, rad: float, style: int, light: Vector2, seed_v: float, heat: float) -> void:
+	if _used >= _views.size():
+		var v := MoonView.new()
+		add_child(v)
+		_views.append(v)
+	var view: MoonView = _views[_used]
+	_used += 1
+	view.put(c, rad, style, light, fmod(seed_v, 10.0), _time * 0.3 + seed_v, 1.0, heat, 1.0)

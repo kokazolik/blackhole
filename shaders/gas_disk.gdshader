@@ -22,27 +22,11 @@ uniform float cam_rot = 0.0;    // камера поворачивается в�
 uniform float gang = 0.0;       // угол гиганта на орбите
 
 
-float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
+uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 
-float noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-			mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
+// Шум из готовой бесшовной текстуры (NoiseTex): 256 пикселей на 16 единиц.
 float fbm(vec2 p) {
-	float s = 0.0;
-	float a = 0.5;
-	for (int i = 0; i < 4; i++) {
-		s += a * noise(p);
-		p = p * 2.03 + vec2(1.7, 9.2);
-		a *= 0.5;
-	}
-	return s;
+	return texture(noise_tex, p * 0.0625).r;
 }
 
 float sigma_at(float r) {

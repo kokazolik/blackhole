@@ -23,6 +23,7 @@ func _ready() -> void:
 	_dr = (GameData.GIANT_DISK.y - GameData.GIANT_DISK.x) / GameData.GIANT_BINS
 	_mat.set_shader_parameter("disk_range", GameData.GIANT_DISK)
 	_mat.set_shader_parameter("snow_line", GameData.SNOW_LINE)
+	_mat.set_shader_parameter("noise_tex", NoiseTex.get_tex())
 
 
 ## Плотность из сохранения или нетронутый диск: Σ ∝ 1/r, у звезды газ

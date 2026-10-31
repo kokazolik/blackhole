@@ -13,27 +13,11 @@ uniform vec2 light_dir = vec2(-1.0, -0.12);
 uniform vec3 dusk : source_color = vec3(0.46, 0.38, 0.32);
 uniform vec3 warm : source_color = vec3(0.95, 0.72, 0.5);
 
-float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453);
-}
+uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 
-float noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-			mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
+// Шум из готовой бесшовной текстуры (NoiseTex) вместо подсчёта в каждом пикселе.
 float fbm(vec2 p) {
-	float s = 0.0;
-	float a = 0.5;
-	for (int i = 0; i < 5; i++) {
-		s += a * noise(p);
-		p = p * 2.1 + vec2(3.1, 7.7);
-		a *= 0.5;
-	}
-	return s;
+	return texture(noise_tex, p * 0.0625).r;
 }
 
 void fragment() {

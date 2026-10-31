@@ -83,6 +83,9 @@ var _flow_t := 60.0
 var _name_i := 0
 var giant: Rival  # молодой гигант второго шанса
 var _moon_a := 0.0
+var _moon_view: MoonView = null
+var _giant_view: ColorRect = null
+var _giant_mat: ShaderMaterial = null
 var _moon_birth := -1.0      # 0..1: луна собирается из диска обломков
 
 
@@ -835,6 +838,8 @@ func _draw_warnings(px: float) -> void:
 
 
 func _draw() -> void:
+	if _giant_view != null:
+		_giant_view.visible = false  # покажет _draw_giant, если гигант в кадре
 	if not active():
 		return
 	var px := 1.0 / camera.zoom.x
@@ -881,33 +886,31 @@ func _draw() -> void:
 				draw_line(a, a + dir * rv.r * 0.4, Color(1.0, 0.45, 0.35, 0.5), 1.5 * px)
 
 
-## Молодой гигант: полосатый газовый шар с дымкой атмосферы.
-func _draw_giant(rv: Rival, px: float) -> void:
+## Молодой гигант: тот же шейдер, что на этапе гиганта (пояса, вихри, дымка).
+func _draw_giant(rv: Rival, _px: float) -> void:
 	var c := world_pos(rv)
 	if c.distance_to(player.position) > dust_field.view_radius() * 1.4 + rv.r:
 		return
-	var r := rv.r
+	if _giant_view == null:
+		_giant_view = ColorRect.new()
+		_giant_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_giant_mat = ShaderMaterial.new()
+		_giant_mat.shader = preload("res://shaders/giant_planet.gdshader")
+		var look: Array = GameData.GIANT_LOOK["giant_cold"]
+		_giant_mat.set_shader_parameter("zone_col", look[0])
+		_giant_mat.set_shader_parameter("belt_col", look[1])
+		_giant_mat.set_shader_parameter("storm_col", look[2])
+		_giant_mat.set_shader_parameter("seed", rng.randf())
+		_giant_view.material = _giant_mat
+		add_child(_giant_view)
+	var q := rv.r / 0.36  # тело — 0.36 ширины квада, дымка выходит за край
+	_giant_view.visible = true
+	_giant_view.size = Vector2(q, q)
+	_giant_view.position = c - _giant_view.size * 0.5
 	var light := (-c).normalized()
-	for k in 5:
-		draw_circle(c, r * (1.0 + 0.06 * (5 - k)), Color(0.95, 0.75, 0.5, 0.05))
-	draw_circle(c, r, Color(0.62, 0.45, 0.3))
-	var bands := [Color(0.85, 0.7, 0.5), Color(0.55, 0.36, 0.24), Color(0.92, 0.82, 0.64), Color(0.7, 0.5, 0.34), Color(0.88, 0.76, 0.58)]
-	for i in bands.size():
-		var y0 := -1.0 + (i + 0.15) * 2.0 / bands.size()
-		var y1 := y0 + 0.75 * 2.0 / bands.size()
-		var pts := PackedVector2Array()
-		for j in 9:
-			var y := lerpf(y0, y1, j / 8.0)
-			pts.append(c + Vector2(sqrt(maxf(1.0 - y * y, 0.0)), y) * r)
-		for j in 9:
-			var y := lerpf(y1, y0, j / 8.0)
-			pts.append(c + Vector2(-sqrt(maxf(1.0 - y * y, 0.0)), y) * r)
-		draw_colored_polygon(pts, Color(bands[i], 0.8))
-	# Ночная сторона: тень от звезды.
-	for k in 6:
-		var f := k / 6.0
-		draw_circle(c - light * r * (0.25 + 0.5 * f), r * (0.95 - 0.5 * f), Color(0.02, 0.01, 0.03, 0.09))
-	draw_arc(c, r, 0.0, TAU, 64, Color(1.0, 0.9, 0.7, 0.5), 2.0 * px, true)
+	_giant_mat.set_shader_parameter("light_dir", light)
+	_giant_mat.set_shader_parameter("spin", Time.get_ticks_msec() * 0.001 * 0.12)
+	_giant_mat.set_shader_parameter("spin_jet", Time.get_ticks_msec() * 0.001 * 0.12)
 
 
 ## Гигант за краем экрана: стрелка у края показывает, куда нырять.
@@ -938,6 +941,8 @@ func _draw_giant_arrow(px: float) -> void:
 ## он за несколько секунд стягивается в шар.
 func _draw_moon(px: float) -> void:
 	if not GameState.has_moon or not GameState.is_embryo():
+		if _moon_view != null:
+			_moon_view.visible = false
 		return
 	var dt := get_process_delta_time()
 	_moon_a += dt * TAU / 24.0
@@ -960,18 +965,13 @@ func _draw_moon(px: float) -> void:
 	var r := player.radius * 0.27 * smoothstep(0.25, 1.0, e)
 	draw_arc(player.position, orbit, 0.0, TAU, 96, Color(1, 1, 1, 0.06 * e), 1.0 * px, true)
 	if r > 0.5 * px:
-		# Луна из мантии удара: её цвет — твой состав.
-		var mc := Color(0.74, 0.72, 0.69)
-		match GameState.body_type():
-			"ice", "titan":
-				mc = Color(0.8, 0.85, 0.9)
-			"metal":
-				mc = Color(0.6, 0.6, 0.64)
-			"carbon":
-				mc = Color(0.42, 0.38, 0.35)
-			"venus":
-				mc = Color(0.78, 0.66, 0.52)
-		_rock(c, r, mc, (-c).normalized())
+		# Луна из мантии удара: её вид — твой состав.
+		if _moon_view == null:
+			_moon_view = MoonView.new()
+			add_child(_moon_view)
+		_moon_view.put(c, r, MoonView.style_for_type(GameState.body_type()), (-c).normalized(), 0.7, _moon_a * 0.3, 1.0, 0.0, smoothstep(0.4, 1.0, e))
+	elif _moon_view != null:
+		_moon_view.visible = false
 
 
 ## Шар, освещённый звездой: мягкий терминатор без плоских кругов.

@@ -150,46 +150,104 @@ func _line(text: String, font: Font, size: int, color: Color) -> Label:
 	return l
 
 
-## Итоговое тело: шар цвета концовки с полосами или материками и тенью.
+## Итоговое тело шейдером, как в игре: каменные миры — шейдер зародыша
+## по составу, гиганты — шейдер гиганта, звёзды — протозвезда без кокона.
+var _art: ColorRect = null
+var _art_mat: ShaderMaterial = null
+var _moon: MoonView = null
+
+
+func _make_art() -> void:
+	_art = ColorRect.new()
+	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_art_mat = ShaderMaterial.new()
+	_art.material = _art_mat
+	_icon.add_child(_art)
+	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
+	var giant := kind.begins_with("giant") or kind in ["super_jupiter", "brown_dwarf", "star_failed", "super_neptune"]
+	if kind.begins_with("star_") and kind != "star_failed":
+		var mj := float(GameState.cloud.get("mj", 1000.0))
+		var col: Color = GameData.star_color(mj) * (GameData.cloud_params(GameState.fate_type())["tint"] as Color)
+		_art_mat.shader = preload("res://shaders/protostar.gdshader")
+		_art_mat.set_shader_parameter("lit", 1.0)
+		_art_mat.set_shader_parameter("heat", 1.0)
+		_art_mat.set_shader_parameter("cocoon", 0.0)
+		_art_mat.set_shader_parameter("disk", 0.0)
+		_art_mat.set_shader_parameter("star_col", col)
+		_art_mat.set_shader_parameter("detail", 0.0)
+	elif giant:
+		_art_mat.shader = preload("res://shaders/giant_planet.gdshader")
+		var look: Array = GameData.GIANT_LOOK.get(kind, [cols[0], cols[1], cols[1]])
+		if kind == "star_failed":
+			look = GameData.GIANT_LOOK["brown_dwarf"]
+		elif kind == "super_neptune":
+			look = GameData.GIANT_LOOK["giant_ice"]
+		_art_mat.set_shader_parameter("zone_col", look[0])
+		_art_mat.set_shader_parameter("belt_col", look[1])
+		_art_mat.set_shader_parameter("storm_col", look[2])
+		_art_mat.set_shader_parameter("heat", 0.7 if kind in ["giant_hot", "brown_dwarf", "star_failed"] else 0.0)
+		_art_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.25))
+	else:
+		_art_mat.shader = preload("res://shaders/embryo.gdshader")
+		var style := 0
+		match kind:
+			"planet_iron", "super_iron":
+				style = 1
+			"planet_dark", "super_diamond":
+				style = 2
+			"planet_layered":
+				style = 4
+			"planet_living", "planet_ocean":
+				style = 5
+		_art_mat.set_shader_parameter("style", style)
+		_art_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.25))
+		_art_mat.set_shader_parameter("seed", 0.37)
+		var atmo := 0.0
+		match kind:
+			"planet_living":
+				atmo = 0.5
+				_art_mat.set_shader_parameter("ocean", 0.7)
+				_art_mat.set_shader_parameter("clouds", 0.7)
+			"planet_ocean":
+				atmo = 0.45
+				_art_mat.set_shader_parameter("ocean", 1.0)
+				_art_mat.set_shader_parameter("clouds", 0.5)
+			"planet_titan", "super_titan":
+				atmo = 1.0
+				_art_mat.set_shader_parameter("veil", 1.0)
+				_art_mat.set_shader_parameter("atmo_col", Color(0.9, 0.6, 0.3))
+			"planet_venus", "super_venus":
+				atmo = 1.0
+				_art_mat.set_shader_parameter("veil", 1.0)
+				_art_mat.set_shader_parameter("atmo_col", Color(0.95, 0.85, 0.6))
+			"super_earth", "planet_rock":
+				atmo = 0.3
+		_art_mat.set_shader_parameter("atmo", atmo)
+	if GameState.has_moon:
+		_moon = MoonView.new()
+		_icon.add_child(_moon)
+
+
 func _draw_planet() -> void:
+	if _art == null:
+		_make_art()
 	var c := _icon.size * 0.5
 	var r := 30.0 if kind == "dwarf_planet" else 52.0  # карлик заметно мельче
-	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
+	var q := r / 0.36
 	if kind.begins_with("star_") and kind != "star_failed":
-		_draw_star(c)
-		return
-	var giant := kind.begins_with("giant") or kind == "super_jupiter" or kind == "brown_dwarf" or kind == "star_failed"
-	for k in 6:
-		_icon.draw_circle(c, r * (1.0 + 0.05 * (6 - k)), Color(cols[0], 0.04))
-	_icon.draw_circle(c, r, cols[0])
-	var hazy := kind in ["planet_titan", "planet_venus", "super_neptune", "super_titan", "super_venus"]  # поверхность скрыта облаками
-	if hazy:
-		for k in 4:
-			_icon.draw_circle(c, r * (1.06 + 0.05 * k), Color(cols[0], 0.08))
-		for i in 3:
-			var y := -0.55 + i * 0.5 + 0.05 * sin(_time * 0.3 + i)
-			var w := sqrt(maxf(1.0 - y * y, 0.0)) * r
-			_icon.draw_line(c + Vector2(-w, y * r), c + Vector2(w, y * r), Color(cols[1], 0.22), 12.0, true)
-	elif giant:
-		for i in 5:
-			var y := -0.8 + i * 0.38
-			var w := sqrt(maxf(1.0 - y * y, 0.0)) * r
-			_icon.draw_line(c + Vector2(-w, y * r), c + Vector2(w, y * r), Color(cols[1], 0.7), 7.0, true)
+		var mj := float(GameState.cloud.get("mj", 1000.0))
+		q = (40.0 + 8.0 * clampf(log(mj / 100.0), 0.0, 4.0)) * 2.0
+		_art_mat.set_shader_parameter("time", _time)
 	else:
-		for i in 7:
-			var a := i * 2.4 + _time * 0.15
-			var d := r * 0.55 * fposmod(i * 0.61, 1.0)
-			var p := c + Vector2(cos(a) * d, sin(i * 1.3) * r * 0.5)
-			_icon.draw_circle(p, r * (0.12 + 0.06 * (i % 3)), Color(cols[1], 0.85))
-	# Ночная сторона.
-	for k in 6:
-		var f := k / 6.0
-		_icon.draw_circle(c + Vector2(r * (0.25 + 0.4 * f), 0.0), r * (0.95 - 0.5 * f), Color(0.02, 0.01, 0.04, 0.1))
-	_icon.draw_arc(c, r, 0.0, TAU, 64, Color(1.0, 0.92, 0.75, 0.4), 1.5, true)
-	if GameState.has_moon:
-		var m := c + Vector2(cos(_time * 0.6) * r * 1.6, sin(_time * 0.6) * r * 0.3)
-		_icon.draw_circle(m, 8.0, Color(0.75, 0.74, 0.72))
-		_icon.draw_circle(m + Vector2(3.0, 0.0), 6.0, Color(0.05, 0.05, 0.08, 0.4))
+		_art_mat.set_shader_parameter("spin", _time * 0.08)
+		_art_mat.set_shader_parameter("spin_jet", _time * 0.08)
+	_art.size = Vector2(q, q)
+	_art.position = c - _art.size * 0.5
+	if _moon != null:
+		var m := c + Vector2(cos(_time * 0.6) * r * 1.7, sin(_time * 0.6) * r * 0.3)
+		_moon.put(m, 9.0, MoonView.style_for_type(GameState.body_type()), Vector2(-1.0, -0.25), 0.7, _time * 0.1)
+		# За планетой луна уходит в тень и за диск, перед ней — поверх.
+		_icon.move_child(_moon, 1 if sin(_time * 0.6) > 0.0 else 0)
 
 
 ## Звезда: ядро цвета массы, мягкое свечение, лучи дифракции.
