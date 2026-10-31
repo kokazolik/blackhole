@@ -86,30 +86,30 @@ void fragment() {
 	float wk = exp(-pow(d / width, 2.0)) * wake
 		* smoothstep(0.4 * hill, 1.2 * hill, dr) * exp(-dr / (rp * 0.7));
 	// Подкова: газ в щели огибает гиганта по орбите, тонкая светлая дуга.
-	float horse = exp(-pow(dr / (0.35 * hill), 2.0)) * smoothstep(0.25, 0.9, abs(th) * rp / hill) * 0.35;
+	float horse = exp(-pow(dr / (0.35 * hill), 2.0)) * smoothstep(0.25, 0.9, abs(th) * rp / hill) * 0.18;
 
 	float dens = s * (0.45 + 0.75 * n) * (1.0 + 2.6 * wk) + horse * gas;
 	dens *= mix(0.35, 1.0, gas);
 
 	// Цвет: у звезды газ горячий и золотой, за снеговой линией холодный, синеватый.
 	float temp = pow(snow_line / r, 0.9);
-	vec3 cold = vec3(0.3, 0.36, 0.58);
-	vec3 mid = vec3(0.72, 0.46, 0.3);
-	vec3 hot = vec3(0.86, 0.56, 0.32);
+	vec3 cold = vec3(0.22, 0.26, 0.4);
+	vec3 mid = vec3(0.5, 0.36, 0.27);
+	vec3 hot = vec3(0.66, 0.46, 0.3);
 	vec3 col = mix(cold, mid, smoothstep(0.65, 1.2, temp));
 	col = mix(col, hot, smoothstep(1.35, 2.2, temp));
 	col *= mix(1.0, 0.75, smoothstep(2.2, 4.0, temp));  // у звезды не выжигать картинку
 	// Тёмные пылевые прожилки.
 	float lanes = smoothstep(0.5, 0.75, fbm(vec2(r * 0.011, th * rp * 0.0025) + n));
-	col *= 1.0 - 0.45 * lanes;
+	col *= 1.0 - 0.22 * lanes;
 	// Свет звезды слабеет с расстоянием, но не выжигает картинку у звезды.
 	float light = mix(0.8, 0.95, smoothstep(0.6, 1.8, temp)) * (1.0 + 0.4 * flare);
 	// Края щели подсвечены: туда газ сгребают приливы гиганта.
 	float ds = abs(sigma_at(r + 60.0) - sigma_at(r - 60.0));
 	float rim = smoothstep(0.02, 0.25, ds) * gas;
 	vec3 rim_col = vec3(1.0, 0.8, 0.5);
-	float shade = 0.4 + 0.45 * clamp(dens, 0.0, 1.1);
-	vec3 c = col * light * shade + vec3(1.0, 0.78, 0.5) * wk * s * 0.6 + rim_col * rim * 0.3;
-	float alpha = clamp(0.25 + dens * 0.6 + wk * s * 0.3 + rim * 0.15, 0.0, 0.9) * smoothstep(0.0, 0.05, s + horse);
+	float shade = 0.35 + 0.4 * clamp(dens, 0.0, 1.1);
+	vec3 c = col * light * shade + vec3(0.9, 0.72, 0.5) * wk * s * 0.22 + rim_col * rim * 0.1;
+	float alpha = clamp(0.07 + dens * 0.44 + wk * s * 0.15 + rim * 0.06, 0.0, 0.58) * smoothstep(0.0, 0.05, s + horse);
 	COLOR = vec4(c, alpha);
 }

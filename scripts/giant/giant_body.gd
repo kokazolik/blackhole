@@ -7,7 +7,7 @@ extends Node2D
 ## подковы, а ближние струи закручивает и роняет в свой диск.
 ## Единица длины потоков — видимый радиус Хилла (hill), время — оборот газа.
 
-const GIANT_SHADER := preload("res://shaders/gas_giant.gdshader")
+const GIANT_SHADER := preload("res://shaders/giant_planet.gdshader")
 const CPD_SHADER := preload("res://shaders/giant_cpd.gdshader")
 const OMEGA := 0.55          # как быстро течёт газ в единицах задачи Хилла, 1/с
 const STREAM_MAX := 240
@@ -52,11 +52,8 @@ func _ready() -> void:
 	_streams.draw.connect(_draw_streams)
 	add_child(_streams)
 	_planet_mat.shader = GIANT_SHADER
-	_planet_mat.set_shader_parameter("ring_k", 0.0)
-	_planet_mat.set_shader_parameter("ambient", 0.22)
-	_planet_mat.set_shader_parameter("tilt", 0.18)
-	_planet_mat.set_shader_parameter("spin_speed", 0.03)
-	_planet_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.15))
+	_planet_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.12))
+	_planet_mat.set_shader_parameter("seed", _rng.randf())
 	_planet.material = _planet_mat
 	_planet.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_planet)
@@ -70,9 +67,16 @@ func _ready() -> void:
 func set_look(flavor: String, hot := 0.0) -> void:
 	var look: Array = GameData.GIANT_LOOK.get(flavor, GameData.GIANT_LOOK["giant_cold"])
 	var burn: Array = GameData.GIANT_LOOK["giant_hot"]
-	_planet_mat.set_shader_parameter("band_light", (look[0] as Color).lerp(burn[0], hot))
-	_planet_mat.set_shader_parameter("band_dark", (look[1] as Color).lerp(burn[1], hot))
-	_planet_mat.set_shader_parameter("storm_col", (look[2] as Color).lerp(burn[2], hot))
+	_planet_mat.set_shader_parameter("zone_col", _muted((look[0] as Color).lerp(burn[0], hot * 0.6), 0.35))
+	_planet_mat.set_shader_parameter("belt_col", _muted((look[1] as Color).lerp(burn[1], hot * 0.6), 0.3))
+	_planet_mat.set_shader_parameter("storm_col", _muted((look[2] as Color).lerp(burn[2], hot * 0.6), 0.2))
+	_planet_mat.set_shader_parameter("heat", hot)
+
+
+## Природные облака не бывают кричащими: цвет наполовину к своей яркости.
+static func _muted(c: Color, k: float) -> Color:
+	var l := c.r * 0.3 + c.g * 0.55 + c.b * 0.15
+	return c.lerp(Color(l, l, l), k)
 
 
 ## Струя газа упала в свой диск: он вспыхивает.
@@ -84,11 +88,12 @@ func _process(delta: float) -> void:
 	_time += delta
 	_cpd_flash = maxf(_cpd_flash - delta * 0.8, 0.0)
 	var r := body_r * inflate
-	var q := r * 2.0 / 0.68  # тело — BODY (0.34) высоты квада
+	var q := r * 2.0 / 0.72  # тело — BODY (0.36) ширины квада
 	_planet.size = Vector2(q, q)
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
-	_planet_mat.set_shader_parameter("heat", clampf(flow * 0.8 + _cpd_flash * 0.5, 0.0, 1.0))
+	_planet_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
+	_planet_mat.set_shader_parameter("spin", _time * 0.035)
 	var cr := hill * 0.95
 	_cpd.size = Vector2(cr, cr) * 2.0
 	_cpd.position = -_cpd.size * 0.5
@@ -164,7 +169,9 @@ func _spawn() -> void:
 
 
 func _draw_streams() -> void:
-	var w := 2.4 / maxf(zoom, 0.01)
+	# Струи почти прозрачны: это разреженный газ, видный лишь в отражённом
+	# свете. Заметнее только там, где поток сгущается у самого гиганта.
+	var w := 1.3 / maxf(zoom, 0.01)
 	for t in _trail:
 		var n := t.size()
 		if n < 2:
@@ -172,28 +179,38 @@ func _draw_streams() -> void:
 		var head := t[n - 1]
 		var near := clampf(1.0 - head.length() / (hill * 2.5), 0.0, 1.0)
 		near *= near
-		var col := Color(1.0, 0.7 + 0.25 * near, 0.4 + 0.45 * near)
-		var a := 0.05 + 0.55 * near
+		var col := Color(0.85, 0.74 + 0.1 * near, 0.62 + 0.15 * near)
+		var a := 0.03 + 0.14 * near
 		for k in range(1, n):
 			var f := float(k) / (n - 1)
-			_streams.draw_line(t[k - 1], t[k], Color(col, a * f), w * (0.4 + 0.8 * f), true)
-		_streams.draw_circle(head, w * (0.6 + 0.6 * near), Color(col, a))
+			_streams.draw_line(t[k - 1], t[k], Color(col, a * f * f), w * (0.6 + 0.6 * f), true)
 
 
 func _draw_moons(ci: Node2D) -> void:
 	var r := body_r * inflate
+	var px := 1.0 / maxf(zoom, 0.01)
+	var cols := [Color(0.78, 0.68, 0.42), Color(0.74, 0.72, 0.68), Color(0.5, 0.47, 0.44), Color(0.42, 0.39, 0.37)]
 	for i in moons:
 		var a := r * (1.55 + 0.55 * i)
 		var w := 0.9 * pow(a / r, -1.5)
 		var ang := _time * w + i * 2.1
 		var p := Vector2(cos(ang), sin(ang)) * a
-		var mr := r * (0.085 + 0.025 * (i % 3))
-		ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 96, Color(0.75, 0.85, 1.0, 0.07), 1.2 / maxf(zoom, 0.01), true)
-		ci.draw_circle(p, mr * 2.2, Color(0.8, 0.9, 1.0, 0.06))
-		var cols := [Color(0.95, 0.82, 0.45), Color(0.86, 0.84, 0.8), Color(0.62, 0.58, 0.54), Color(0.5, 0.46, 0.44)]
-		ci.draw_circle(p, mr, cols[i % cols.size()])
-		# Ночная сторона: от звезды (слева) отвёрнута вправо.
-		ci.draw_circle(p + Vector2(mr * 0.35, 0.0), mr * 0.82, Color(0.02, 0.02, 0.05, 0.55))
+		var mr := maxf(r * (0.06 + 0.02 * (i % 3)), 2.0 * px)
+		ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035), px, true)
+		# Тень гиганта: луна за ним гаснет.
+		var shadow := 1.0
+		if p.x > 0.0 and absf(p.y) < r:
+			shadow = 0.18 + 0.82 * smoothstep(r * 0.8, r, absf(p.y))
+		var c: Color = cols[i % cols.size()]
+		# Шар: освещённая сторона к звезде (влево), мягкий терминатор.
+		var steps := 10
+		for k in steps:
+			var f := float(k) / steps
+			var rr := mr * (1.0 - f * 0.85)
+			var off := Vector2(-mr * 0.5 * f, -mr * 0.06 * f)
+			var lum := (0.06 + 0.94 * pow(f, 0.7)) * shadow
+			ci.draw_circle(p + off, rr, Color(c.r * lum, c.g * lum, c.b * lum))
+		ci.draw_arc(p, mr, PI * 0.55, PI * 1.45, 24, Color(0.7, 0.8, 1.0, 0.18 * shadow), px, true)
 
 
 static func moon_name(i: int) -> String:
