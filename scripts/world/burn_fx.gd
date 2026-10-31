@@ -134,9 +134,11 @@ func _draw() -> void:
 		# свечению ионизированного газа, и гаснет.
 		var hot := GameData.thermal_color(v.temp)
 		var col := Color(hot.r, hot.g, hot.b).lerp(Color(0.45, 0.55, 0.9), clampf(k * 1.6, 0.0, 1.0))
-		if v.get("ice", false):
-			col = Color(0.55, 0.75, 1.0)
 		var a := (1.0 - k) * (0.35 + 0.5 * hot.a)
+		if v.get("ice", false):
+			# Пар льда разреженный: тонкая голубоватая дымка, а не белый шлейф.
+			col = Color(0.55, 0.75, 1.0)
+			a = (1.0 - k) * k * 4.0 * 0.06
 		var s: float = v.size * (1.0 + 2.5 * k)  # газ расширяется
 		draw_texture_rect(_glow, Rect2(v.pos - Vector2(s, s), Vector2(s, s) * 2.0), false, Color(col, a))
 	for sh in _shards:

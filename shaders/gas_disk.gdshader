@@ -18,6 +18,8 @@ uniform float gas = 1.0;        // сколько газа осталось
 uniform float spin = 0.35;      // угловая скорость течения на орбите гиганта, рад/с
 uniform float snow_line = 6800.0;
 uniform float flare = 0.0;
+uniform float cam_rot = 0.0;    // камера поворачивается вместе с гигантом
+uniform float gang = 0.0;       // угол гиганта на орбите
 
 
 float hash(vec2 p) {
@@ -59,10 +61,13 @@ float flow_layer(float r, float th, float dom, float t, vec2 seed) {
 }
 
 void fragment() {
-	vec2 w = cam + (UV - 0.5) * view_size / zoom;
+	vec2 sv = (UV - 0.5) * view_size / zoom;
+	float cr = cos(cam_rot);
+	float sr = sin(cam_rot);
+	vec2 w = cam + vec2(cr * sv.x - sr * sv.y, sr * sv.x + cr * sv.y);
 	float r = length(w);
 	// Угол в сторону орбитального движения: гигант летит «вверх» по экрану.
-	float th = -atan(w.y, w.x);
+	float th = -(mod(atan(w.y, w.x) - gang + PI, TAU) - PI);
 	float u = (r - disk_range.x) / (disk_range.y - disk_range.x);
 	float s = sigma_at(r) * smoothstep(0.0, 0.03, u) * smoothstep(1.0, 0.85, u);
 

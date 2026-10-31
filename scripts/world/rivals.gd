@@ -83,10 +83,15 @@ var _flow_t := 60.0
 var _name_i := 0
 var giant: Rival  # молодой гигант второго шанса
 var _moon_a := 0.0
+var _moon_birth := -1.0      # 0..1: луна собирается из диска обломков
 
 
 func _ready() -> void:
 	rng.randomize()
+	# Луна не возникает сразу: диск обломков удара стягивается в неё на глазах.
+	GameState.moon_formed.connect(func(at: Vector2) -> void:
+		_moon_birth = 0.0
+		_moon_a = (at - player.position).angle() if player else 0.0)
 	_name_i = rng.randi() % NAMES.size()
 	var img := Image.create(256, 256, false, Image.FORMAT_L8)
 	img.fill(Color.WHITE)
@@ -929,16 +934,50 @@ func _draw_giant_arrow(px: float) -> void:
 	draw_set_transform(Vector2.ZERO)
 
 
-## Луна после косого удара: кружит вокруг тебя.
+## Луна после косого удара: кружит вокруг тебя. Сначала это диск обломков,
+## он за несколько секунд стягивается в шар.
 func _draw_moon(px: float) -> void:
 	if not GameState.has_moon or not GameState.is_embryo():
 		return
-	_moon_a += get_process_delta_time() * TAU / 24.0
-	var c := player.position + Vector2.from_angle(_moon_a) * player.radius * 3.4
-	var r := player.radius * 0.27
-	var light := (-c).normalized()
-	draw_arc(player.position, player.radius * 3.4, 0.0, TAU, 96, Color(1, 1, 1, 0.06), 1.0 * px, true)
-	draw_circle(c, r, Color(0.62, 0.6, 0.58))
-	draw_circle(c + light * r * 0.2, r * 0.8, Color(0.78, 0.76, 0.73))
-	draw_circle(c - light * r * 0.45, r * 0.7, Color(0.1, 0.1, 0.12, 0.55))
-	draw_circle(c + Vector2(0.2, -0.1) * r, r * 0.18, Color(0.5, 0.48, 0.47))
+	var dt := get_process_delta_time()
+	_moon_a += dt * TAU / 24.0
+	var orbit := player.radius * 3.4
+	var e := 1.0
+	if _moon_birth >= 0.0:
+		_moon_birth += dt / 5.0
+		e = smoothstep(0.0, 1.0, minf(_moon_birth, 1.0))
+		if _moon_birth >= 1.0:
+			_moon_birth = -1.0
+		# Обломки кружат кольцом и сбегаются к будущей луне.
+		for i in 40:
+			var spread := (1.0 - e) * TAU * (0.15 + 0.85 * fmod(i * 0.618, 1.0))
+			var a := _moon_a - spread * (1.0 if i % 2 == 0 else -0.6)
+			var rr := orbit * (1.0 + (1.0 - e) * 0.25 * sin(i * 2.7))
+			var q := player.position + Vector2.from_angle(a) * rr
+			var sz := player.radius * (0.03 + 0.05 * fmod(i * 0.37, 1.0)) * (1.0 - 0.5 * e)
+			_rock(q, maxf(sz, 1.2 * px), Color(0.62, 0.58, 0.54), (-q).normalized())
+	var c := player.position + Vector2.from_angle(_moon_a) * orbit
+	var r := player.radius * 0.27 * smoothstep(0.25, 1.0, e)
+	draw_arc(player.position, orbit, 0.0, TAU, 96, Color(1, 1, 1, 0.06 * e), 1.0 * px, true)
+	if r > 0.5 * px:
+		# Луна из мантии удара: её цвет — твой состав.
+		var mc := Color(0.74, 0.72, 0.69)
+		match GameState.body_type():
+			"ice", "titan":
+				mc = Color(0.8, 0.85, 0.9)
+			"metal":
+				mc = Color(0.6, 0.6, 0.64)
+			"carbon":
+				mc = Color(0.42, 0.38, 0.35)
+			"venus":
+				mc = Color(0.78, 0.66, 0.52)
+		_rock(c, r, mc, (-c).normalized())
+
+
+## Шар, освещённый звездой: мягкий терминатор без плоских кругов.
+func _rock(c: Vector2, rad: float, col: Color, light: Vector2) -> void:
+	var steps := 9
+	for k in steps:
+		var f := float(k) / steps
+		var lum := 0.06 + 0.94 * pow(f, 0.7)
+		draw_circle(c + light * rad * 0.5 * f, rad * (1.0 - f * 0.85), Color(col.r * lum, col.g * lum, col.b * lum))

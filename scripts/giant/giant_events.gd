@@ -187,6 +187,7 @@ func _win() -> void:
 	var at: Vector2 = stage.body.position
 	match kind:
 		"comets":
+			stage.clumps.shred_now("rubble", "ice", Vector2(stage.hill() * 1.2, -stage.hill() * 0.6).rotated(stage.ang), 7)
 			var gain: float = 3.0 + 0.06 * stage.earths
 			stage.earths += gain
 			stage.pay(gain * 3.0)
@@ -198,6 +199,7 @@ func _win() -> void:
 			else:
 				stage.hud.toast("Рой пойман: +%.1f масс Земли, хондры +4" % gain, col)
 		"rival":
+			stage.clumps.shred_now("embryo", "rock", Vector2(0.0, -stage.hill() * 1.3).rotated(stage.ang))
 			var gain: float = _rng.randf_range(4.0, 8.0) + 0.08 * stage.earths
 			stage.earths += gain
 			stage.pay(gain * 2.0)
@@ -216,9 +218,12 @@ func _win() -> void:
 			if stage.moons < STRAY_MOONS:
 				stage.moons += 1
 				stage.body.moons = stage.moons
+				# Тело подходит со своей орбиты и садится на лунную, а не возникает.
+				stage.body.birth(stage.moons - 1, Vector2(clampf(r - stage.orbit, -2.0 * stage.hill(), 2.0 * stage.hill()) + 0.01, -stage.hill() * 0.8))
 				stage.hud.toast("Поле захватило луну %s! Хондры +6" % stage.body.moon_name(stage.moons - 1), col)
 			else:
 				stage.earths += 1.5
+				stage.body.fall()
 				stage.hud.toast("Лунам тесно: тело упало в тебя, +1,5 массы Земли", col)
 	_finish()
 
@@ -255,16 +260,17 @@ func _draw() -> void:
 	var col := color()
 	var pulse := 0.6 + 0.4 * sin(_time * 3.0)
 	var w := tol()
+	var g: float = stage.ang  # гигант не всегда на оси x: цель рисуем рядом с ним
 	if kind == "flare":
 		# Горячая зона вокруг звезды: всё, что ближе границы.
 		draw_circle(Vector2.ZERO, r, Color(1.0, 0.45, 0.25, 0.05 + 0.04 * pulse))
-		draw_arc(Vector2.ZERO, r, -span, span, 96, Color(1.0, 0.55, 0.35, 0.55 * pulse), 3.0 * px, true)
+		draw_arc(Vector2.ZERO, r, g - span, g + span, 96, Color(1.0, 0.55, 0.35, 0.55 * pulse), 3.0 * px, true)
 		return
 	# Полоса цели вдоль орбиты: мягкая, с яркими краями.
-	draw_arc(Vector2.ZERO, r, -span, span, 128, Color(col, 0.06 + 0.04 * pulse), w * 2.0, true)
-	draw_arc(Vector2.ZERO, r - w, -span, span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
-	draw_arc(Vector2.ZERO, r + w, -span, span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
-	var ang := 0.35 * span * sin(_time * 0.25)
+	draw_arc(Vector2.ZERO, r, g - span, g + span, 128, Color(col, 0.06 + 0.04 * pulse), w * 2.0, true)
+	draw_arc(Vector2.ZERO, r - w, g - span, g + span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
+	draw_arc(Vector2.ZERO, r + w, g - span, g + span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
+	var ang := g + 0.35 * span * sin(_time * 0.25)
 	var p := Vector2(cos(ang), sin(ang)) * r
 	var light := -p.normalized()
 	match kind:
@@ -280,8 +286,8 @@ func _draw() -> void:
 			_ball(p, 14.0 * px, Color(0.62, 0.5, 0.4), light)
 		"stray":
 			# Вытянутая орбита: тело качается туда-сюда поперёк орбит.
-			draw_arc(Vector2.ZERO, _base - 650.0, -span * 0.5, span * 0.5, 64, Color(col, 0.12), px, true)
-			draw_arc(Vector2.ZERO, _base + 650.0, -span * 0.5, span * 0.5, 64, Color(col, 0.12), px, true)
+			draw_arc(Vector2.ZERO, _base - 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
+			draw_arc(Vector2.ZERO, _base + 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
 			_ball(p, 9.0 * px, Color(0.6, 0.6, 0.62), light)
 		"cloud":
 			for i in 26:

@@ -10,6 +10,7 @@ const GasDisk := preload("res://scripts/giant/gas_disk.gd")
 const GiantBody := preload("res://scripts/giant/giant_body.gd")
 const GiantHud := preload("res://scripts/giant/giant_hud.gd")
 const GiantEvents := preload("res://scripts/giant/giant_events.gd")
+const GasClumps := preload("res://scripts/giant/gas_clumps.gd")
 const SAVE_EVERY := 3.0
 const STAR_SCALE := 0.18    # звезда меньше, чем на ранних этапах: она далеко
 const STAR_GLOW := 3400.0   # радиус свечения вокруг звезды
@@ -22,17 +23,21 @@ var disk: GasDisk
 var body: GiantBody
 var hud: GiantHud
 var events: GiantEvents
+var clumps: GasClumps
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
 var pause_menu: PauseMenu
 var earths := 10.0
 var orbit := 7500.0
+var ang := 0.0               # угол гиганта на орбите: «вперёд» по экрану — вверх
+var vel := Vector2.ZERO     # x — от звезды, y — назад по орбите (экран вниз)
 var gas := 0.0
 var gas_total := 1.0
 var moons := 0
 var moon_prog := 0.0
 var mdot := 0.0             # аккреция сейчас, M⊕/с
 var auto_input := 0.0       # для бота: радиальный ввод вместо стика
+var auto_y := 0.0           # для бота: ввод вдоль орбиты
 var use_auto := false
 var _flow := 0.0
 var _feed0 := -1.0          # плотность в зоне в начале: по ней видно, что открылась щель
@@ -49,6 +54,7 @@ func _ready() -> void:
 	var g: Dictionary = GameState.giant
 	earths = float(g.get("e", GameData.GIANT_EARTHS))
 	orbit = float(g.get("r", 7500.0))
+	ang = float(g.get("ang", 0.0))
 	gas_total = GameData.GIANT_GAS_TIME * (1.0 + Skills.stat("giant_gas"))
 	gas = float(g.get("gas", gas_total))
 	moons = int(g.get("moons", 0))
@@ -85,6 +91,9 @@ func _ready() -> void:
 	events = GiantEvents.new()
 	events.stage = self
 	add_child(events)
+	clumps = GasClumps.new()
+	clumps.stage = self
+	add_child(clumps)
 	body = GiantBody.new()
 	body.sigma_at = func(x: float) -> float: return disk.at(orbit + x * body.hill)
 	add_child(body)
@@ -96,12 +105,15 @@ func _ready() -> void:
 	else:
 		_inflate = 1.0
 
+	# Камера поворачивается вместе с гигантом: звезда всегда слева, вперёд по орбите — вверх.
+	camera.ignore_rotation = false
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 4.0
 	camera.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(camera)
 	_update_view(0.0)
-	camera.position = Vector2(orbit, 0.0)
+	camera.position = Vector2.from_angle(ang) * orbit
+	camera.rotation = ang
 	camera.reset_smoothing()
 
 	var ui := CanvasLayer.new()
@@ -179,18 +191,23 @@ func _process(delta: float) -> void:
 	disk.step(delta, orbit, width, h, gained * GameData.GIANT_EAT, torque)
 	pay(gained)
 
-	# Орбита: стик к звезде или от неё, газ тянет внутрь (миграция II типа).
-	var input := auto_input if use_auto else joystick.output.x
+	# Движение: стик в любую сторону. Влево-вправо — к звезде и от неё, вверх-вниз —
+	# вперёд и назад по орбите, за сгустками газа и телами. Гигант тяжёлый:
+	# разгоняется и тормозит плавно. Газ тянет внутрь (миграция II типа).
+	var input := Vector2(auto_input, auto_y) if use_auto else joystick.output
 	if not use_auto:
-		input += Input.get_axis("ui_left", "ui_right")
-	input = clampf(input, -1.0, 1.0)
+		input += Vector2(Input.get_axis("ui_left", "ui_right"), Input.get_axis("ui_up", "ui_down"))
+	input = input.limit_length(1.0)
 	var speed := GameData.GIANT_SPEED * pow(earths / 10.0, -0.25) * Skills.stat("giant_speed")
-	orbit += input * speed * delta
+	vel = vel.lerp(input * speed, minf(delta * 2.2, 1.0))
+	orbit += vel.x * delta
+	ang = wrapf(ang + vel.y * delta / orbit, -PI, PI)
 	var mig := GameData.GIANT_MIGRATE * disk.at(orbit) * gk * maxf(1.0 - Skills.stat("giant_anchor"), 0.0)
 	orbit -= mig * delta
 	orbit = clampf(orbit, GameData.GIANT_DISK.x + 400.0, GameData.GIANT_DISK.y - 600.0)
 
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
+	clumps.step(delta)
 	_moons_step(delta)
 	value_boost = maxf(value_boost - delta, 0.0)
 	events.step(delta)
@@ -212,6 +229,13 @@ func _process(delta: float) -> void:
 		save()
 
 
+## Сколько масс Земли за секунду дал бы газ плотности s сейчас: мерка для сгустков.
+func clump_gain(s: float) -> float:
+	var gk := clampf(gas / gas_total, 0.0, 1.0)
+	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
+	return GameData.GIANT_ACC * clampf(s, 0.1, 1.5) * maxf(gk, 0.3) * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")
+
+
 func pay(gained: float) -> void:
 	if gained <= 0.0:
 		return
@@ -231,11 +255,13 @@ func _moons_step(delta: float) -> void:
 		GameState.add_chondrules(MOON_CHONDRULES, body.position)
 		moons += 1
 		body.moons = moons
+		body.birth(moons - 1)
 		if moons == 1 and not _said.has("moon"):
 			_said["moon"] = true
 			hud.caption("Своя луна", "пыль в твоём диске слиплась в спутник: каждая луна +8% к звёздной пыли", 3.0)
 	else:
 		earths += MOON_FALL_GAIN
+		body.fall()
 		hud.toast("Новая луна упала в тебя: поле слишком слабое, чтобы удержать больше", Color(1.0, 0.7, 0.55))
 		if not _said.has("fall"):
 			_said["fall"] = true
@@ -246,7 +272,7 @@ func _moons_step(delta: float) -> void:
 func _tell(feed: float, gk: float) -> void:
 	if _time > 7.0 and not _said.has("move"):
 		_said["move"] = true
-		hud.caption("Ищи газ", "стик влево — ближе к звезде, вправо — дальше. Карта внизу показывает, где газ гуще", 4.0)
+		hud.caption("Ищи газ", "стик в любую сторону: влево к звезде, вправо от неё, вверх и вниз вдоль орбиты. Догоняй сгустки газа и всё, что кружит в диске", 4.0)
 	if feed < _feed0 * 0.45 and not _said.has("gap"):
 		_said["gap"] = true
 		hud.caption("Щель в диске", "ты выпил газ вдоль своей орбиты, а приливы сгребли остаток к краям: тянись к ним", 4.0)
@@ -269,8 +295,10 @@ func _update_view(delta: float) -> void:
 	var vp := get_viewport_rect().size
 	var z := vp.x * 0.5 / (3.2 * h + 600.0)
 	camera.zoom = camera.zoom.lerp(Vector2(z, z), minf(delta * 2.0, 1.0)) if delta > 0.0 else Vector2(z, z)
-	camera.position = Vector2(orbit, 0.0)
-	body.position = Vector2(orbit, 0.0)
+	camera.position = Vector2.from_angle(ang) * orbit
+	camera.rotation = ang
+	body.position = Vector2.from_angle(ang) * orbit
+	body.rotation = ang
 	body.body_r = GameData.giant_body_r(earths)
 	body.hill = h
 	body.reach = Skills.stat("giant_reach")
@@ -280,13 +308,14 @@ func _update_view(delta: float) -> void:
 	body.zoom = camera.zoom.x
 	body.set_look(str(GameState.giant.get("flavor", "giant_cold")), 1.0 - smoothstep(GameData.HOT_ORBIT - 300.0, GameData.HOT_ORBIT + 900.0, orbit))
 	var gk := clampf(gas / gas_total, 0.0, 1.0)
-	disk.set_view(orbit, h, gk, 0.3 + 0.5 * clampf(earths / 300.0, 0.0, 1.0))
+	disk.set_view(orbit, h, gk, 0.3 + 0.5 * clampf(earths / 300.0, 0.0, 1.0), ang)
 
 
 func save() -> void:
 	var g := GameState.giant
 	g["e"] = earths
 	g["r"] = orbit
+	g["ang"] = ang
 	g["gas"] = gas
 	g["moons"] = moons
 	g["moon_prog"] = moon_prog

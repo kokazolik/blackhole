@@ -107,10 +107,12 @@ func _process(_delta: float) -> void:
 	_mat.set_shader_parameter("view_size", size)
 	_mat.set_shader_parameter("cam", camera.get_screen_center_position())
 	_mat.set_shader_parameter("zoom", camera.zoom.x)
+	_mat.set_shader_parameter("cam_rot", camera.global_rotation)
 	_mat.set_shader_parameter("flare", Star.flare)
 
 
-func set_view(rp: float, hill: float, gas: float, wake: float) -> void:
+func set_view(rp: float, hill: float, gas: float, wake: float, gang := 0.0) -> void:
+	_mat.set_shader_parameter("gang", gang)
 	_mat.set_shader_parameter("rp", rp)
 	_mat.set_shader_parameter("hill", hill)
 	_mat.set_shader_parameter("gas", gas)

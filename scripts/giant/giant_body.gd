@@ -34,6 +34,10 @@ var _cpd_mat := ShaderMaterial.new()
 var _pos: Array[Vector2] = []
 var _vel: Array[Vector2] = []
 var _trail: Array[PackedVector2Array] = []
+var _bri: Array[float] = []          # струи всосанных сгустков ярче фоновых
+var _birth := {}                      # луна -> {t, from}: рождение или захват на глазах
+var _falling: Array = []              # луны, что падают в гиганта
+var _impacts: Array = []
 var _spawn_acc := 0.0
 var _time := 0.0
 var _cpd_flash := 0.0
@@ -93,7 +97,7 @@ func _process(delta: float) -> void:
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
 	_planet_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
-	_planet_mat.set_shader_parameter("spin", _time * 0.035)
+	_planet_mat.set_shader_parameter("spin", _time * 0.12)  # оборот меньше чем за минуту: вращение видно
 	var cr := hill * 0.95
 	_cpd.size = Vector2(cr, cr) * 2.0
 	_cpd.position = -_cpd.size * 0.5
@@ -101,6 +105,26 @@ func _process(delta: float) -> void:
 	_cpd_mat.set_shader_parameter("inner", clampf(r / cr * (1.05 + 0.6 * field), 0.2, 0.75))
 	_cpd_mat.set_shader_parameter("glow", clampf(0.25 + flow * 0.6 + _cpd_flash, 0.0, 1.4))
 	_cpd_mat.set_shader_parameter("field", field)
+	for i in _birth.keys():
+		_birth[i].t = float(_birth[i].t) + delta / 4.0
+		if float(_birth[i].t) >= 1.0:
+			_birth.erase(i)
+	var keep := []
+	for f in _falling:
+		f.t = float(f.t) + delta / 3.0
+		if f.t >= 1.0:
+			var an := float(f.ang) + _time * 0.9 + 4.0
+			_impacts.append({"t": 0.0, "p": Vector2(cos(an), sin(an)) * r * 0.95})
+			flash()
+		else:
+			keep.append(f)
+	_falling = keep
+	var ik := []
+	for im in _impacts:
+		im.t = float(im.t) + delta / 1.2
+		if im.t < 1.0:
+			ik.append(im)
+	_impacts = ik
 	_step_streams(delta)
 	_streams.queue_redraw()
 	for c in get_children():
@@ -143,6 +167,7 @@ func _step_streams(delta: float) -> void:
 			_pos.remove_at(i)
 			_vel.remove_at(i)
 			_trail.remove_at(i)
+			_bri.remove_at(i)
 		else:
 			_pos[i] = p
 			_vel[i] = v
@@ -165,25 +190,65 @@ func _spawn() -> void:
 		_pos.append(Vector2(x, y))
 		_vel.append(Vector2(0.0, -1.5 * x))
 		_trail.append(PackedVector2Array([Vector2(x, -y) * hill]))
+		_bri.append(0.0)
 		return
+
+
+## Струя всосанного газа: из точки local (в координатах гиганта) по спирали в свой диск.
+func inject(local: Vector2) -> void:
+	if _pos.size() >= STREAM_MAX + 80:
+		return
+	var p := Vector2(local.x, -local.y) / maxf(hill, 1.0)
+	p += Vector2(_rng.randf_range(-0.12, 0.12), _rng.randf_range(-0.12, 0.12))
+	var v := -p.normalized() * _rng.randf_range(0.6, 1.1) + Vector2(0.0, -1.5 * p.x) * 0.3
+	_pos.append(p)
+	_vel.append(v)
+	_trail.append(PackedVector2Array([Vector2(p.x, -p.y) * hill]))
+	_bri.append(1.0)
+
+
+## Новая луна собирается на глазах: из пыли своего диска или из захваченного тела.
+func birth(i: int, from := Vector2.INF) -> void:
+	_birth[i] = {"t": 0.0, "from": from}
+
+
+## Лишняя луна падает в гиганта по спирали.
+func fall() -> void:
+	var r := body_r * inflate
+	_falling.append({"t": 0.0, "a": r * (1.55 + 0.55 * moons), "ang": _rng.randf() * TAU})
 
 
 func _draw_streams() -> void:
 	# Струи почти прозрачны: это разреженный газ, видный лишь в отражённом
-	# свете. Заметнее только там, где поток сгущается у самого гиганта.
+	# свете. Заметнее там, где поток сгущается у самого гиганта, и в струях
+	# всосанных сгустков.
 	var w := 1.3 / maxf(zoom, 0.01)
-	for t in _trail:
+	for j in _trail.size():
+		var t := _trail[j]
 		var n := t.size()
 		if n < 2:
 			continue
 		var head := t[n - 1]
 		var near := clampf(1.0 - head.length() / (hill * 2.5), 0.0, 1.0)
 		near *= near
-		var col := Color(0.85, 0.74 + 0.1 * near, 0.62 + 0.15 * near)
-		var a := 0.03 + 0.14 * near
+		var bi := _bri[j]
+		var col := Color(0.85, 0.74 + 0.1 * near, 0.62 + 0.15 * near).lerp(Color(1.0, 0.8, 0.6), bi * 0.5)
+		var a := 0.03 + 0.14 * near + 0.22 * bi
 		for k in range(1, n):
 			var f := float(k) / (n - 1)
-			_streams.draw_line(t[k - 1], t[k], Color(col, a * f * f), w * (0.6 + 0.6 * f), true)
+			_streams.draw_line(t[k - 1], t[k], Color(col, a * f * f), w * (0.6 + 0.6 * f + 0.8 * bi), true)
+
+
+func _moon_ball(ci: Node2D, p: Vector2, mr: float, c: Color, shadow: float) -> void:
+	# Шар: освещённая сторона к звезде (влево), мягкий терминатор.
+	var steps := 10
+	for k in steps:
+		var f := float(k) / steps
+		var rr := mr * (1.0 - f * 0.85)
+		var off := Vector2(-mr * 0.5 * f, -mr * 0.06 * f)
+		var lum := (0.06 + 0.94 * pow(f, 0.7)) * shadow
+		ci.draw_circle(p + off, rr, Color(c.r * lum, c.g * lum, c.b * lum))
+	ci.draw_arc(p, mr, PI * 0.55, PI * 1.45, 24, Color(0.7, 0.8, 1.0, 0.18 * shadow), mr * 0.12, true)
 
 
 func _draw_moons(ci: Node2D) -> void:
@@ -196,21 +261,57 @@ func _draw_moons(ci: Node2D) -> void:
 		var ang := _time * w + i * 2.1
 		var p := Vector2(cos(ang), sin(ang)) * a
 		var mr := maxf(r * (0.06 + 0.02 * (i % 3)), 2.0 * px)
-		ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035), px, true)
+		var c: Color = cols[i % cols.size()]
+		var grow := 1.0
+		if _birth.has(i):
+			var b: Dictionary = _birth[i]
+			var e := smoothstep(0.0, 1.0, float(b.t))
+			var from: Vector2 = b.from
+			if from.x == INF:
+				# Пыль своего диска стягивается в комок: облачко по орбите сжимается в шар.
+				for k in 28:
+					var f := float(k) / 28.0
+					var spread := (1.0 - e) * (0.4 + 2.2 * f)
+					var aa := ang - spread * (0.3 + 0.7 * fmod(k * 0.618, 1.0))
+					var rr := a * (1.0 + (1.0 - e) * 0.18 * sin(k * 2.3))
+					ci.draw_circle(Vector2(cos(aa), sin(aa)) * rr, maxf(mr * (0.12 + 0.18 * (1.0 - f)), 0.8 * px), Color(c.lightened(0.2), 0.5 * (1.0 - e * 0.7)))
+				grow = smoothstep(0.3, 1.0, e)
+			else:
+				# Захваченное тело подходит по дуге и садится на орбиту.
+				var q := from.lerp(p, e)
+				q += (p - from).orthogonal().normalized() * sin(e * PI) * from.distance_to(p) * 0.25
+				for k in 10:
+					var f := float(k + 1) / 10.0
+					var ek := clampf(e - f * 0.15, 0.0, 1.0)
+					var qk := from.lerp(p, ek) + (p - from).orthogonal().normalized() * sin(ek * PI) * from.distance_to(p) * 0.25
+					ci.draw_circle(qk, mr * 0.35 * (1.0 - f), Color(0.8, 0.85, 1.0, 0.2 * (1.0 - f)))
+				p = q
+			ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035 * e), px, true)
+		else:
+			ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035), px, true)
+		if grow <= 0.01:
+			continue
 		# Тень гиганта: луна за ним гаснет.
 		var shadow := 1.0
 		if p.x > 0.0 and absf(p.y) < r:
 			shadow = 0.18 + 0.82 * smoothstep(r * 0.8, r, absf(p.y))
-		var c: Color = cols[i % cols.size()]
-		# Шар: освещённая сторона к звезде (влево), мягкий терминатор.
-		var steps := 10
-		for k in steps:
-			var f := float(k) / steps
-			var rr := mr * (1.0 - f * 0.85)
-			var off := Vector2(-mr * 0.5 * f, -mr * 0.06 * f)
-			var lum := (0.06 + 0.94 * pow(f, 0.7)) * shadow
-			ci.draw_circle(p + off, rr, Color(c.r * lum, c.g * lum, c.b * lum))
-		ci.draw_arc(p, mr, PI * 0.55, PI * 1.45, 24, Color(0.7, 0.8, 1.0, 0.18 * shadow), px, true)
+		_moon_ball(ci, p, mr * grow, c, shadow)
+	# Падающие луны: спираль вниз, вспышка в облаках.
+	for f in _falling:
+		var e := smoothstep(0.0, 1.0, float(f.t))
+		var a2: float = lerpf(float(f.a), r * 0.98, e)
+		var an: float = float(f.ang) + _time * 0.9 * pow(a2 / r, -1.5) + e * 4.0
+		var p2 := Vector2(cos(an), sin(an)) * a2
+		var mr2 := r * 0.07 * (1.0 - 0.4 * e)
+		for k in 8:
+			var bk := float(k + 1) / 8.0
+			var anb := an - bk * 0.35
+			ci.draw_circle(Vector2(cos(anb), sin(anb)) * (a2 + bk * r * 0.05), mr2 * 0.4 * (1.0 - bk), Color(1.0, 0.7, 0.45, 0.3 * e * (1.0 - bk)))
+		_moon_ball(ci, p2, mr2, Color(0.7, 0.66, 0.6).lerp(Color(1.0, 0.55, 0.25), smoothstep(0.6, 1.0, e)), 1.0)
+	for im in _impacts:
+		var k := 1.0 - float(im.t)
+		ci.draw_circle(im.p, r * 0.08 * (1.0 + 2.0 * float(im.t)), Color(1.0, 0.75, 0.5, 0.5 * k * k))
+		ci.draw_circle(im.p, r * 0.04, Color(1.0, 0.95, 0.85, 0.9 * k))
 
 
 static func moon_name(i: int) -> String:

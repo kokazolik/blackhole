@@ -50,19 +50,20 @@ void fragment() {
 	float n = fbm(vec2(q.x * 2.2 + q.y * 0.35, cos(aa) * 1.3) + vec2(0.0, sin(aa) * 1.3));
 	float fine = fbm(vec2(r * 22.0, aa * 3.0));
 	float arms = 0.5 + 0.5 * cos(2.0 * (aa - 2.5 * log(max(r, 0.05))));
-	float dens = (0.55 + 0.45 * n) * (0.8 + 0.2 * arms) * (0.85 + 0.3 * fine);
+	float dens = (0.55 + 0.45 * n) * (0.55 + 0.6 * arms) * (0.85 + 0.3 * fine);
 	// Плотнее к гиганту, мягко тает к краю сферы Хилла.
 	dens *= pow(1.0 - smoothstep(0.25, 1.0, r), 1.4) * (1.0 + 0.6 * smoothstep(0.6, 0.2, r));
 	float cav = smoothstep(inner, inner + 0.08, r);
-	dens *= cav;
+	// Полость не пустая чернота: поле держит там тонкий горячий газ.
+	dens *= mix(0.22, 1.0, cav);
 	// Свет звезды падает сбоку: ближняя к звезде сторона диска светлее.
 	float lit = 0.55 + 0.45 * dot(normalize(p + vec2(1e-4)), normalize(light_dir));
 	vec3 col = dusk * (0.5 + 0.7 * lit);
 	// Нагрев от ударов струй: тёплый, но приглушённый, ярче у полости.
 	col = mix(col, warm, clamp(glow * 0.45 * smoothstep(0.7, 0.25, r) * arms, 0.0, 0.5));
 	// Край полости: поле срывает газ к полюсам, тонкая холодная кромка.
-	float lip = exp(-pow((r - inner - 0.02) / 0.02, 2.0)) * field * 0.5;
-	float alpha = clamp(dens * (0.22 + 0.2 * glow), 0.0, 0.5);
-	vec3 c = col + vec3(0.6, 0.78, 1.0) * lip * 0.4;
+	float lip = exp(-pow((r - inner - 0.02) / 0.03, 2.0)) * (0.25 + field * 0.5);
+	float alpha = clamp(dens * (0.26 + 0.22 * glow), 0.0, 0.55);
+	vec3 c = col + vec3(1.0, 0.82, 0.62) * lip * 0.35 + vec3(1.0, 0.75, 0.5) * (1.0 - cav) * 0.25 * glow;
 	COLOR = vec4(c, clamp(alpha + lip * 0.12, 0.0, 0.55));
 }

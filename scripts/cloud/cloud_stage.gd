@@ -72,6 +72,7 @@ var _me := ColorRect.new()
 var _me_mat := ShaderMaterial.new()
 var _fx := Node2D.new()       # кольца, ударные волны, вспышки поверх облака
 var _rings: Array = []        # {p, t, col, r}
+var _sinking: Array = []      # поглощённые соседи: падают в тебя по спирали {node, p, size, t}
 var _save_t := 0.0
 var _said := {}
 var _ending_t := -1.0
@@ -382,7 +383,8 @@ func _step_rivals(delta: float) -> void:
 				GameState.add_chondrules(ch, p)
 				hud.toast("Поглощён зародыш звезды: +%s · хондры +%d" % [GameData.format_star_mass(gain), ch], Color(0.7, 0.95, 1.0))
 				_rings.append({"p": p, "t": 0.0, "col": Color(0.7, 0.9, 1.0), "r": body_r(mj) * 4.0})
-				(r.node as Node).queue_free()
+				# Сосед не исчезает: его кокон срывает приливом и он по спирали падает в тебя.
+				_sinking.append({"node": r.node, "mat": r.mat, "rel": p - pos, "size": body_r(m) * 8.0, "t": 0.0})
 				if not _said.has("eat"):
 					_said["eat"] = true
 					hud.caption("Слияние", "зародыш мельче тебя падает в тебя целиком: в тебе остаётся %d%% его массы" % roundi(keep_k * 100.0), 3.5)
@@ -446,6 +448,7 @@ func _process(delta: float) -> void:
 	_supernova(delta)
 	_bursts(delta)
 	_step_rings(delta)
+	_step_sinking(delta)
 	_tex_t -= delta
 	if _tex_t <= 0.0:
 		_tex_t = 0.25
@@ -640,6 +643,28 @@ func _burst_end(caught: bool) -> void:
 		_vibrate(300)
 		hud.toast("Вспышка FU Ориона сдула часть диска: −%s" % GameData.format_star_mass(lost), Color(1.0, 0.6, 0.5))
 		_rings.append({"p": pos, "t": 0.0, "col": Color(1.0, 0.5, 0.4), "r": body_r(mj) * 9.0})
+
+
+func _step_sinking(delta: float) -> void:
+	var keep := []
+	for sk in _sinking:
+		sk.t = float(sk.t) + delta / 1.4
+		var n: ColorRect = sk.node
+		if float(sk.t) >= 1.0:
+			n.queue_free()
+			_flash = maxf(_flash, 0.35)
+			continue
+		var e := smoothstep(0.0, 1.0, float(sk.t))
+		var rel: Vector2 = (sk.rel as Vector2).rotated(2.4 * e) * pow(1.0 - e, 1.3)
+		var sz := float(sk.size) * (1.0 - 0.75 * e)
+		n.size = Vector2(sz, sz)
+		n.position = pos + rel - n.size * 0.5
+		n.modulate.a = 1.0 - smoothstep(0.7, 1.0, float(sk.t))
+		var m: ShaderMaterial = sk.mat
+		m.set_shader_parameter("cocoon", 1.0 - 0.8 * e)
+		m.set_shader_parameter("flare", e * 1.2)
+		keep.append(sk)
+	_sinking = keep
 
 
 func _step_rings(delta: float) -> void:
