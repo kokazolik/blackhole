@@ -84,7 +84,7 @@ func absorb(level: int, material: String, at: Vector2, grains := 1) -> void:
 
 ## Присоединить вещество: масса растит тело, ценность даёт звёздную пыль.
 func absorb_mass(base_mass: float, base_value: float, material: String, at: Vector2) -> void:
-	var gained_mass: float = base_mass * body_bonus("mass")
+	var gained_mass: float = base_mass * body_bonus("mass") * route_growth()
 	mass += gained_mass
 	if is_melted:
 		_add_frozen(gained_mass)
@@ -110,7 +110,7 @@ func absorb_mix(base_mass: float, base_value: float, mix: Dictionary, at: Vector
 			top = key
 	if total <= 0.0:
 		return
-	var gained_mass: float = base_mass * body_bonus("mass")
+	var gained_mass: float = base_mass * body_bonus("mass") * route_growth()
 	mass += gained_mass
 	if is_melted:
 		_add_frozen(gained_mass)
@@ -198,6 +198,12 @@ func moon_slant() -> float:
 ## Путь каменной планеты: цель — масса Земли, гиганта не будет.
 func planet_route() -> bool:
 	return embryo_choice == "planet"
+
+
+## Путь планеты растёт медленнее: без лавины газа зародыш набирает массу
+## столкновениями, и до массы Земли идут почти всю жизнь газового диска.
+func route_growth() -> float:
+	return GameData.PLANET_ROUTE_GROWTH if planet_route() and is_embryo() else 1.0
 
 
 ## Сколько масс Земли нужно набрать на выбранном пути.
