@@ -12,8 +12,8 @@ const GiantHud := preload("res://scripts/giant/giant_hud.gd")
 const GiantEvents := preload("res://scripts/giant/giant_events.gd")
 const GasClumps := preload("res://scripts/giant/gas_clumps.gd")
 const SAVE_EVERY := 3.0
-const STAR_SCALE := 0.18    # звезда меньше, чем на ранних этапах: она далеко
-const STAR_GLOW := 3400.0   # радиус свечения вокруг звезды
+const STAR_SCALE := GameData.GIANT_STAR_R / GameData.STAR_RADIUS  # звезда в разы шире гиганта
+const STAR_GLOW := 6200.0   # радиус свечения вокруг звезды
 const MOON_TIME := 75.0     # секунд на луну при обычном притоке газа
 const MOON_FALL_GAIN := 0.6 # масс Земли, если луна упала в гиганта
 const MOON_CHONDRULES := 6  # луна слиплась из пыли: в ней хондры
@@ -53,7 +53,7 @@ func _ready() -> void:
 	process_priority = 100
 	var g: Dictionary = GameState.giant
 	earths = float(g.get("e", GameData.GIANT_EARTHS))
-	orbit = float(g.get("r", 7500.0))
+	orbit = maxf(float(g.get("r", 7500.0)), GameData.GIANT_ORBIT_MIN)
 	ang = float(g.get("ang", 0.0))
 	gas_total = GameData.GIANT_GAS_TIME * (1.0 + Skills.stat("giant_gas"))
 	gas = float(g.get("gas", gas_total))
@@ -204,7 +204,7 @@ func _process(delta: float) -> void:
 	ang = wrapf(ang + vel.y * delta / orbit, -PI, PI)
 	var mig := GameData.GIANT_MIGRATE * disk.at(orbit) * gk * maxf(1.0 - Skills.stat("giant_anchor"), 0.0)
 	orbit -= mig * delta
-	orbit = clampf(orbit, GameData.GIANT_DISK.x + 400.0, GameData.GIANT_DISK.y - 600.0)
+	orbit = clampf(orbit, GameData.GIANT_ORBIT_MIN, GameData.GIANT_DISK.y - 600.0)
 
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
 	clumps.step(delta)

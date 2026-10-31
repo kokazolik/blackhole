@@ -119,7 +119,7 @@ func step(delta: float) -> void:
 				c.rel0 = wp - gpos
 				c.inj = 0.0
 			var da := absf(wrapf(float(c.a) - ang, -PI, PI)) * orbit
-			if da > half_h * 3.2 or float(c.r) < GameData.GIANT_DISK.x + 200.0 or float(c.r) > GameData.GIANT_DISK.y - 300.0:
+			if da > half_h * 3.2 or float(c.r) < GameData.GIANT_STAR_R * 1.15 or float(c.r) > GameData.GIANT_DISK.y - 300.0:
 				node.queue_free()
 				continue
 		_place(c)
@@ -136,7 +136,7 @@ func _spawn(k: Dictionary, orbit: float, ang: float, half_h: float, anywhere: bo
 		var side := 1.0 if _rng.randf() < 0.5 else -1.0
 		var dx := side * _rng.randf_range(0.9, 5.0) * h
 		var r := orbit + dx
-		if r < GameData.GIANT_DISK.x + 500.0 or r > GameData.GIANT_DISK.y - 600.0:
+		if r < GameData.GIANT_STAR_R * 1.25 or r > GameData.GIANT_DISK.y - 600.0:
 			continue
 		var s: float = stage.disk.at(r)
 		if k.has("ice"):
@@ -262,7 +262,7 @@ func _step_rocks(delta: float, _k: Dictionary, orbit: float, ang: float, half_h:
 			kind = "planetesimal"
 		var side := 1.0 if _rng.randf() < 0.5 else -1.0
 		var dx := side * _rng.randf_range(1.0, 4.5) * h
-		var r := clampf(orbit + dx, GameData.GIANT_DISK.x + 600.0, GameData.GIANT_DISK.y - 700.0)
+		var r := clampf(orbit + dx, GameData.GIANT_STAR_R * 1.3, GameData.GIANT_DISK.y - 700.0)
 		var off := half_h * _rng.randf_range(1.1, 1.5)
 		var mat := _material_at(r)
 		var n := 6 if kind == "rubble" else 1

@@ -119,7 +119,7 @@ func step(delta: float) -> void:
 			_start(kind_for(str(GameState.giant.get("flavor", "giant_cold"))))
 		return
 	t -= delta
-	var lo := GameData.GIANT_DISK.x + 400.0
+	var lo := GameData.GIANT_ORBIT_MIN
 	var hi := GameData.GIANT_DISK.y - 600.0
 	match kind:
 		"stray":
@@ -152,7 +152,7 @@ func _start(k: String) -> void:
 	t = KINDS[k]["time"]
 	inside = 0.0
 	var o: float = stage.orbit
-	var lo := GameData.GIANT_DISK.x + 900.0
+	var lo := GameData.GIANT_ORBIT_MIN + 400.0
 	var hi := GameData.GIANT_DISK.y - 1000.0
 	var d := _rng.randf_range(1900.0, 3200.0)
 	match k:
