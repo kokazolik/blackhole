@@ -124,13 +124,7 @@ func _ready() -> void:
 		_geode_pos = at
 		var label := "Осколок железного ядра +%s" if GameState.is_planet() else "Жеода! +%s"
 		fx.popup(at + Vector2(0, -player.radius * 2.0), label % GameData.format_number(value), GameData.GEODE_GLOW, 26))
-	pebble_field.swarm_started.connect(func(at: Vector2) -> void:
-		_swarm_pos = at
-		if "swarm" in GameState.tips_seen:
-			_show_caption("Потоковая неустойчивость", "рядом сбился рой галек: 20 секунд, чтобы его собрать"))
-	pebble_field.eddy_started.connect(func(_at: Vector2) -> void:
-		if "eddy" in GameState.tips_seen:
-			_show_caption("Вихрь турбулентности", "добыча внутри в полтора раза ценнее. Плыви по течению: против него удары раскалывают"))
+	pebble_field.swarm_started.connect(func(at: Vector2) -> void: _swarm_pos = at)
 	GameState.stage_reached.connect(_on_stage_reached)
 	GameState.chipped.connect(func(_at: Vector2, _lost: float) -> void: _chip_time = _intro_time)
 	pebble_field.pebble_split.connect(func(at: Vector2) -> void:
@@ -142,20 +136,7 @@ func _ready() -> void:
 		_chunk_time = _intro_time
 		_chunk_pos = at)
 	pebble_field.crash_burst.connect(func(at: Vector2) -> void:
-		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26)
-		if GameState.is_planet():
-			_show_caption("Семейство обломков", "осколки разбитого тела летят одной стаей, как семейства астероидов")
-		elif "crash" in GameState.tips_seen:
-			_show_caption("Столкновение валунов", "облако обломков на полминуты: они вдвое ценнее, но быстрые"))
-	pebble_field.giant.appeared.connect(func(_at: Vector2) -> void:
-		if "giant" in GameState.tips_seen:
-			_show_caption("Странник", "валун в десятки раз крупнее тебя: с разгону о него расколешься, а мелочь вокруг он не трогает"))
-	drifters.appeared.connect(func(kind: String, _at: Vector2) -> void:
-		if kind in GameState.tips_seen:
-			_show_caption("Галька", "в тысячу раз крупнее тебя: её край — стена, о неё отскакиваешь"))
-	pebble_field.clump_started.connect(func(_at: Vector2) -> void:
-		if "clump" in GameState.tips_seen:
-			_show_caption("Сгусток", "мелочь в кольце сжимается: успей в центр за 25 секунд"))
+		fx.popup(at + Vector2(0, -player.radius * 2.5), "Столкновение!", Color(1.0, 0.7, 0.4), 26))
 
 	_connect_planet()
 
@@ -180,6 +161,7 @@ func _ready() -> void:
 
 	hud.tree_requested.connect(_open_tree)
 	hud.menu_requested.connect(_open_pause)
+	pause_menu.orbit_cleared.connect(_clear_orbit)
 	tree_screen.closed.connect(hud.play_purchase_spark)
 	tree_screen.closed.connect(_set_world_visible.bind(true))
 
@@ -251,9 +233,7 @@ func _connect_planet() -> void:
 	rivals.merged.connect(func(at: Vector2, kind: String) -> void:
 		var label := "Контактная пара!" if kind == "twin" else "Слияние!"
 		fx.popup(at + Vector2(0, -player.radius * 2.4), label, Color(1.0, 0.85, 0.5), 26)
-		_shake = maxf(_shake, 0.5)
-		if kind == "twin" and "twin" in GameState.tips_seen:
-			_show_caption("Контактная пара", "два тела слиплись на малой скорости, как Аррокот: вместе вы крупнее"))
+		_shake = maxf(_shake, 0.5))
 	rivals.shattered.connect(func(at: Vector2) -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.4), "Раскол соседа", Color(1.0, 0.7, 0.4), 24)
 		_shake = maxf(_shake, 0.6))
@@ -262,7 +242,6 @@ func _connect_planet() -> void:
 		_show_caption("Тебя раскололо", "ты — крупнейший осколок: обломки вокруг ещё можно собрать обратно"))
 	rivals.grazed.connect(func(at: Vector2) -> void:
 		fx.popup(at + Vector2(0, -player.radius * 2.0), "Скол!", Color(1.0, 0.55, 0.4), 22, "graze"))
-	rivals.event_started.connect(_on_planet_event)
 	GameState.melted.connect(func() -> void:
 		var info: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(GameState.body_type())]
 		_shake = maxf(_shake, 0.7)
@@ -279,30 +258,6 @@ func _connect_planet() -> void:
 			_finish("giant_core"))
 
 
-func _on_planet_event(kind: String, _at: Vector2) -> void:
-	match kind:
-		"yorp":
-			_show_caption("Эффект YORP", "свет звезды раскручивает тебя: скоро с экватора посыплется щебень")
-		"yorp_shed":
-			_show_caption("Волчок", "щебень сорвался с экватора: подбери его, пока не разлетелся")
-		"twin":
-			if "twin" in GameState.tips_seen:
-				_show_caption("Близнец на орбите", "тело твоего размера: подойди медленно — слипнетесь, с разгону — раскол")
-		"oligarch":
-			_show_caption("Пролёт олигарха", "тело в десять раз крупнее: его притяжение сдвинет твою орбиту")
-		"sling_out":
-			_show_caption("Праща", "олигарх вытолкнул тебя дальше от звезды: здесь кормовая полоса нетронута")
-		"sling_in":
-			_show_caption("Праща", "олигарх стянул тебя ближе к звезде: здесь кормовая полоса нетронута")
-		"impactor":
-			_show_caption("Гигантский удар", "сосед почти твоего размера идёт прямо на тебя: уйди с пути или встреть медленно")
-		"flow":
-			if GameState.is_embryo():
-				_show_caption("Галечная аккреция", "газ несёт гальку из внешнего диска: за снеговой линией её втрое больше")
-			else:
-				_show_caption("Поток гальки", "из внешнего диска дрейфует галька: сфера Хилла ловит её почти без потерь")
-
-
 ## Тело выросло до тысячи километров: путь дальше решает состав и место в диске.
 ## Начинается гонка с газом диска.
 func _reach_embryo() -> void:
@@ -312,7 +267,7 @@ func _reach_embryo() -> void:
 	if GameState.gas_left < 0.0:
 		GameState.gas_left = GameData.GAS_TIME
 	GameState.save_game()
-	_show_caption("Зародыш планеты", "газ диска уйдёт через %d минут: успей набрать %d масс Земли" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
+	_show_caption("Зародыш планеты", "газ диска уйдёт через %d минут: успей набрать %d масс Земли или расчисти орбиту в меню" % [roundi(GameData.GAS_TIME / 60.0), roundi(GameData.GIANT_EARTHS)])
 	if not "embryo" in GameState.tips_seen:
 		for c in $UI.get_children():
 			if c is Tutorial:
@@ -399,6 +354,7 @@ func _open_pause() -> void:
 		return
 	joystick.reset()
 	player.move_input = Vector2.ZERO
+	pause_menu.can_clear_orbit = GameState.is_embryo() and GameState.ending == "" and _collapse_t < 0.0
 	pause_menu.open()
 
 
@@ -525,7 +481,17 @@ func _check_embryo(delta: float) -> void:
 		rivals.spawn_giant()
 		_show_caption("Второй шанс", "газ ушёл, но рядом молодой гигант: нырни в него медленно — станешь его ядром")
 	else:
-		_finish(GameData.planet_ending(GameState.fate_type(), GameData.composition(GameState.materials), GameState.core_share))
+		_finish(GameState.planet_fate())
+
+
+## Игрок сам остановил рост: гонка за газом кончилась, концовка по нынешней массе.
+func _clear_orbit() -> void:
+	if GameState.ending != "" or _collapse_t >= 0.0:
+		return
+	if _chance_t >= 0.0:
+		_chance_t = -1.0
+		rivals.remove_giant()
+	_finish(GameState.planet_fate())
 
 
 func _finish(kind: String) -> void:

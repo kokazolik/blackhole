@@ -4,6 +4,9 @@ extends Control
 ## Игра стоит, пока меню открыто.
 ## Пять касаний по заголовку «Пауза» открывают меню разработчика: прыжки по этапам.
 
+signal orbit_cleared
+
+var can_clear_orbit := false  # ставит main: зародыш, гонка с газом ещё идёт
 var _panel: PanelContainer
 var _box: VBoxContainer
 var _title_taps := 0
@@ -63,6 +66,8 @@ func _show_main() -> void:
 				_show_dev())
 	_note("Пылинка ждёт. Звезда тоже подождёт.")
 	_button("Продолжить", true, close)
+	if can_clear_orbit:
+		_button("Расчистить орбиту", false, _show_clear)
 	_button("Карта путей", false, _show_paths)
 	_button("Главное меню", false, func(): Fader.go(Fader.MENU))
 	_button("Плавность: 120 кадров" if GameState.fps_120 else "Плавность: 60 кадров", false, func():
@@ -98,6 +103,18 @@ func _show_paths() -> void:
 		_note("Наследие %d: звёздной пыли +%d%%. Концовок открыто %d из %d." % [GameState.legacy,
 			roundi(GameState.legacy * GameData.LEGACY_BONUS * 100.0), GameState.endings_seen.size(), GameData.ENDINGS.size()])
 	_button("Назад", true, _show_main)
+
+
+## Остаться планетой: гонка за газом кончается, концовка — по массе и составу сейчас.
+func _show_clear() -> void:
+	_clear()
+	_title("Расчистить орбиту?")
+	var kind := GameState.planet_fate()
+	_note("Ты — %s. Гонка за газом закончится,\nгигантом уже не станешь. Итог: «%s»." % [GameData.format_earths(GameState.mass), GameData.ENDINGS[kind]["name"]])
+	_button("Остаться планетой", true, func():
+		close()
+		orbit_cleared.emit())
+	_button("Отмена", false, _show_main)
 
 
 func _show_confirm() -> void:

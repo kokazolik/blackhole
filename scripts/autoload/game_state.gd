@@ -183,6 +183,14 @@ func fate_type() -> String:
 	return melt_type if is_melted and melt_type != "" else GameData.planet_type(body_type())
 
 
+## Чем кончится забег, если остаться планетой сейчас: от массы Земли — суперземля,
+## легче — решает застывший состав.
+func planet_fate() -> String:
+	if earth_masses() >= GameData.SUPER_EARTHS:
+		return "super_earth"
+	return GameData.planet_ending(fate_type(), GameData.composition(materials), core_share)
+
+
 ## Забег окончен концовкой: начисляем наследие (за новую концовку — вдвое).
 func finish(kind: String) -> int:
 	if ending != "":
