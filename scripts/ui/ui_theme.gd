@@ -8,6 +8,13 @@ const FONT_NUMBERS := preload("res://assets/fonts/InterDisplay-Bold.otf")
 const FONT_SERIF := preload("res://assets/fonts/LiberationSerif-Regular.ttf")
 const FONT_SERIF_ITALIC := preload("res://assets/fonts/LiberationSerif-Italic.ttf")
 const FONT_SERIF_BOLD := preload("res://assets/fonts/LiberationSerif-Bold.ttf")
+# Меню и коллекция: современная гротесковая пара. Unbounded — широкий
+# «космический» заголовочный, Manrope — спокойный текст.
+const FONT_DISPLAY := preload("res://assets/fonts/Unbounded-Light.ttf")
+const FONT_DISPLAY_MED := preload("res://assets/fonts/Unbounded-Medium.ttf")
+const FONT_DISPLAY_BOLD := preload("res://assets/fonts/Unbounded-Bold.ttf")
+const FONT_UI := preload("res://assets/fonts/Manrope-Medium.ttf")
+const FONT_UI_BOLD := preload("res://assets/fonts/Manrope-Bold.ttf")
 const PANEL_TEX := preload("res://assets/ui/panel_painted.png")
 const BUTTON_DARK_TEX := preload("res://assets/ui/button_dark.png")
 const BUTTON_GOLD_TEX := preload("res://assets/ui/button_gold.png")
@@ -98,6 +105,56 @@ static func paint_button(b: Button, primary := false, font_size := 26) -> void:
 	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		b.add_theme_color_override(key, text_col)
 	b.add_theme_color_override("font_disabled_color", Color(0.6, 0.58, 0.55))
+
+
+## Шрифт с разрядкой: широкие буквы заголовков дышат.
+static func spaced(base: Font, spacing: int) -> FontVariation:
+	var f := FontVariation.new()
+	f.base_font = base
+	f.spacing_glyph = spacing
+	return f
+
+
+## Кнопка меню: тонкое стекло с волосяной рамкой, текст разрядкой.
+## Главная — с тёплой заливкой и светлой рамкой; при наведении стекло светлеет.
+static func glass_button(b: Button, primary := false, font_size := 17, align := HORIZONTAL_ALIGNMENT_LEFT) -> void:
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var s := StyleBoxFlat.new()
+		s.set_corner_radius_all(6)
+		s.anti_aliasing = true
+		s.set_border_width_all(1)
+		s.content_margin_left = 26
+		s.content_margin_right = 26
+		s.content_margin_top = 12
+		s.content_margin_bottom = 12
+		var bg := Color(1.0, 0.8, 0.5, 0.16) if primary else Color(0.75, 0.82, 1.0, 0.05)
+		var edge := Color(1.0, 0.84, 0.6, 0.7) if primary else Color(0.85, 0.9, 1.0, 0.18)
+		match state:
+			"hover":
+				bg = Color(bg, bg.a + 0.08)
+				edge = Color(edge, minf(edge.a + 0.25, 1.0))
+			"pressed":
+				bg = Color(bg, bg.a + 0.16)
+			"disabled":
+				bg = Color(bg, bg.a * 0.5)
+				edge = Color(edge, edge.a * 0.5)
+		s.bg_color = bg
+		s.border_color = edge
+		if primary:
+			# Мягкий тёплый ореол вокруг главной кнопки.
+			s.shadow_color = Color(1.0, 0.7, 0.35, 0.18)
+			s.shadow_size = 10
+		b.add_theme_stylebox_override(state, s)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.focus_mode = Control.FOCUS_NONE
+	b.alignment = align
+	b.add_theme_font_override("font", spaced(FONT_DISPLAY_MED if primary else FONT_DISPLAY, 2))
+	b.add_theme_font_size_override("font_size", font_size)
+	var col := Color(1.0, 0.92, 0.8) if primary else Color(0.88, 0.9, 0.96)
+	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(key, col)
+	b.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0))
+	b.add_theme_color_override("font_disabled_color", Color(0.6, 0.6, 0.66))
 
 
 static func pill(color: Color, radius := 16) -> StyleBoxFlat:

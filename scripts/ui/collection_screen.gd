@@ -113,13 +113,12 @@ func _radius(id: String) -> float:
 
 func _build_head() -> void:
 	var title := Label.new()
-	title.text = "Коллекция тел"
-	title.position = Vector2(32, 16)
-	title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	title.add_theme_font_size_override("font_size", 36)
-	title.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
-	title.add_theme_color_override("font_outline_color", Color(0.1, 0.04, 0.0, 0.8))
-	title.add_theme_constant_override("outline_size", 6)
+	title.text = "КОЛЛЕКЦИЯ ТЕЛ"
+	title.position = Vector2(32, 20)
+	title.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_DISPLAY, 6))
+	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0))
+	title.add_theme_constant_override("outline_size", 0)
 	add_child(title)
 	var n_end := 0
 	for e in CollectionData.ENDING_NODES:
@@ -132,27 +131,33 @@ func _build_head() -> void:
 	var sub := Label.new()
 	sub.text = "тел открыто %d из %d · этапов пройдено %d из %d · тапни тело, чтобы узнать о нём" % [
 		n_end, CollectionData.ENDING_NODES.size(), n_st, CollectionData.STAGE_NODES.size() - 1]
-	sub.position = Vector2(34, 60)
-	sub.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
-	sub.add_theme_font_size_override("font_size", 19)
-	sub.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.8))
+	sub.position = Vector2(34, 64)
+	sub.add_theme_font_override("font", UiTheme.FONT_UI)
+	sub.add_theme_font_size_override("font_size", 16)
+	sub.add_theme_color_override("font_color", Color(0.8, 0.84, 0.95, 0.7))
 	add_child(sub)
 	var back := Button.new()
 	back.text = "Назад"
-	UiTheme.paint_button(back, false, 22)
+	UiTheme.glass_button(back, false, 15, HORIZONTAL_ALIGNMENT_CENTER)
 	back.anchor_left = 1.0
 	back.anchor_right = 1.0
-	back.offset_left = -220
+	back.offset_left = -190
 	back.offset_right = -24
-	back.offset_top = 20
-	back.offset_bottom = 78
+	back.offset_top = 22
+	back.offset_bottom = 70
 	back.pressed.connect(close)
 	add_child(back)
 
 
 func _build_card() -> void:
 	_card = PanelContainer.new()
-	_card.add_theme_stylebox_override("panel", UiTheme.painted_panel(26))
+	var glass := StyleBoxFlat.new()
+	glass.bg_color = Color(0.035, 0.04, 0.075, 0.94)
+	glass.set_border_width_all(1)
+	glass.border_color = Color(0.85, 0.9, 1.0, 0.2)
+	glass.set_corner_radius_all(10)
+	glass.set_content_margin_all(26)
+	_card.add_theme_stylebox_override("panel", glass)
 	_card.anchor_left = 1.0
 	_card.anchor_right = 1.0
 	_card.anchor_top = 1.0
@@ -168,19 +173,19 @@ func _build_card() -> void:
 	box.add_theme_constant_override("separation", 8)
 	_card.add_child(box)
 	_card_title = Label.new()
-	_card_title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	_card_title.add_theme_font_size_override("font_size", 30)
-	_card_title.add_theme_color_override("font_color", UiTheme.GOLD)
+	_card_title.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_DISPLAY_MED, 1))
+	_card_title.add_theme_font_size_override("font_size", 24)
+	_card_title.add_theme_color_override("font_color", Color(1.0, 0.86, 0.6))
 	_card_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_card_title)
 	_card_state = Label.new()
-	_card_state.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
-	_card_state.add_theme_font_size_override("font_size", 19)
+	_card_state.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_UI_BOLD, 2))
+	_card_state.add_theme_font_size_override("font_size", 14)
 	box.add_child(_card_state)
 	_card_text = Label.new()
-	_card_text.add_theme_font_override("font", UiTheme.FONT_SERIF)
-	_card_text.add_theme_font_size_override("font_size", 21)
-	_card_text.add_theme_color_override("font_color", UiTheme.PARCHMENT)
+	_card_text.add_theme_font_override("font", UiTheme.FONT_UI)
+	_card_text.add_theme_font_size_override("font_size", 19)
+	_card_text.add_theme_color_override("font_color", Color(0.88, 0.9, 0.96))
 	_card_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_card_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(_card_text)
@@ -288,6 +293,7 @@ func select(id: String) -> void:
 			_card_state.text = "ещё не открыто · как получить"
 			_card_text.text = str(CollectionData.ENDING_NODES[id]["hint"])
 	_card_state.add_theme_color_override("font_color", Color(0.62, 0.86, 1.0) if seen else Color(1.0, 0.78, 0.5))
+	_card_state.text = _card_state.text.to_upper()
 
 
 func close() -> void:
@@ -371,20 +377,20 @@ func _draw_under() -> void:
 
 
 func _draw_labels() -> void:
-	var font: Font = UiTheme.FONT_SERIF_BOLD
+	var font: Font = UiTheme.FONT_UI_BOLD
 	for id in CollectionData.all_ids():
 		var p := CollectionData.pos_of(id)
 		var r := _radius(id)
 		var seen := CollectionData.seen(id)
 		var stage := CollectionData.is_stage(id)
-		var fs := 22 if stage else 19
-		var col := (Color(1.0, 0.84, 0.5) if stage else UiTheme.PARCHMENT) if seen else Color(0.6, 0.6, 0.68, 0.7)
+		var fs := 21 if stage else 17
+		var col := (Color(1.0, 0.84, 0.58) if stage else Color(0.92, 0.93, 0.98)) if seen else Color(0.55, 0.57, 0.66, 0.75)
 		if not seen:
 			# Силуэт в тени: чёрный шар, по краю едва светится контровой свет.
 			_labels.draw_circle(p, r, Color(0.0, 0.0, 0.0, 1.0))
 			_labels.draw_arc(p, r - 1.0, PI * 0.65, PI * 1.45, 32, Color(0.85, 0.78, 0.65, 0.28), 2.0, true)
 		var y := p.y + r + 24.0
-		for line in _wrap(font, CollectionData.title_of(id), fs, 160.0 if not stage else 260.0):
+		for line in _wrap(font, CollectionData.title_of(id), fs, 140.0 if not stage else 260.0):
 			var w := font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			var tp := Vector2(p.x - w * 0.5, y)
 			_labels.draw_string_outline(font, tp, line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, Color(0.02, 0.01, 0.04, 0.9))
@@ -393,7 +399,7 @@ func _draw_labels() -> void:
 		if not seen:
 			# Знак вопроса на силуэте: тело ещё ждёт.
 			var q := "?"
-			var qf := int(r * 0.9)
+			var qf := int(r * 0.8)
 			var qw := font.get_string_size(q, HORIZONTAL_ALIGNMENT_LEFT, -1, qf).x
 			_labels.draw_string(font, p + Vector2(-qw * 0.5, qf * 0.35), q, HORIZONTAL_ALIGNMENT_LEFT, -1, qf, Color(0.8, 0.75, 0.65, 0.22))
 
