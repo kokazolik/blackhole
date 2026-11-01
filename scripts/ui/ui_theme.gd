@@ -1,17 +1,24 @@
 class_name UiTheme
-## Общий стиль интерфейса: шрифт Inter, «стеклянные» панели и кнопки, цвета акцентов.
+## Общий стиль интерфейса: Unbounded и Manrope, тонкое стекло с волосяной рамкой, цвета акцентов.
 
-const FONT_TEXT := preload("res://assets/fonts/Inter-Medium.otf")
-const FONT_SEMI := preload("res://assets/fonts/Inter-SemiBold.otf")
+# Весь интерфейс на одной паре: Unbounded — заголовки, Manrope — текст.
+# Старые имена (SERIF и т. п.) оставлены, чтобы не трогать каждый экран:
+# они теперь указывают на Manrope, крупные заголовки — FONT_HEAD.
+const FONT_TEXT := preload("res://assets/fonts/Manrope-Medium.ttf")
+const FONT_SEMI := preload("res://assets/fonts/Manrope-Bold.ttf")
 const FONT_NUMBERS := preload("res://assets/fonts/InterDisplay-Bold.otf")
-# Голос рассказчика и заголовки меню: книжная антиква.
-const FONT_SERIF := preload("res://assets/fonts/LiberationSerif-Regular.ttf")
-const FONT_SERIF_ITALIC := preload("res://assets/fonts/LiberationSerif-Italic.ttf")
-const FONT_SERIF_BOLD := preload("res://assets/fonts/LiberationSerif-Bold.ttf")
-const PANEL_TEX := preload("res://assets/ui/panel_painted.png")
-const BUTTON_DARK_TEX := preload("res://assets/ui/button_dark.png")
-const BUTTON_GOLD_TEX := preload("res://assets/ui/button_gold.png")
-const PARCHMENT := Color(0.96, 0.9, 0.78)  # цвет текста рассказа
+const FONT_SERIF := preload("res://assets/fonts/Manrope-Medium.ttf")
+const FONT_SERIF_ITALIC := preload("res://assets/fonts/Manrope-Medium.ttf")
+const FONT_SERIF_BOLD := preload("res://assets/fonts/Manrope-Bold.ttf")
+const FONT_HEAD := preload("res://assets/fonts/Unbounded-Medium.ttf")
+# Меню и коллекция: современная гротесковая пара. Unbounded — широкий
+# «космический» заголовочный, Manrope — спокойный текст.
+const FONT_DISPLAY := preload("res://assets/fonts/Unbounded-Light.ttf")
+const FONT_DISPLAY_MED := preload("res://assets/fonts/Unbounded-Medium.ttf")
+const FONT_DISPLAY_BOLD := preload("res://assets/fonts/Unbounded-Bold.ttf")
+const FONT_UI := preload("res://assets/fonts/Manrope-Medium.ttf")
+const FONT_UI_BOLD := preload("res://assets/fonts/Manrope-Bold.ttf")
+const PARCHMENT := Color(0.9, 0.91, 0.95)  # цвет текста рассказа: холодный светлый
 
 const GOLD := Color(1.0, 0.82, 0.42)
 const GOLD_DEEP := Color(0.92, 0.6, 0.18)
@@ -62,42 +69,73 @@ static func glass(radius := 18, bg := GLASS, border := GLASS_BORDER, margin := 1
 	return s
 
 
-## Расписная карточка с золотой рамкой (меню, рассказчик).
-static func painted_panel(margin := 26.0) -> StyleBoxTexture:
-	var s := StyleBoxTexture.new()
-	s.texture = PANEL_TEX
-	s.set_texture_margin_all(30)
+## Карточка: тёмное стекло с волосяной рамкой, как в меню и коллекции.
+static func painted_panel(margin := 26.0) -> StyleBox:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0.035, 0.04, 0.075, 0.94)
+	s.border_color = Color(0.85, 0.9, 1.0, 0.2)
+	s.set_border_width_all(1)
+	s.set_corner_radius_all(10)
 	s.set_content_margin_all(margin)
+	s.anti_aliasing = true
+	s.shadow_color = Color(0, 0, 0, 0.45)
+	s.shadow_size = 18
 	return s
 
 
-## Расписная кнопка: тёмная с золотым кантом или главная золотая.
+## Кнопка карточки: стекло меню, текст по центру.
 static func paint_button(b: Button, primary := false, font_size := 26) -> void:
-	var tex := BUTTON_GOLD_TEX if primary else BUTTON_DARK_TEX
+	glass_button(b, primary, roundi(font_size * 0.68), HORIZONTAL_ALIGNMENT_CENTER)
+
+
+## Шрифт с разрядкой: широкие буквы заголовков дышат.
+static func spaced(base: Font, spacing: int) -> FontVariation:
+	var f := FontVariation.new()
+	f.base_font = base
+	f.spacing_glyph = spacing
+	return f
+
+
+## Кнопка меню: тонкое стекло с волосяной рамкой, текст разрядкой.
+## Главная — с тёплой заливкой и светлой рамкой; при наведении стекло светлеет.
+static func glass_button(b: Button, primary := false, font_size := 17, align := HORIZONTAL_ALIGNMENT_LEFT) -> void:
 	for state in ["normal", "hover", "pressed", "disabled"]:
-		var s := StyleBoxTexture.new()
-		s.texture = tex
-		s.set_texture_margin_all(20)
-		s.content_margin_left = 28
-		s.content_margin_right = 28
-		s.content_margin_top = 10
-		s.content_margin_bottom = 10
+		var s := StyleBoxFlat.new()
+		s.set_corner_radius_all(6)
+		s.anti_aliasing = true
+		s.set_border_width_all(1)
+		s.content_margin_left = 26
+		s.content_margin_right = 26
+		s.content_margin_top = 12
+		s.content_margin_bottom = 12
+		var bg := Color(1.0, 0.8, 0.5, 0.16) if primary else Color(0.75, 0.82, 1.0, 0.05)
+		var edge := Color(1.0, 0.84, 0.6, 0.7) if primary else Color(0.85, 0.9, 1.0, 0.18)
 		match state:
 			"hover":
-				s.modulate_color = Color(1.15, 1.12, 1.05)
+				bg = Color(bg, bg.a + 0.08)
+				edge = Color(edge, minf(edge.a + 0.25, 1.0))
 			"pressed":
-				s.modulate_color = Color(0.85, 0.82, 0.78)
+				bg = Color(bg, bg.a + 0.16)
 			"disabled":
-				s.modulate_color = Color(0.6, 0.6, 0.65, 0.7)
+				bg = Color(bg, bg.a * 0.5)
+				edge = Color(edge, edge.a * 0.5)
+		s.bg_color = bg
+		s.border_color = edge
+		if primary:
+			# Мягкий тёплый ореол вокруг главной кнопки.
+			s.shadow_color = Color(1.0, 0.7, 0.35, 0.18)
+			s.shadow_size = 10
 		b.add_theme_stylebox_override(state, s)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_override("font", FONT_SERIF_BOLD)
+	b.alignment = align
+	b.add_theme_font_override("font", spaced(FONT_DISPLAY_MED if primary else FONT_DISPLAY, 2))
 	b.add_theme_font_size_override("font_size", font_size)
-	var text_col := Color(0.16, 0.09, 0.02) if primary else PARCHMENT
+	var col := Color(1.0, 0.92, 0.8) if primary else Color(0.88, 0.9, 0.96)
 	for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		b.add_theme_color_override(key, text_col)
-	b.add_theme_color_override("font_disabled_color", Color(0.6, 0.58, 0.55))
+		b.add_theme_color_override(key, col)
+	b.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0))
+	b.add_theme_color_override("font_disabled_color", Color(0.6, 0.6, 0.66))
 
 
 static func pill(color: Color, radius := 16) -> StyleBoxFlat:
@@ -117,13 +155,13 @@ static func _build() -> Theme:
 	t.set_color("font_outline_color", "Label", Color(0, 0, 0, 0.55))
 	t.set_constant("outline_size", "Label", 3)
 
-	t.set_stylebox("panel", "PanelContainer", glass())
+	t.set_stylebox("panel", "PanelContainer", glass(10, Color(0.035, 0.04, 0.075, 0.72), Color(0.85, 0.9, 1.0, 0.16)))
 
 	t.set_font("font", "Button", FONT_SEMI)
-	t.set_stylebox("normal", "Button", glass(16, Color(0.08, 0.1, 0.2, 0.7), Color(0.6, 0.75, 1.0, 0.35), 12.0))
-	t.set_stylebox("hover", "Button", glass(16, Color(0.12, 0.15, 0.28, 0.8), Color(0.7, 0.85, 1.0, 0.55), 12.0))
-	t.set_stylebox("pressed", "Button", glass(16, Color(0.16, 0.2, 0.36, 0.9), Color(0.8, 0.9, 1.0, 0.7), 12.0))
-	t.set_stylebox("disabled", "Button", glass(16, Color(0.06, 0.07, 0.12, 0.6), Color(1, 1, 1, 0.08), 12.0))
+	t.set_stylebox("normal", "Button", glass(6, Color(0.04, 0.05, 0.09, 0.72), Color(0.85, 0.9, 1.0, 0.2), 12.0))
+	t.set_stylebox("hover", "Button", glass(6, Color(0.08, 0.09, 0.14, 0.8), Color(0.9, 0.94, 1.0, 0.42), 12.0))
+	t.set_stylebox("pressed", "Button", glass(6, Color(0.12, 0.13, 0.2, 0.88), Color(1.0, 1.0, 1.0, 0.55), 12.0))
+	t.set_stylebox("disabled", "Button", glass(6, Color(0.04, 0.04, 0.07, 0.55), Color(1, 1, 1, 0.08), 12.0))
 	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
 	t.set_color("font_color", "Button", TEXT)
 	t.set_color("font_hover_color", "Button", Color.WHITE)

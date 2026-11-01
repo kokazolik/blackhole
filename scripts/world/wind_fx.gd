@@ -4,7 +4,7 @@ extends Node2D
 ## Чем сильнее дрейф к звезде, тем они ярче и длиннее; в кольце-ловушке почти
 ## пропадают. Штрихи живут в системе отсчёта пыли и текут мимо гальки.
 
-const COUNT := 34
+const COUNT := 24
 
 var player: Player
 var dust_field: DustField
@@ -41,7 +41,8 @@ func _process(delta: float) -> void:
 
 func _new_streak(view_r: float) -> Dictionary:
 	var at := player.position + Vector2.from_angle(_rng.randf() * TAU) * sqrt(_rng.randf()) * view_r
-	return {"pos": at - dust_field.frame_offset, "t": 0.0, "life": _rng.randf_range(1.2, 2.6), "len": _rng.randf_range(0.6, 1.4)}
+	return {"pos": at - dust_field.frame_offset, "t": 0.0, "life": _rng.randf_range(1.0, 3.0), "len": _rng.randf_range(0.25, 1.6) * _rng.randf_range(0.5, 1.0),
+		"bend": _rng.randf_range(-0.12, 0.12), "w": _rng.randf_range(0.6, 1.1)}
 
 
 func _draw() -> void:
@@ -52,14 +53,35 @@ func _draw() -> void:
 	var dir := -drift / speed
 	var strength := clampf(speed / (GameData.DRIFT_SPEED * GameData.speed_k()), 0.0, 2.0) * player.pebble_k
 	var px := 1.0 / camera.zoom.x
+	var t := Time.get_ticks_msec() * 0.001
+	# Цвет газа: у звезды тёплый, за снеговой линией холодный.
+	var cold := smoothstep(GameData.SNOW_LINE - GameData.SNOW_LINE_WIDTH, GameData.SNOW_LINE + GameData.SNOW_LINE_WIDTH, player.position.length())
+	var gas_col := Color(1.0, 0.86, 0.7).lerp(Color(0.78, 0.88, 1.0), cold)
 	for s in _streaks:
 		var k: float = s.t / s.life
-		var a := sin(k * PI) * 0.16 * strength
+		var a := sin(k * PI) * 0.15 * strength
 		var p: Vector2 = s.pos + dust_field.frame_offset
 		# В ветровой тени крупного тела струй нет: видна спокойная полоса.
 		if pebble_field:
 			a *= 1.0 - pebble_field.shadow_at(p)
-		var l: float = speed * 2.2 * s.len
-		var tail := p - dir * l
-		draw_line(tail, p, Color(0.85, 0.9, 1.0, a * 0.4), 1.2 * px, true)
-		draw_line(tail.lerp(p, 0.5), p, Color(0.9, 0.95, 1.0, a), 1.4 * px, true)
+		if a < 0.004:
+			continue
+		# Не линейка, а рваная струйка газа: извивается турбулентностью,
+		# тоньше и прозрачнее к концам, вокруг слабая дымка.
+		var l: float = speed * 1.8 * s.len
+		var d := dir.rotated(float(s.bend))
+		var side := d.orthogonal()
+		var seed := float(s.w) * 37.0
+		var pts := PackedVector2Array()
+		var n := 9
+		for i in n:
+			var f := float(i) / (n - 1)
+			var wob := sin(f * 5.0 + seed + t * 2.3) * 0.06 + sin(f * 11.0 + seed * 1.7 - t * 3.1) * 0.025
+			pts.append(p - d * l * (1.0 - f) + side * l * (wob + float(s.bend) * 0.5 * f * (1.0 - f)))
+		var w: float = s.w
+		for i in range(1, n):
+			var f := float(i) / (n - 1)
+			var taper := sin(f * PI)
+			draw_line(pts[i - 1], pts[i], Color(gas_col, a * 0.18 * taper), w * 5.0 * px * taper + px, true)
+			draw_line(pts[i - 1], pts[i], Color(gas_col, a * (0.35 + 0.65 * f) * taper), w * 0.9 * px, true)
+

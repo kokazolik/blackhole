@@ -23,15 +23,17 @@ func _ready() -> void:
 	panel.add_child(box)
 
 	var title := Label.new()
-	title.text = "Пылинка испарилась"
+	title.text = "Упал в звезду" if GameState.burned_embryo else "Пылинка испарилась"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_font_override("font", UiTheme.FONT_HEAD)
+	title.add_theme_font_size_override("font_size", 29)
 	title.add_theme_color_override("font_color", Color(1.0, 0.72, 0.4))
 	box.add_child(title)
 
 	var text := Label.new()
 	text.text = "Огня в космосе нет: излучение звезды раскалило пылинку, вещество перешло в газ, и звёздный ветер унёс его прочь. Но в диске ещё много пыли — путь можно начать снова."
+	if GameState.burned_embryo:
+		text.text = "Газ диска тянул тяжёлое тело к звезде, и орбиту не удалось удержать: жар расплавил и испарил зародыш. Но в диске ещё много пыли — путь можно начать снова."
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	text.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
