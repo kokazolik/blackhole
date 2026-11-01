@@ -1,39 +1,93 @@
 shader_type canvas_item;
-// Приливная струя разорванного тела: лента вдоль нити обломков.
-// Так рисуют хвосты и струи в играх и в научной визуализации: не стопкой
-// пятен, а гладкой лентой по контрольным точкам (здесь они летят по задаче
-// Хилла), поперёк — гауссов профиль, вдоль — прожилки шума, которые
-// тянутся вместе с потоком. Пыль светит отражённым светом звезды, а у самой
-// планеты, где струя врезается в облака, накаляется.
-// Line2D: UV.x — вдоль ленты (0 — голова у планеты), UV.y — поперёк.
-// Цвет вершин (градиент Line2D) несёт яркость и накал по длине.
+render_mode blend_premul_alpha;
+// Приливная струя: пыль и мелкие обломки разорванного тела, которые прилив
+// гиганта вытянул в нить и закручивает к себе. Лента строится по заранее
+// заданной траектории (tidal_streams.gd): гладкая, летит вместе с гигантом.
+// Цвет — с текстуры самого тела (снимок в миг разрыва): камень остаётся
+// камнем, лёд — льдом, суперземля с морями — с голубизной. Поверх пыли
+// светится только то, что раскалено: вход в облака гиганта и искры.
+// UV.x — координата вещества (0 — голова, 1 — хвост), UV.y — поперёк.
+// Цвет вершин: r — накал, g — яркость, a — плотность.
 
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
-uniform vec3 dust_col : source_color = vec3(0.8, 0.74, 0.66);
-uniform float len = 10.0;      // длина ленты в ширинах: прожилки не растягиваются
+uniform sampler2D body_tex : filter_linear;
+uniform bool use_body = false;
+uniform float disc = 0.36;
+uniform vec3 c_tail : source_color = vec3(0.85, 0.72, 0.55);
+uniform vec3 c_glow : source_color = vec3(0.9, 0.55, 0.3);
+uniform vec3 c_hot : source_color = vec3(1.0, 0.8, 0.5);
+uniform float sparkle = 0.5;
+uniform float haze = 0.0;
+uniform float len = 20.0;
 uniform float time = 0.0;
 uniform float seed = 0.0;
-uniform float spread = 0.0;    // 0 — свежая узкая нить, 1 — расплылась
+uniform vec2 light = vec2(-1.0, 0.0);
+uniform float frag_s[16];      // где в нити куски (координата вещества), −1 — нет
+uniform float frag_k[16];      // их размер 0..1 (стачиваются)
+
+float n2(vec2 p) {
+	return texture(noise_tex, p).r;
+}
+
+// Цвет вещества тела: несколько точек снимка вдоль полосы, где это вещество
+// было на теле (голова — ближний к гиганту край).
+vec3 body_col(float s, float y) {
+	vec3 acc = vec3(0.0);
+	float w = 0.0;
+	for (int i = 0; i < 5; i++) {
+		float fi = float(i) - 2.0;
+		float bx = mix(-0.8, 0.8, s) + fi * 0.05;
+		float by = y * 0.75 * sqrt(max(1.0 - bx * bx, 0.05)) + fi * 0.04;
+		vec4 t = texture(body_tex, vec2(0.5) + vec2(bx, by) * disc);
+		acc += t.rgb * t.a;
+		w += t.a;
+	}
+	return w > 0.05 ? acc / w : c_tail;
+}
 
 void fragment() {
 	float x = UV.x;
 	float y = UV.y * 2.0 - 1.0;
 	float along = x * len;
-	// Прожилки: несколько тонких нитей внутри ленты, чуть волнистых.
-	float wob = (texture(noise_tex, vec2(along * 0.05 + seed, 0.37)).r - 0.5) * 0.6;
-	float yy = y + wob * (0.4 + spread);
-	float core = exp(-yy * yy * mix(5.0, 2.2, spread));
-	float strands = texture(noise_tex, vec2(along * 0.04 - time * 0.02 + seed, yy * 1.1 + 3.0)).r;
-	strands = smoothstep(0.3, 0.85, strands);
-	float fine = texture(noise_tex, vec2(along * 0.16 + seed * 2.0, yy * 2.6)).r;
-	// Плотность: ядро нити плюс волокна, края мягко тают.
-	float dens = core * (0.45 + 0.75 * strands) * (0.7 + 0.5 * fine);
+	float wob = (n2(vec2(along * 0.03 + seed, 0.21)) - 0.5) * 0.8;
+	float yy = y + wob * 0.5;
+	float core = exp(-yy * yy * mix(3.6, 2.2, haze));
+	// Кома у каждого куска: пыль сыплется с него и тянется хвостом назад.
+	float coma = 0.0;
+	for (int i = 0; i < 16; i++) {
+		float fs = frag_s[i];
+		if (fs < -0.5) continue;
+		float d = x - fs;
+		float k = d > 0.0 ? d / 0.09 : d / 0.018;
+		coma += exp(-k * k) * frag_k[i];
+	}
+	coma = min(coma, 1.5) * exp(-yy * yy * 2.5);
+	// Пыль: волокна вдоль потока и комки (рой обломков, не трубка).
+	float f1 = n2(vec2(along * 0.04 + seed * 1.7, yy * 1.4 + 0.3));
+	float f2 = n2(vec2(along * 0.13 - seed, yy * 2.8 + 5.0));
+	float f3 = n2(vec2(along * 0.35 + seed * 0.3, yy * 5.0 + 2.0));
+	float strands = smoothstep(0.3, 0.85, f1 * 0.6 + f2 * 0.4);
+	float clumps = smoothstep(0.45, 0.9, f2 * 0.5 + f3 * 0.6);
+	strands = mix(strands, 0.55, haze);
+	// Зёрна: рой мелких обломков, каждый ловит свет звезды.
+	float gr = n2(vec2(along * 1.3 + seed * 4.0, y * 7.0 + seed));
+	float grains = smoothstep(0.7, 0.92, gr);
+	float dens = core * (0.3 + 0.7 * strands) * (0.6 + 0.7 * clumps) + grains * core * 0.6 + coma * (0.6 + 0.5 * strands);
 	dens *= smoothstep(1.0, 0.55, abs(y));
-	// Концы ленты гаснут: голова уходит в облака, хвост рассеивается.
-	dens *= smoothstep(0.0, 0.06, x) * smoothstep(1.0, 0.75, x);
-	float heat = COLOR.r;          // накал у планеты (в красном канале градиента)
-	float bright = COLOR.g;
-	vec3 col = dust_col * (0.75 + 0.5 * fine) * bright;
-	col = mix(col, vec3(1.0, 0.62, 0.32) * (1.0 + 0.6 * strands), heat * 0.85);
-	COLOR = vec4(col, clamp(dens * COLOR.a, 0.0, 1.0));
+	float a = clamp(dens * COLOR.a * 1.8, 0.0, 0.92);
+	// Цвет: настоящий цвет тела, свет звезды с одной стороны нити.
+	vec3 base = use_body ? body_col(1.0 - x, y) : c_tail;
+	base = mix(base, c_tail, 0.3);
+	// Пыль рассеивает свет звезды: светлее тела, край к звезде ярче.
+	float lit = 1.15 + 0.35 * (0.5 - UV.y) * sign(light.x) + 0.3 * (f3 - 0.5);
+	vec3 dust = base * lit + base * grains * 0.6;
+	// Накал у облаков гиганта и мерцающие искры.
+	float heat = COLOR.r;
+	float g = n2(vec2(along * 0.6 + time * 0.07 + seed * 5.0, y * 4.0 + time * 0.05));
+	float tw = 0.5 + 0.5 * sin(time * 9.0 + along * 3.1 + seed * 11.0);
+	float spark = pow(smoothstep(0.64, 1.0, g), 6.0) * sparkle * 5.0 * (0.4 + 0.6 * tw) * core;
+	vec3 glow = c_hot * heat * heat * core * 1.6 + c_glow * heat * 0.35 * core;
+	glow += mix(vec3(1.0), c_hot, 0.4) * spark;
+	dust = mix(dust, c_hot, heat * heat * 0.6);
+	COLOR = vec4((dust * a + glow * COLOR.a) * COLOR.g, a);
 }

@@ -15,6 +15,8 @@ var body_r := 200.0
 var hill := 440.0
 var reach := 1.0
 var inflate := 1.0           # раздувание оболочки на входе в этап
+var envelope := 1.0          # сколько газа осело на ядро: 0 — голое ядро, 1 — сплошные облака
+const CORE_R := 0.3          # радиус ядра в долях полного радиуса гиганта
 var flow := 0.5              # сколько газа падает сейчас, 0..1
 var field := 0.3
 var moons := 0
@@ -25,6 +27,8 @@ var zoom := 0.3
 var sigma_at: Callable       # плотность газа по смещению от орбиты в радиусах Хилла
 
 var _planet := ColorRect.new()
+var _core := ColorRect.new()       # твёрдое ядро твоего состава, видно, пока оболочка тонкая
+var _core_mat := ShaderMaterial.new()
 var _cpd := ColorRect.new()
 var _map_vp := SubViewport.new()   # карта облаков: печётся раз в BAKE_EVERY
 var _map_mat := ShaderMaterial.new()
@@ -79,6 +83,14 @@ func _ready() -> void:
 	add_child(_map_vp)
 	_planet_mat.set_shader_parameter("use_map", true)
 	_planet_mat.set_shader_parameter("map", _map_vp.get_texture())
+	_core_mat.shader = preload("res://shaders/embryo.gdshader")
+	_core_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.12))
+	_core_mat.set_shader_parameter("seed", sd)
+	_core_mat.set_shader_parameter("tilt", 0.25)
+	_core.material = _core_mat
+	_core.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_core.visible = false
+	add_child(_core)
 	_planet.material = _planet_mat
 	_planet.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_planet)
@@ -107,6 +119,65 @@ func set_look(flavor: String, hot := 0.0) -> void:
 	_planet_mat.set_shader_parameter("heat", hot)
 
 
+## Ядро, на которое оседает газ: у каждого состава своё. Камень раскалён
+## ударами падающих тел, железо светится, углерод тлеет под бурой дымкой,
+## лёд в инее, у титана и венеры своя мгла. Дымка оболочки поначалу —
+## цвета того, что ядро выдыхает в первый газ.
+func set_core(type: String, flavor: String) -> void:
+	var style := 0
+	var magma := 0.35
+	var frost := 0.0
+	var veil := 0.0
+	var veil_col := Color(0.78, 0.8, 0.86)       # водород с пылью: серо-голубая мгла
+	var atmo_col := Color(0.55, 0.75, 1.0)
+	match type:
+		"metal":
+			style = 1
+			magma = 0.5
+			veil_col = Color(0.74, 0.74, 0.78)
+		"carbon":
+			style = 2
+			magma = 0.3
+			veil = 0.25
+			veil_col = Color(0.62, 0.5, 0.4)     # сажа и углеводороды: бурая мгла
+			atmo_col = Color(0.9, 0.7, 0.45)
+		"ice":
+			style = 3
+			magma = 0.0
+			frost = 0.9
+			veil_col = Color(0.7, 0.84, 0.98)    # пар воды и метан: голубая
+		"titan":
+			style = 3
+			magma = 0.0
+			frost = 0.6
+			veil = 0.5
+			veil_col = Color(0.86, 0.66, 0.38)   # оранжевая мгла, как у Титана
+			atmo_col = Color(0.95, 0.7, 0.4)
+		"venus":
+			style = 0
+			magma = 0.45
+			veil = 0.55
+			veil_col = Color(0.92, 0.84, 0.6)    # сернистая желтоватая
+			atmo_col = Color(0.95, 0.85, 0.55)
+		"chondrite":
+			style = 4
+			magma = 0.3
+			veil_col = Color(0.8, 0.76, 0.7)
+		_:
+			veil_col = Color(0.84, 0.78, 0.68)   # камень: пыльная, песочная
+	if flavor == "giant_hot":
+		magma = minf(magma + 0.4, 0.95)
+		frost = 0.0
+		veil_col = veil_col.lerp(Color(1.0, 0.72, 0.45), 0.35)
+	_core_mat.set_shader_parameter("style", style)
+	_core_mat.set_shader_parameter("magma", magma)
+	_core_mat.set_shader_parameter("frost", frost)
+	_core_mat.set_shader_parameter("veil", veil)
+	_core_mat.set_shader_parameter("atmo", 0.0)
+	_core_mat.set_shader_parameter("atmo_col", atmo_col)
+	_planet_mat.set_shader_parameter("veil_col", veil_col)
+
+
 ## Природные облака не бывают кричащими: цвет наполовину к своей яркости.
 static func _muted(c: Color, k: float) -> Color:
 	var l := c.r * 0.3 + c.g * 0.55 + c.b * 0.15
@@ -130,6 +201,13 @@ func _process(delta: float) -> void:
 	_planet.size = Vector2(q, q)
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
+	_planet_mat.set_shader_parameter("envelope", envelope)
+	_core.visible = envelope < 0.999
+	if _core.visible:
+		var cq := body_r * CORE_R * 2.0 / 0.72
+		_core.size = Vector2(cq, cq)
+		_core.position = -_core.size * 0.5
+		_core_mat.set_shader_parameter("spin", _time * SPIN * 0.5)
 	_planet_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
 	_planet_mat.set_shader_parameter("spin", _time * SPIN)  # оборот меньше чем за минуту: вращение видно
 	_update_scars(delta)

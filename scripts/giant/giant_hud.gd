@@ -208,14 +208,27 @@ func _label(size: int, color: Color, font: Font) -> Label:
 	return l
 
 
-## Большая подпись по центру: появляется и тает.
+var _cap_tw: Tween
+var _cap_queue: Array = []
+
+
+## Большая подпись по центру: появляется и тает. Если на экране уже есть
+## подпись, новая ждёт своей очереди, а не перебивает её на полуслове.
 func caption(title: String, sub: String, hold := 4.0) -> void:
+	if _cap_tw != null and _cap_tw.is_running():
+		if _cap_queue.size() < 3:
+			_cap_queue.append([title, sub, hold])
+		return
 	_cap_title.text = title
 	_cap_sub.text = sub
-	var tw := _caption.create_tween()
-	tw.tween_property(_caption, "modulate:a", 1.0, 0.7)
-	tw.tween_interval(hold)
-	tw.tween_property(_caption, "modulate:a", 0.0, 1.2)
+	_cap_tw = _caption.create_tween()
+	_cap_tw.tween_property(_caption, "modulate:a", 1.0, 0.7)
+	_cap_tw.tween_interval(hold)
+	_cap_tw.tween_property(_caption, "modulate:a", 0.0, 1.0)
+	_cap_tw.finished.connect(func() -> void:
+		if not _cap_queue.is_empty():
+			var c: Array = _cap_queue.pop_front()
+			caption(c[0], c[1], c[2]))
 
 
 ## Короткое сообщение над гигантом.

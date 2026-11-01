@@ -83,7 +83,7 @@ var stage                    # giant_stage.gd
 var bodies: Array = []
 var vortices: Array = []
 var _pearls: Array = []      # крупные обломки разорванных тел: летят по задаче Хилла
-var _streams: Array = []     # пылевые струи: контрольные точки ленты летят по задаче Хилла
+var tides: TidalStreams     # приливные струи: светящиеся нити в системе гиганта
 var _white: ImageTexture
 var _width_curve: Curve
 var _flashes: Array = []     # вспышки ударов в облаках и падений в звезду
@@ -114,6 +114,9 @@ func _ready() -> void:
 
 
 func setup() -> void:
+	tides = TidalStreams.new()
+	tides.world = self
+	stage.body.add_child(tides)
 	for i in N_BODIES:
 		_spawn_random(true)
 	# Соперники: один полегче (вырастешь — съешь), один тяжелее (бойся).
@@ -353,7 +356,7 @@ func step(delta: float) -> void:
 			keep.append(b)
 	bodies = keep
 	_step_pearls(delta, h)
-	_step_streams(delta)
+	tides.step(delta, _giant_r())
 	_step_vortices(delta, gpos, h)
 	# Тела не кончаются: новые приходят с окраин и из-за края экрана.
 	_spawn_t -= delta
@@ -610,44 +613,32 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	var info: Dictionary = KINDS[b.kind]
 	var m: float = b.m
-	var gas: GasParticles = stage.body.gas
-	var rad := rad_of(b) / h
-	var axis := Vector2(p.x, p.y).normalized()
-	var tang := axis.orthogonal()
-	var col: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.85, 0.78, 0.66)
-	if b.kind in ["rival", "minineptune"]:
-		var look: Array = NEPTUNE_LOOK if b.kind == "minineptune" else RIVAL_LOOKS[int(b.look)]
-		col = (look[0] as Color).lerp(look[1], 0.4)
-	var id := DEBRIS_BASE + int(b.id)
 	var gain := _gain(b)
 	var share_dust := 0.65 if b.kind != "rival" else 0.85
-	# Пылевая струя — лента по контрольным точкам. Голова (ближе к тебе)
-	# падает быстрее, хвост отстаёт: так прилив и растягивает тело в нить.
-	# Тело приходит со своим моментом: обломки не падают отвесно, а ложатся
-	# на орбиту вокруг тебя и сползают по спирали, обвивая гиганта нитью.
-	var gk := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
-	var dist := maxf(Vector2(p.x, p.y).length(), 0.3)
-	# Прямое вращение (как у своего диска): по задаче Хилла такие орбиты живут
-	# несколько секунд, обратные падают сразу. Модель на Python: 4–7 с.
-	var vt := -tang * sqrt(gk / dist) * 0.95
-	p = Vector4(p.x, p.y, p.z * 0.2 + vt.x, p.w * 0.2 + vt.y)
-	var stretch_len := rad * (2.5 + 2.0 * float(b.stretch))
-	_add_stream(p, axis, tang, stretch_len, 28, gain * share_dust, _pay_k(b), col, float(b.seed), rad_of(b) * (3.6 if b.kind == "rival" else 3.0))
-	# Поверх ленты — редкая мелкая пыль: искры на свету, без массы.
-	for i in 36:
-		var sv := _rng.randf_range(-1.0, 1.0)
-		var q := Vector2(p.x, p.y) + axis * sv * stretch_len + tang * _rng.randfn(0.0, 0.3) * rad
-		var dv := axis * (sv * 0.12) - tang * sv * 0.1 + Vector2(_rng.randfn(0.0, 0.03), _rng.randfn(0.0, 0.03))
-		gas.add(q.x, q.y, p.z + dv.x, p.w + dv.y, _rng.randf_range(0.006, 0.013), _rng.randf_range(0.4, 0.75), col.lightened(0.25), id)
-	# Крупные обломки: нитка жемчуга, как у кометы Шумейкеров–Леви 9.
-	var pearls := 0 if b.kind in ["rival", "minineptune", "comet"] else clampi(3 + int(m * 2.0), 3, 9)
-	for i in pearls:
-		var s := (float(i) / maxf(pearls - 1, 1)) * 2.0 - 1.0
-		var q := Vector2(p.x, p.y) + axis * s * rad * 2.2
-		var dv := axis * (s * 0.12) - tang * s * 0.1
-		_pearls.append({"h": Vector4(q.x, q.y, p.z + dv.x, p.w + dv.y), "r": rad_of(b) * _rng.randf_range(0.22, 0.42),
-			"mat": b.mat, "seed": float(b.seed) + i, "gain": gain * (1.0 - share_dust) / pearls, "pay": _pay_k(b),
-			"spin": _rng.randf() * TAU})
+	# Нить: вещество закручивается к тебе спиралью прямого вращения и уходит
+	# в облака. Траектория в системе гиганта: летит с тобой, не ломается.
+	var pal: String = str(b.mat)
+	if b.kind == "rival":
+		pal = "rival"
+	elif b.kind == "minineptune" and not b.get("core", false):
+		pal = "nep"
+	var big := clampf(float(b.m) / maxf(float(stage.earths) * 0.1, 0.01), 0.0, 3.0)
+	var opts := {"T": 3.2 + 0.5 * big, "Ls": 1.6 + 0.7 * big, "turns": _rng.randf_range(0.95, 1.35)}
+	if b.kind == "rival":
+		opts = {"T": 4.8, "Ls": 3.6, "turns": 1.4}
+	var from := Vector2(p.x, -p.y) * h
+	# Тело снимается в текстуру своим шейдером: дальше ломается именно оно.
+	var snap := _snapshot(b)
+	var solid: bool = not (b.kind in ["rival", "minineptune", "comet"]) or b.get("core", false)
+	var pearls := clampi(6 + int(m * 2.0), 7, 14) if solid and not snap.is_empty() else 0
+	opts["snap"] = snap
+	opts["shards"] = pearls
+	if float(b.m) > 0.4 or b.kind in ["rival", "icedwarf", "superearth", "minineptune"]:
+		# Крупное тело ломается на глазах: камера подъезжает.
+		stage.focus(from * 0.6, 4.5, 0.9)
+	opts["rad"] = maxf(rad_of(b), 6.0 / maxf(stage.camera.zoom.x, 0.001))
+	opts["gain_shards"] = gain * (1.0 - share_dust)
+	tides.spawn(from, "spiral", gain * share_dust, _pay_k(b), pal, float(b.seed), rad_of(b) * (3.0 if b.kind == "rival" else 2.6), opts)
 	if pearls == 0:
 		var rest := gain * (1.0 - share_dust)
 		stage.earths += rest
@@ -655,33 +646,76 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	_reward(b, gain)
 
 
-## Лента струи: n контрольных точек вдоль оси, голова к тебе падает быстрее.
-func _add_stream(p: Vector4, axis: Vector2, tang: Vector2, stretch_len: float, n: int, mass: float, pay: float, col: Color, seed_v: float, w: float) -> void:
-	var pts: Array[Vector4] = []
-	for i in n:
-		var sv := float(i) / (n - 1) * 2.0 - 1.0
-		var q := Vector2(p.x, p.y) + axis * sv * stretch_len
-		var dv := axis * (sv * 0.12) - tang * sv * 0.1
-		pts.append(Vector4(q.x, q.y, p.z + dv.x, p.w + dv.y))
-	var alive := PackedByteArray()
-	alive.resize(n)
-	alive.fill(1)
-	_streams.append({"pts": pts, "alive": alive, "per": mass / n, "pay": pay, "col": col,
-		"seed": seed_v, "t": 0.0, "w": w})
+## Снимок тела в текстуру его же шейдером (для кусков и цвета пыли).
+func _snapshot(b: Dictionary) -> Dictionary:
+	var info: Dictionary = KINDS[b.kind]
+	var view: String = info["view"]
+	if b.get("core", false):
+		view = "embryo"
+	if view == "comet":
+		return {}
+	var S := 192
+	var vp := SubViewport.new()
+	vp.size = Vector2i(S, S)
+	vp.transparent_bg = true
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var light := (-pos_of(b)).normalized()
+	var disc := 0.36
+	var heat := 0.25 if b.mat in ["rock", "lava"] else 0.0
+	match view:
+		"moon":
+			var mv := MoonView.new()
+			vp.add_child(mv)
+			mv.put(Vector2(S, S) * 0.5, S / 2.2, int(MATS[b.mat]["moon"]) if MATS.has(b.mat) else 0, light, fmod(float(b.seed), 10.0), float(b.spin), 1.0, heat, 1.0)
+			disc = 1.0 / 2.2
+		"embryo":
+			var node := ColorRect.new()
+			node.size = Vector2(S, S)
+			var m := ShaderMaterial.new()
+			m.shader = preload("res://shaders/embryo.gdshader")
+			var big: bool = b.kind == "superearth" or b.get("core", false)
+			m.set_shader_parameter("style", int(MATS[b.mat]["embryo"]) if MATS.has(b.mat) else 0)
+			m.set_shader_parameter("light_dir", light)
+			m.set_shader_parameter("spin", b.spin)
+			m.set_shader_parameter("tilt", b.tilt)
+			m.set_shader_parameter("seed", fmod(float(b.seed), 1.0))
+			m.set_shader_parameter("magma", 0.85 if b.mat == "lava" else heat)
+			m.set_shader_parameter("atmo", 0.55 if big else 0.1)
+			m.set_shader_parameter("veil", 0.8 if big and b.mat == "carbon" else 0.0)
+			m.set_shader_parameter("ocean", 0.6 if big and b.mat == "rock" else 0.0)
+			m.set_shader_parameter("frost", 0.9 if b.mat == "ice" else 0.0)
+			m.set_shader_parameter("clouds", 0.5 if big and b.mat == "rock" else 0.0)
+			m.set_shader_parameter("atmo_col", Color(0.9, 0.7, 0.45) if b.mat == "carbon" else Color(0.55, 0.75, 1.0))
+			node.material = m
+			vp.add_child(node)
+		"giant":
+			var node := ColorRect.new()
+			node.size = Vector2(S, S)
+			var m := ShaderMaterial.new()
+			m.shader = preload("res://shaders/giant_planet.gdshader")
+			m.set_shader_parameter("use_map", true)
+			var look: Array = NEPTUNE_LOOK if b.kind == "minineptune" else RIVAL_LOOKS[int(b.look)]
+			var key := "nep" if b.kind == "minineptune" else "rv%d" % int(b.look)
+			m.set_shader_parameter("map", _map_for(key, look, 0.17 + 0.23 * int(b.look)))
+			m.set_shader_parameter("haze_col", Color(0.62, 0.74, 0.95))
+			m.set_shader_parameter("light_dir", light)
+			m.set_shader_parameter("spin", float(b.spin) * 3.0)
+			m.set_shader_parameter("tilt", 0.1)
+			node.material = m
+			vp.add_child(node)
+	tides.add_child(vp)
+	return {"vp": vp, "tex": vp.get_texture(), "disc": disc}
 
 
 ## Мини-нептун у предела Роша своей оболочки: газ срывает лентой, ядро
 ## летит дальше по спирали (и рвётся или врезается уже как каменное/ледяное).
 func _strip_envelope(b: Dictionary, p: Vector4, h: float) -> void:
 	var env: float = float(b.m) * 0.7
-	var axis := Vector2(p.x, p.y).normalized()
-	var tang := axis.orthogonal()
-	var gk := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
-	var dist := maxf(Vector2(p.x, p.y).length(), 0.3)
-	var vt := -tang * sqrt(gk / dist) * 0.95
-	var sp := Vector4(p.x, p.y, p.z * 0.3 + vt.x, p.w * 0.3 + vt.y)
 	var col := (NEPTUNE_LOOK[0] as Color).lerp(NEPTUNE_LOOK[1], 0.3)
-	_add_stream(sp, axis, tang, rad_of(b) / h * 3.0, 28, env * 0.6, 1.2, col, float(b.seed) + 3.0, rad_of(b) * 3.4)
+	var from := Vector2(p.x, -p.y) * h
+	stage.focus(from * 0.6, 4.5, 0.8)
+	tides.spawn(from, "spiral", env * 0.6, 1.2, "nep", float(b.seed) + 3.0, rad_of(b) * 3.6, {"T": 4.4, "Ls": 3.2, "turns": 1.3, "snap": _snapshot(b)})
 	stage.earths += env * 0.4
 	stage.pay(env * 0.4 * 1.2)
 	b.m = float(b.m) - env
@@ -689,7 +723,7 @@ func _strip_envelope(b: Dictionary, p: Vector4, h: float) -> void:
 	if b.get("rings", false):
 		# Кольца — лёд: их срывает вместе с оболочкой отдельной светлой лентой.
 		b.erase("rings")
-		_add_stream(sp, tang, axis, rad_of(b) / h * 4.0, 20, env * 0.05, 2.0, Color(0.9, 0.93, 0.97), float(b.seed) + 7.0, rad_of(b) * 1.6)
+		tides.spawn(from * 1.04, "spiral", env * 0.05, 2.0, "ring", float(b.seed) + 7.0, rad_of(b) * 1.4, {"T": 3.4, "Ls": 2.0, "turns": 1.0})
 	if b.mat == "gas":
 		b.mat = "ice" if float(b.r) > GameData.SNOW_LINE else "rock"
 	b.stretch = 0.0
@@ -733,6 +767,7 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	# Свет и волна: белое ядро вспышки, оранжевый шар и кольцо по облакам.
 	# Вспышки привязаны к гиганту (loc): он летит дальше, а огонь остаётся на нём.
 	var at := dir * r * 0.9
+	stage.focus(at * 0.8, 4.0, 0.7)
 	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 1.1, "size": r * 0.6, "col": Color(1.0, 0.97, 0.9)})
 	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 3.2, "size": r * 1.3, "col": Color(1.0, 0.62, 0.32)})
 	_flashes.append({"p": at * 0.95, "loc": true, "t": 0.0, "dur": 3.4, "size": r * 1.7, "col": Color(1.0, 0.85, 0.7), "ring": true})
@@ -747,14 +782,12 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	var tang := hd.orthogonal()
 	var col: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.85, 0.78, 0.66)
 	var hot_col := col.lerp(Color(1.0, 0.7, 0.45), 0.35)
-	for k in 2:
-		# Факел выброса: лента вдоль радиуса, внешний конец летит быстрее.
-		var side := 1.0 if k == 0 else -1.0
-		var ax := hd.rotated(side * 0.35)
-		var d0 := contact_h(b) * 1.1 + rad_of(b) / h * 1.2
-		var vt := -tang * sqrt(gk / d0) * (0.7 + 0.15 * k)
-		var sp := Vector4(ax.x * d0, ax.y * d0, vt.x + ax.x * 0.5, vt.y + ax.y * 0.5)
-		_add_stream(sp, ax, ax.orthogonal(), rad_of(b) / h * 3.0, 24, gain * 0.075, _pay_k(b), hot_col, float(b.seed) + k, rad_of(b) * 1.3)
+	# Шлейф: огненный веер поднимается из облаков и опадает дымом цвета тела.
+	var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.4, 0.33, 0.26)
+	tides.plume(dir * r * 0.96, r * (0.75 + 0.6 * q), smoke.darkened(0.35), float(b.seed), 3.4)
+	# Часть выбитого вещества ложится обратно дугой пыли.
+	tides.spawn(dir.rotated(0.1) * r, "arc", gain * 0.15, _pay_k(b), str(b.mat) if MATS.has(b.mat) else "rock", float(b.seed),
+		rad_of(b) * 1.2, {"T": 3.6, "Ls": 1.8, "span": 0.7, "hgt": r * 0.55, "snap": _snapshot(b)})
 	# Брызги веером: мелкая раскалённая пыль без массы.
 	var gas: GasParticles = stage.body.gas
 	var c0 := hd * contact_h(b)
@@ -883,45 +916,6 @@ func _on_debris(id: int) -> void:
 	d.left = int(d.left) - 1
 	if int(d.left) <= 0:
 		_debris.erase(id)
-
-
-func _step_streams(delta: float) -> void:
-	var g := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
-	var dt := delta * HILL_W
-	var steps := maxi(1, ceili(dt / 0.02))
-	var hh := dt / steps
-	var keep := []
-	for st in _streams:
-		st.t = float(st.t) + delta
-		var pts: Array = st.pts
-		var alive: PackedByteArray = st.alive
-		var left := 0
-		for i in pts.size():
-			if alive[i] == 0:
-				continue
-			var q: Vector4 = pts[i]
-			var gone := false
-			for k in steps:
-				var d2 := q.x * q.x + q.y * q.y
-				# У самого гиганта пыль трётся о свой диск и оседает по спирали.
-				q = GasParticles.hill_step(q, hh, g, 0.3 if d2 < 1.44 else 0.0)
-				if d2 < CAPTURE * CAPTURE:
-					gone = true
-					break
-			pts[i] = q
-			if gone:
-				alive[i] = 0
-				stage.earths += float(st.per)
-				stage.pay(float(st.per) * float(st.pay))
-				stage.body.flash()
-			elif absf(q.x) > 8.0 or absf(q.y) > 10.0:
-				alive[i] = 0
-			else:
-				left += 1
-		st.alive = alive
-		if left >= 2:
-			keep.append(st)
-	_streams = keep
 
 
 func _step_pearls(delta: float, h: float) -> void:
@@ -1092,10 +1086,6 @@ func shift(d: Vector2) -> void:
 			b.h = _shift_one(b.h, dx, dy)
 	for pr in _pearls:
 		pr.h = _shift_one(pr.h, dx, dy)
-	for st in _streams:
-		var pts: Array = st.pts
-		for i in pts.size():
-			pts[i] = _shift_one(pts[i], dx, dy)
 
 
 static func _shift_one(p: Vector4, dx: float, dy: float) -> Vector4:
@@ -1240,31 +1230,6 @@ func _view(kind: String) -> CanvasItem:
 		var v: CanvasItem = pool[i]
 		v.visible = true
 		return v
-	if kind == "stream":
-		var line := Line2D.new()
-		if _white == null:
-			var img := Image.create(4, 4, false, Image.FORMAT_RGBA8)
-			img.fill(Color.WHITE)
-			_white = ImageTexture.create_from_image(img)
-			_width_curve = Curve.new()
-			_width_curve.add_point(Vector2(0.0, 0.25))
-			_width_curve.add_point(Vector2(0.18, 0.85))
-			_width_curve.add_point(Vector2(0.55, 1.0))
-			_width_curve.add_point(Vector2(1.0, 0.55))
-		line.texture = _white
-		line.texture_mode = Line2D.LINE_TEXTURE_STRETCH
-		line.joint_mode = Line2D.LINE_JOINT_ROUND
-		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
-		line.end_cap_mode = Line2D.LINE_CAP_ROUND
-		line.width_curve = _width_curve
-		line.gradient = Gradient.new()
-		var lm := ShaderMaterial.new()
-		lm.shader = preload("res://shaders/tidal_stream.gdshader")
-		lm.set_shader_parameter("noise_tex", NoiseTex.get_tex())
-		line.material = lm
-		add_child(line)
-		pool.append(line)
-		return line
 	var node: Control
 	match kind:
 		"moon":
@@ -1364,7 +1329,6 @@ func _draw() -> void:
 		var heat := smoothstep(1.0, 0.45, d)
 		var mv := _view("moon") as MoonView
 		mv.put(wp, maxf(float(pr.r), 2.0 * px), int(MATS[pr.mat]["moon"]) if MATS.has(pr.mat) else 0, (-wp).normalized(), fmod(float(pr.seed), 10.0), float(pr.spin), 1.0, heat, 1.0)
-	_draw_streams(h)
 	for k in _pools.keys():
 		var pool: Array = _pools[k]
 		for i in range(int(_used[k]), pool.size()):
@@ -1507,70 +1471,12 @@ func _draw_sat(b: Dictionary, p: Vector2, rad: float, light: Vector2, px: float)
 	mv.put(p + o, maxf(rad * 0.22, 2.5 * px), int(MATS[b.mat]["moon"]) if MATS.has(b.mat) else 0, light, fmod(float(b.seed) * 3.0, 10.0), float(b.spin), 1.0, 0.0, 1.0)
 
 
-## Струи лентой: гладкая кривая через живые точки (Катмулл — Ром),
-## ширина — колокол, цвет вершин несёт накал и яркость по длине.
-func _draw_streams(h: float) -> void:
-	for st in _streams:
-		var pts: Array = st.pts
-		var alive: PackedByteArray = st.alive
-		var ctrl := PackedVector2Array()
-		var heat := PackedFloat32Array()
-		for i in pts.size():
-			if alive[i] == 0:
-				continue
-			var q: Vector4 = pts[i]
-			ctrl.append(stage.body.to_global(Vector2(q.x, -q.y) * h))
-			heat.append(smoothstep(1.1, 0.45, sqrt(q.x * q.x + q.y * q.y)))
-		if ctrl.size() < 2:
-			continue
-		var line := _view("stream") as Line2D
-		var smooth := PackedVector2Array()
-		var hs := PackedFloat32Array()
-		var m := ctrl.size()
-		for i in m - 1:
-			var p0 := ctrl[maxi(i - 1, 0)]
-			var p1 := ctrl[i]
-			var p2 := ctrl[i + 1]
-			var p3 := ctrl[mini(i + 2, m - 1)]
-			for k in 3:
-				var t := float(k) / 3.0
-				var t2 := t * t
-				var t3 := t2 * t
-				smooth.append(0.5 * (2.0 * p1 + (p2 - p0) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3))
-				hs.append(lerpf(heat[i], heat[i + 1], t))
-		smooth.append(ctrl[m - 1])
-		hs.append(heat[m - 1])
-		line.points = smooth
-		var length := 0.0
-		for i in smooth.size() - 1:
-			length += smooth[i].distance_to(smooth[i + 1])
-		var spread := clampf(float(st.t) / 8.0, 0.0, 1.0)
-		var w: float = float(st.w) * (1.0 + 0.8 * spread)
-		line.width = w
-		var grad := line.gradient
-		var offs := PackedFloat32Array()
-		var cols := PackedColorArray()
-		var cnt := smooth.size()
-		var fade := clampf(1.0 - (float(st.t) - 10.0) / 6.0, 0.0, 1.0)
-		for i in cnt:
-			offs.append(float(i) / maxf(cnt - 1, 1))
-			# r — накал, g — яркость (свежая нить ярче), a — плотность.
-			cols.append(Color(hs[i], 1.0 - 0.35 * spread, 0.0, (0.9 - 0.35 * spread) * fade))
-		grad.offsets = offs
-		grad.colors = cols
-		var mat := line.material as ShaderMaterial
-		mat.set_shader_parameter("len", length / maxf(w, 1.0))
-		mat.set_shader_parameter("time", _time)
-		mat.set_shader_parameter("seed", st.seed)
-		mat.set_shader_parameter("spread", spread)
-		mat.set_shader_parameter("dust_col", st.col)
-
-
 ## Приливная деформация: тело вытягивается вдоль оси на гиганта.
 func _shape(node: Control, axis_ang: float, stretch: float, fade: float) -> void:
 	node.pivot_offset = node.size * 0.5
 	node.rotation = axis_ang if stretch > 0.001 else 0.0
-	node.scale = Vector2(1.0 + 1.4 * stretch, 1.0 - 0.35 * stretch)
+	# Жидкое тело у предела Роша — вытянутый эллипсоид, но не «пилюля».
+	node.scale = Vector2(1.0 + 0.35 * stretch, 1.0 - 0.12 * stretch)
 	node.modulate.a = fade
 
 

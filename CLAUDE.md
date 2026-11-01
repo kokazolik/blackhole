@@ -152,6 +152,19 @@ shaders/gas_clump.gdshader) всасываются по спирали, мелк
 (`sat`, переходят к тебе), кольца у мини-нептунов. Бот giant_bot:
 spawn=<kind>:<mat>:<доля>, spawnt, ahead, dr, ram, drift, rings, sat, every, blen.
 
+0.99.33: приливные струи заново (scripts/giant/tidal_streams.gd, TidalStreams):
+лента ArrayMesh по заданной траектории (спираль/дуга) в системе гиганта —
+гладкая, не мнётся при движении. Тело снимается в текстуру (SubViewport,
+`_snapshot`), рвётся на куски Вороного (shaders/shard.gdshader) с трещинами
+по составу, куски стачиваются в пыль, у каждого кома (shaders/tidal_stream.gdshader,
+цвет пыли с текстуры тела). Шлейф удара shaders/impact_plume.gdshader
+(температура → дым цвета тела). Камера наезжает на события (stage.focus).
+Начало этапа гиганта: твёрдое ядро состава (embryo.gdshader в GiantBody._core,
+set_core по body_type: камень, железо, углерод, лёд, титан, венера, хондрит,
+горячий — расплав), газ оседает: дымка цвета ядра → облака-перья → покров →
+пояса (giant_planet.gdshader uniform envelope, veil_col). GameState.giant.env
+(старые сохранения → 1). Подписи HUD встают в очередь. Бот giant_bot: core=<тип>, env.
+
 Открыто:
 - [ ] Живая проверка на телефоне: гигант, молодая планета, облако (баланс по ботам).
 

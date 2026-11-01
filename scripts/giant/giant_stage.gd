@@ -48,7 +48,14 @@ var _save_t := 0.0
 var _time := 0.0
 var _said := {}
 var _ending_t := -1.0
-var _inflate := 0.35
+var envelope := 1.0          # сколько газа осело на ядро (0 — голое ядро, 1 — сплошные облака)
+var _core_type := "silicate"
+var _env_step := 0           # какие подписи про оболочку уже были
+var _focus_t := 0.0          # камера подъезжает к событию (разрыв, удар): секунд осталось
+var _focus_dur := 1.0
+var _focus_loc := Vector2.ZERO   # куда смотреть, в системе гиганта
+var _focus_k := 0.0
+var _focus_w := 0.0
 var value_boost := 0.0      # секунд звёздной пыли ×1,5 (событие парникового мира)
 
 
@@ -127,11 +134,14 @@ func _ready() -> void:
 	events.bind(world)
 	body.set_look(str(g.get("flavor", "giant_cold")))
 	body.moons = moons
-	# Только что после лавины: оболочка раздувается на глазах.
-	if g.get("sigma", []).is_empty():
-		_inflate = 0.35
-	else:
-		_inflate = 1.0
+	# Только что после лавины: газ оседает на твёрдое ядро на глазах.
+	envelope = float(g.get("env", 0.0 if g.get("sigma", []).is_empty() else 1.0))
+	_core_type = GameState.body_type()
+	if _core_type in ["neutral", "unformed"]:
+		_core_type = GameData.lead_material(GameState.materials)
+	body.set_core(_core_type, str(g.get("flavor", "giant_cold")))
+	body.envelope = envelope
+	_env_step = 3 if envelope >= 1.0 else (2 if envelope > 0.6 else (1 if envelope > 0.25 else 0))
 
 	# Камера поворачивается вместе с гигантом: звезда всегда слева, вперёд по орбите — вверх.
 	camera.ignore_rotation = false
@@ -168,10 +178,57 @@ func _ready() -> void:
 		gas_total = total)
 
 	world.setup()
-	if _inflate < 1.0:
-		hud.caption("Газовый гигант", "ядро в десять масс Земли втягивает газ диска лавиной: ты раздуваешься", 4.5)
+	if envelope < 0.05:
+		hud.caption("Газовый гигант", _core_line(), 5.0)
+		# Камера наезжает на ядро: пусть игрок разглядит, из чего он.
+		focus(Vector2.ZERO, 9.0, 1.2)
 	else:
 		hud.caption("Газовый гигант", "газ диска ещё течёт к тебе", 2.5)
+
+
+## Подпись на входе: какое ядро у тебя и чем оно дымит в первый газ.
+func _core_line() -> String:
+	match _core_type:
+		"metal":
+			return "железное ядро в десять масс Земли раскалено и тянет газ: он оседает серой дымкой"
+		"ice":
+			return "ледяное ядро в инее: водород оседает на него голубой дымкой"
+		"carbon":
+			return "углеродное ядро тлеет под бурой мглой: газ оседает на тебя"
+		"titan":
+			return "лёд и углерод под оранжевой мглой, как у Титана: газ оседает на тебя"
+		"venus":
+			return "раскалённое ядро под желтоватой сернистой мглой: газ оседает на тебя"
+		"chondrite":
+			return "пёстрое ядро из всего понемногу: газ оседает на него дымкой"
+	return "каменное ядро в десять масс Земли раскалено ударами: газ оседает на него пыльной дымкой"
+
+
+## Газ оседает на ядро: быстрее, когда течёт густо и когда ты тяжелее.
+## Плотное железное ядро держит газ крепче, у льда и углерода оболочка
+## в холоде садится медленнее.
+func _grow_envelope(delta: float) -> void:
+	if envelope >= 1.0:
+		return
+	var k := 1.0
+	match _core_type:
+		"metal":
+			k = 1.25
+		"ice", "titan":
+			k = 0.9
+		"carbon":
+			k = 0.95
+	envelope = minf(envelope + delta * (0.5 + 1.0 * _flow) * k / 70.0, 1.0)
+	envelope = maxf(envelope, clampf((earths - 12.0) / 150.0, 0.0, 1.0))
+	if _env_step < 1 and envelope > 0.25:
+		_env_step = 1
+		hud.caption("Первые облака", "газ остывает и конденсируется: ядро ещё видно в разрывах", 3.5)
+	elif _env_step < 2 and envelope > 0.6:
+		_env_step = 2
+		hud.caption("Облачный покров", "ветер вытягивает облака вдоль параллелей: проступают пояса", 3.5)
+	elif _env_step < 3 and envelope >= 1.0:
+		_env_step = 3
+		hud.caption("Ядро скрылось", "под тобой тысячи километров газа: теперь ты газовый гигант", 3.5)
 
 
 func _open_pause() -> void:
@@ -203,7 +260,7 @@ func _process(delta: float) -> void:
 		if _ending_t < 0.0:
 			_show_ending()
 		return
-	_inflate = minf(_inflate + delta * 0.22, 1.0)
+	_grow_envelope(delta)
 	gas -= delta
 	var gk := clampf(gas / gas_total, 0.0, 1.0)
 	var h := hill()
@@ -272,6 +329,16 @@ func clump_gain(s: float) -> float:
 	var gk := clampf(gas / gas_total, 0.0, 1.0)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
 	return GameData.GIANT_ACC * clampf(s, 0.1, 1.5) * maxf(gk, 0.3) * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")
+
+
+## Подвести камеру к событию: loc — в системе гиганта, k — насколько ближе.
+func focus(loc: Vector2, dur: float, k: float) -> void:
+	if _focus_t > 0.5 and _focus_k >= k:
+		return
+	_focus_loc = loc
+	_focus_dur = dur
+	_focus_t = dur
+	_focus_k = k
 
 
 func pay(gained: float) -> void:
@@ -347,15 +414,24 @@ func _update_view(delta: float) -> void:
 	var h := hill()
 	var vp := get_viewport_rect().size
 	var z := vp.x * 0.5 / (3.2 * h + 600.0)
+	# Крупный разрыв или удар: камера на пару секунд подъезжает ближе.
+	_focus_t = maxf(_focus_t - delta, 0.0)
+	var want := 0.0
+	if _focus_t > 0.0:
+		var el := _focus_dur - _focus_t
+		want = smoothstep(0.0, 0.6, el) * smoothstep(0.0, 1.2, _focus_t)
+	_focus_w = lerpf(_focus_w, want, minf(delta * 3.0, 1.0))
+	z *= 1.0 + _focus_k * _focus_w
 	camera.zoom = camera.zoom.lerp(Vector2(z, z), minf(delta * 2.0, 1.0)) if delta > 0.0 else Vector2(z, z)
-	camera.position = Vector2.from_angle(ang) * orbit
+	camera.position = Vector2.from_angle(ang) * orbit + _focus_loc.rotated(ang) * _focus_w
 	camera.rotation = ang
 	body.position = Vector2.from_angle(ang) * orbit
 	body.rotation = ang
 	body.body_r = GameData.giant_body_r(earths)
 	body.hill = h
 	body.reach = Skills.stat("giant_reach")
-	body.inflate = 0.35 + 0.65 * smoothstep(0.0, 1.0, (_inflate - 0.35) / 0.65) if _inflate < 1.0 else 1.0
+	body.envelope = envelope
+	body.inflate = lerpf(GiantBody.CORE_R + 0.04, 1.0, smoothstep(0.04, 0.85, envelope)) if envelope < 1.0 else 1.0
 	body.flow = _flow
 	body.field = GameState.giant_field()
 	body.zoom = camera.zoom.x
@@ -372,6 +448,7 @@ func save() -> void:
 	g["gas"] = gas
 	g["moons"] = moons
 	g["moon_prog"] = moon_prog
+	g["env"] = envelope
 	var arr := []
 	for v in disk.sigma:
 		arr.append(snappedf(v, 0.0001))
