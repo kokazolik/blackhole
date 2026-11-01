@@ -15,6 +15,8 @@ const GAP := Vector2(55.0, 80.0)
 const STRAY_MOONS := 6       # больше лун не захватить даже сильным полем
 const COMETS := 7
 const COMETS_WIN := 3
+const DEBRIS := 9
+const DEBRIS_WIN := 4
 
 const KINDS := {
 	"comets": {
@@ -41,6 +43,12 @@ const KINDS := {
 		"time": 30.0, "color": Color(0.85, 0.55, 0.3),
 		"fail": "",
 	},
+	"debris": {
+		"title": "Обломки столкновения",
+		"sub": "впереди по орбите столкнулись два зародыша: облако обломков ещё не разлетелось. Собери хотя бы четыре",
+		"time": 35.0, "color": Color(0.95, 0.78, 0.55),
+		"fail": "Обломки разлетелись",
+	},
 	"flare": {
 		"title": "Вспышка звезды",
 		"sub": "молодая звезда вспыхивает и сдувает газ вокруг себя: уйди дальше отмеченной границы",
@@ -58,6 +66,7 @@ var caught := 0              # комет поймано
 var _targets: Array = []     # тела мира, что относятся к событию
 var _vortex: Dictionary = {}
 var _next := FIRST
+var _last := ""
 var _time := 0.0
 var _rng := RandomNumberGenerator.new()
 
@@ -82,6 +91,32 @@ static func kind_for(flavor: String) -> String:
 		"giant_hot":
 			return "flare"
 	return "rival"
+
+
+## Что может случиться сейчас. В кормовой зоне только событие своего ядра,
+## потом к нему добавляются чужие, но своё остаётся самым частым, и одно и то
+## же не идёт два раза подряд.
+func _pick() -> String:
+	var own := kind_for(str(GameState.giant.get("flavor", "giant_cold")))
+	if stage.era < 2:
+		return own
+	var w := {"rival": 1.0, "comets": 0.7, "stray": 0.7, "cloud": 0.6, "debris": 1.0, "flare": 0.0}
+	if stage.orbit < GameData.HOT_ORBIT + 2500.0:
+		w["flare"] = 0.8
+	if stage.orbit < GameData.SNOW_LINE - 1500.0:
+		w["comets"] *= 0.5
+	w[own] = 2.5
+	if w.has(_last) and _last != "":
+		w[_last] = 0.0
+	var total := 0.0
+	for k in w:
+		total += float(w[k])
+	var x := _rng.randf() * total
+	for k in w:
+		x -= float(w[k])
+		if x <= 0.0 and float(w[k]) > 0.0:
+			return k
+	return own
 
 
 func active() -> bool:
@@ -112,6 +147,8 @@ func hint() -> String:
 			return "%s · %d с · уйди за границу" % [title(), ceili(t)]
 		"comets":
 			return "%s · %d с · поймано %d из %d" % [title(), ceili(t), caught, COMETS_WIN]
+		"debris":
+			return "%s · %d с · собрано %d из %d" % [title(), ceili(t), caught, DEBRIS_WIN]
 	return "%s · %d с · догони тело" % [title(), ceili(t)]
 
 
@@ -129,8 +166,9 @@ func step(delta: float) -> void:
 	queue_redraw()
 	if not active():
 		_next -= delta
-		if _next <= 0.0 and stage.gas > 40.0:
-			_start(kind_for(str(GameState.giant.get("flavor", "giant_cold"))))
+		# В рыхлом облаке событий нет: сначала вокруг только газ.
+		if _next <= 0.0 and stage.gas > 40.0 and stage.era >= 1:
+			_start(_pick())
 		return
 	t -= delta
 	# Цель — живое тело: метка на карте идёт за ним.
@@ -158,6 +196,12 @@ func step(delta: float) -> void:
 		"comets":
 			if caught >= COMETS_WIN:
 				_comets_win()
+				return
+			if _targets.is_empty():
+				t = 0.0
+		"debris":
+			if caught >= DEBRIS_WIN:
+				_debris_win()
 				return
 			if _targets.is_empty():
 				t = 0.0
@@ -196,6 +240,18 @@ func _start(k: String) -> void:
 				var b := w._add_body("comet", r + _rng.randf_range(-300.0, 900.0), g + ahead + _rng.randf_range(-0.05, 0.05), "ice")
 				b.tag = "ev"
 				_targets.append(b)
+		"debris":
+			# Облако обломков впереди или позади по орбите, чуть в стороне.
+			r = clampf(o + _rng.randf_range(900.0, 1800.0) * (1.0 if _rng.randf() < 0.5 else -1.0), lo, hi)
+			var ahead := _rng.randf_range(0.22, 0.34) * (1.0 if _rng.randf() < 0.5 else -1.0)
+			var mat := w._material_at(r)
+			for i in DEBRIS:
+				var kd := "planetesimal" if i < 2 else "rubble"
+				var b := w._add_body(kd, r + _rng.randfn(0.0, 220.0), g + ahead + _rng.randfn(0.0, 0.025), mat if _rng.randf() < 0.7 else w._material_at(r))
+				# Обломки ещё разлетаются: у каждого своя скорость от удара.
+				b.vr = _rng.randfn(0.0, 40.0)
+				b.tag = "ev"
+				_targets.append(b)
 		"cloud":
 			r = clampf(o + d * (1.0 if _rng.randf() < 0.5 else -1.0), lo, hi)
 			_vortex = w.spawn_vortex(r, true, 34.0, true)
@@ -224,7 +280,7 @@ func _on_eaten(b: Dictionary) -> void:
 	if not active() or not _targets.has(b):
 		return
 	match kind:
-		"comets":
+		"comets", "debris":
 			caught += 1
 		"rival":
 			_rival_win()
@@ -233,10 +289,11 @@ func _on_eaten(b: Dictionary) -> void:
 
 
 func _finish() -> void:
+	_last = kind
 	kind = ""
 	_targets = []
 	_vortex = {}
-	_next = _rng.randf_range(GAP.x, GAP.y)
+	_next = _rng.randf_range(GAP.x, GAP.y) * (1.25 if stage.era < 2 else 1.0)
 
 
 func _comets_win() -> void:
@@ -251,6 +308,37 @@ func _comets_win() -> void:
 		stage.hud.toast("Рой пойман: +%s масс Земли, метановый лёд пошёл на луну" % String.num(gain, 1).replace(".", ","), color())
 	else:
 		stage.hud.toast("Рой пойман: +%s масс Земли, хондры +4" % String.num(gain, 1).replace(".", ","), color())
+	_finish()
+
+
+## Обломки собраны: у каждого ядра своя добыча.
+func _debris_win() -> void:
+	var type := GameState.body_type()
+	var at: Vector2 = stage.body.position
+	var gain: float = 1.5 + 0.03 * stage.earths
+	var ch := 4
+	var text := ""
+	match type:
+		"chondrite":
+			ch = 9
+			text = ", в обломках хондры"
+		"metal":
+			gain *= 1.5
+			text = ", железо осело в ядро"
+		"carbon", "venus":
+			stage.value_boost = 20.0
+			text = ", сажа: пыль ×1,5 на 20 с"
+		"ice", "titan":
+			stage.moon_prog += 0.5
+			text = ", лёд пошёл на луну"
+		_:
+			if _rng.randf() < 0.4:
+				stage.moon_prog += 1.0
+				text = ", из остатка соберётся луна"
+	stage.earths += gain
+	stage.pay(gain * 2.5)
+	GameState.add_chondrules(ch, at)
+	stage.hud.toast("Обломки собраны: +%s масс Земли, хондры +%d%s" % [String.num(gain, 1).replace(".", ","), ch, text], color())
 	_finish()
 
 

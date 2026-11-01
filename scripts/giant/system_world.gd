@@ -44,6 +44,7 @@ const SLING := 380.0         # пинок пращи, ед./с
 const RADIAL_DRAG := 0.12    # газ гасит радиальную скорость тел
 const DEBRIS_BASE := 1000000 # номера учёта обломков в частицах
 const N_BODIES := 170
+const ERA_BODIES := [14, 70, 125, 170]   # сколько мелких тел в мире по эпохам
 
 # Виды тел: масса в массах Земли, видимый радиус, чем рисуется, что дают.
 const KINDS := {
@@ -117,15 +118,38 @@ func setup() -> void:
 	tides = TidalStreams.new()
 	tides.world = self
 	stage.body.add_child(tides)
-	for i in N_BODIES:
+
+
+## Мир сразу такой, какой положен эпохе (начало этапа или загрузка посреди).
+func fill_to(era: int) -> void:
+	for i in ERA_BODIES[clampi(era, 0, 3)]:
 		_spawn_random(true)
-	# Соперники: один полегче (вырастешь — съешь), один тяжелее (бойся).
+	for n in range(1, era + 1):
+		_era_guests(n)
+
+
+## Новая эпоха: мелкие тела подтянутся сами (их ждёт счётчик), а гости
+## приходят издалека, из-за края экрана.
+func on_era(era: int) -> void:
+	_era_guests(era)
+	# Первая горсть новых тел сразу, чтобы перемену было видно.
+	for i in 6:
+		_spawn_random(false)
+
+
+func _era_guests(era: int) -> void:
 	var e: float = stage.earths
-	_spawn_rival(maxf(e * 3.0, 35.0) * _rng.randf_range(0.9, 1.3))
-	_spawn_rival(maxf(e * 12.0, 140.0) * _rng.randf_range(0.9, 1.4))
-	if _flavor() in ["giant_cold", "giant_hot"]:
-		_spawn_rival(maxf(e * 30.0, 300.0) * _rng.randf_range(0.9, 1.2))
-	_spawn_trojans()
+	match era:
+		2:
+			# Соперник полегче: вырастешь — съешь.
+			_spawn_rival(maxf(e * 3.0, 35.0) * _rng.randf_range(0.9, 1.3))
+			_spawn_trojans()
+		3:
+			# Тяжёлый соперник: бойся.
+			_spawn_rival(maxf(e * 4.0, 300.0) * _rng.randf_range(0.9, 1.4))
+			if _flavor() in ["giant_cold", "giant_hot"]:
+				_spawn_rival(maxf(e * 8.0, 600.0) * _rng.randf_range(0.9, 1.2))
+			_dwarf_t = minf(_dwarf_t, _rng.randf_range(50.0, 90.0))
 
 
 ## Троянцы: рои в точках Лагранжа L4 и L5, на 60° впереди и позади тебя по
@@ -186,6 +210,19 @@ func _pick_kind(r: float) -> String:
 		w["superearth"] = 0.16
 	if f == "giant_cold":
 		w["superearth"] *= 1.5
+	# Эпохи: сначала только пыль и обломки, крупное приходит потом.
+	var era: int = maxi(stage.era, 0)
+	if era < 1:
+		w["planetesimal"] = 0.0
+		w["binary"] = 0.0
+		w["irondwarf"] = 0.0
+	if era < 2:
+		w["embryo"] = 0.0
+		w["icedwarf"] = 0.0
+		w["irondwarf"] = 0.0
+	if era < 3:
+		w["superearth"] = 0.0
+		w["minineptune"] = 0.0
 	var total := 0.0
 	for k in w:
 		total += float(w[k])
@@ -360,7 +397,10 @@ func step(delta: float) -> void:
 	_step_vortices(delta, gpos, h)
 	# Тела не кончаются: новые приходят с окраин и из-за края экрана.
 	_spawn_t -= delta
-	var want := roundi(N_BODIES * Skills.stat("giant_bodies"))
+	var want := roundi(ERA_BODIES[clampi(stage.era, 0, 3)] * Skills.stat("giant_bodies"))
+	# Диск тает: новых тел почти нет, мир пустеет к концу.
+	if stage.gas < 90.0:
+		want = roundi(want * 0.3)
 	if _spawn_t <= 0.0:
 		_spawn_t = _rng.randf_range(1.0, 2.5)
 		var small := 0
@@ -369,7 +409,8 @@ func step(delta: float) -> void:
 				small += 1
 		if small < want:
 			_spawn_random(false)
-	_dwarf_t -= delta
+	if stage.era >= 3:
+		_dwarf_t -= delta
 	if _dwarf_t <= 0.0 and stage.gas > 50.0:
 		_dwarf_t = _rng.randf_range(170.0, 240.0)
 		_spawn_dwarf()
