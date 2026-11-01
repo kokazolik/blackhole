@@ -235,9 +235,11 @@ func _process(delta: float) -> void:
 		if f.t >= 1.0:
 			var an := _fall_angle(f, r, 1.0)
 			var at := Vector2(cos(an), sin(an)) * r * 0.95
-			_impacts.append({"t": 0.0, "p": at})
+			# Луна входит в облака: шлейф над ними и тёмный след, без вспышки-шара.
 			scar(at.normalized(), r * 0.07)
-			flash()
+			var stg = get_parent()
+			if stg != null and stg.get("world") != null and stg.world.tides != null:
+				stg.world.tides.plume(at, r * 0.35, Color(0.32, 0.29, 0.26), _rng.randf() * 5.0, 3.6)
 		else:
 			keep.append(f)
 	_falling = keep

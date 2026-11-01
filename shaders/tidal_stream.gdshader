@@ -7,7 +7,7 @@ render_mode blend_premul_alpha;
 // камнем, лёд — льдом, суперземля с морями — с голубизной. Поверх пыли
 // светится только то, что раскалено: вход в облака гиганта и искры.
 // UV.x — координата вещества (0 — голова, 1 — хвост), UV.y — поперёк.
-// Цвет вершин: r — накал, g — яркость, a — плотность.
+// Цвет вершин: r — накал, g — освещённость (0 — в тени гиганта), a — плотность.
 
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
 uniform sampler2D body_tex : filter_linear;
@@ -66,28 +66,30 @@ void fragment() {
 	float f1 = n2(vec2(along * 0.04 + seed * 1.7, yy * 1.4 + 0.3));
 	float f2 = n2(vec2(along * 0.13 - seed, yy * 2.8 + 5.0));
 	float f3 = n2(vec2(along * 0.35 + seed * 0.3, yy * 5.0 + 2.0));
-	float strands = smoothstep(0.3, 0.85, f1 * 0.6 + f2 * 0.4);
+	float strands = smoothstep(0.2, 0.95, f1 * 0.6 + f2 * 0.4);
 	float clumps = smoothstep(0.45, 0.9, f2 * 0.5 + f3 * 0.6);
 	strands = mix(strands, 0.55, haze);
 	// Зёрна: рой мелких обломков, каждый ловит свет звезды.
 	float gr = n2(vec2(along * 1.3 + seed * 4.0, y * 7.0 + seed));
 	float grains = smoothstep(0.7, 0.92, gr);
-	float dens = core * (0.3 + 0.7 * strands) * (0.6 + 0.7 * clumps) + grains * core * 0.6 + coma * (0.6 + 0.5 * strands);
+	// Пыль — облачко, а не мазки кисти: волокна мягкие, контраст небольшой.
+	float dens = core * (0.6 + 0.4 * strands) * (0.75 + 0.45 * clumps) + grains * core * 0.3 + coma * (0.6 + 0.5 * strands);
 	dens *= smoothstep(1.0, 0.55, abs(y));
-	float a = clamp(dens * COLOR.a * 1.8, 0.0, 0.92);
+	float a = clamp(dens * COLOR.a * 1.05, 0.0, 0.7);
 	// Цвет: настоящий цвет тела, свет звезды с одной стороны нити.
 	vec3 base = use_body ? body_col(1.0 - x, y) : c_tail;
 	base = mix(base, c_tail, 0.3);
 	// Пыль рассеивает свет звезды: светлее тела, край к звезде ярче.
-	float lit = 1.15 + 0.35 * (0.5 - UV.y) * sign(light.x) + 0.3 * (f3 - 0.5);
+	// Пыль матовая: светится отражённым светом звезды, не ярче самого тела.
+	float lit = 0.95 + 0.25 * (0.5 - UV.y) * sign(light.x) + 0.25 * (f3 - 0.5);
 	vec3 dust = base * lit + base * grains * 0.6;
 	// Накал у облаков гиганта и мерцающие искры.
 	float heat = COLOR.r;
 	float g = n2(vec2(along * 0.6 + time * 0.07 + seed * 5.0, y * 4.0 + time * 0.05));
-	float tw = 0.5 + 0.5 * sin(time * 9.0 + along * 3.1 + seed * 11.0);
-	float spark = pow(smoothstep(0.64, 1.0, g), 6.0) * sparkle * 5.0 * (0.4 + 0.6 * tw) * core;
-	vec3 glow = c_hot * heat * heat * core * 1.6 + c_glow * heat * 0.35 * core;
+	// Блики: редкие гладкие грани льда и металла ловят звезду, без мигания.
+	float spark = pow(smoothstep(0.7, 1.0, g), 6.0) * sparkle * 1.6 * core * COLOR.g;
+	vec3 glow = c_hot * heat * heat * core * 1.2 + c_glow * heat * 0.3 * core;
 	glow += mix(vec3(1.0), c_hot, 0.4) * spark;
 	dust = mix(dust, c_hot, heat * heat * 0.6);
-	COLOR = vec4((dust * a + glow * COLOR.a) * COLOR.g, a);
+	COLOR = vec4(dust * a * COLOR.g + glow * COLOR.a, a);
 }

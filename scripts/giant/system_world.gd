@@ -746,8 +746,9 @@ func _hit_whole(b: Dictionary, p: Vector4, h: float) -> void:
 	stage.body.flash()
 	stage.body.flash()
 	stage.body.impact_heat = minf(stage.body.impact_heat + 0.25 * clampf(float(b.get("q", 0.05)) * 4.0, 0.2, 1.0), 1.0)
-	var at: Vector2 = stage.body.to_global(dir * r * 0.97)
-	_flashes.append({"p": at, "t": 0.0, "dur": 1.6, "size": r * 0.5 * clampf(rad_of(b) / 30.0, 0.5, 1.6), "col": Color(1.0, 0.8, 0.55)})
+	# Целое тело входит в облака: шлейф по размеру тела, дым его цвета.
+	var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.4, 0.33, 0.26)
+	tides.plume(dir * r * 0.97, clampf(rad_of(b) * 3.0, r * 0.12, r * 0.45), smoke.darkened(0.4), float(b.seed), 3.0)
 	_composition_hit(b, 0.5)
 	_reward(b, gain, "hit")
 
@@ -764,16 +765,13 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	stage.pay(gain * 0.85 * _pay_k(b) * Skills.stat("giant_impact") * 1.3)
 	var r := _giant_r()
 	var h: float = stage.hill()
-	# Свет и волна: белое ядро вспышки, оранжевый шар и кольцо по облакам.
-	# Вспышки привязаны к гиганту (loc): он летит дальше, а огонь остаётся на нём.
+	# Огонь — шлейф над облаками (ниже), без светящихся шаров. По облакам
+	# бежит волна: тёмное кольцо, как волны от ударов кометы в 1994-м.
+	# Всё привязано к гиганту (loc): он летит дальше, а след остаётся на нём.
 	var at := dir * r * 0.9
 	stage.focus(at * 0.8, 4.0, 0.7)
-	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 1.1, "size": r * 0.6, "col": Color(1.0, 0.97, 0.9)})
-	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 3.2, "size": r * 1.3, "col": Color(1.0, 0.62, 0.32)})
-	_flashes.append({"p": at * 0.95, "loc": true, "t": 0.0, "dur": 3.4, "size": r * 1.7, "col": Color(1.0, 0.85, 0.7), "ring": true})
+	_flashes.append({"p": at * 0.95, "loc": true, "t": 0.0, "dur": 6.0, "size": r * 1.5, "col": Color(0.1, 0.075, 0.06), "ring": true})
 	stage.body.scar(dir, rad_of(b) * 1.3)
-	for i in 6:
-		stage.body.flash()
 	stage.body.impact_heat = minf(stage.body.impact_heat + 0.45 + q, 1.0)
 	# Выбитое вещество: две ленты из точки удара, с прямым вращением —
 	# они обовьют тебя и упадут обратно позже.
@@ -794,7 +792,7 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	for i in 70:
 		var a := _rng.randfn(0.0, 0.55)
 		var vv := hd.rotated(a) * _rng.randf_range(0.6, 1.8) - tang * _rng.randf_range(0.2, 0.9)
-		gas.add(c0.x, c0.y, vv.x, vv.y, _rng.randf_range(0.008, 0.02), _rng.randf_range(0.5, 0.9), hot_col.lightened(0.2), -1)
+		gas.add(c0.x, c0.y, vv.x, vv.y, _rng.randf_range(0.008, 0.02), _rng.randf_range(0.4, 0.75), hot_col.darkened(0.15), -1)
 	# Отдача: тело приносит свой импульс.
 	var rel: Vector2 = (_vel_of(b) - _player_vel()).rotated(-float(stage.ang))
 	stage.kick += rel * q * 0.6
@@ -954,7 +952,6 @@ func _impact(pr: Dictionary, p: Vector4) -> void:
 
 
 func _into_star(b: Dictionary) -> void:
-	_flashes.append({"p": pos_of(b).normalized() * GameData.GIANT_STAR_R, "t": 0.0, "dur": 2.0, "size": 900.0, "col": Color(1.0, 0.85, 0.6)})
 	if b.get("slung", false):
 		var v := float(b.m) * 2.5 * Skills.stat("giant_sling")
 		stage.earths += 0.0
@@ -984,7 +981,6 @@ func _sling(b: Dictionary, p: Vector2, gpos: Vector2) -> void:
 	b["slung"] = true
 	# Отдача: тебя толкает в другую сторону, тем сильнее, чем тяжелее тело.
 	stage.kick.x -= out * 260.0 * clampf(m / e, 0.05, 1.0)
-	_flashes.append({"p": p, "t": 0.0, "dur": 0.8, "size": rad_of(b) * 3.0, "col": Color(0.8, 0.9, 1.0)})
 	stage.pay(m * 0.4 * Skills.stat("giant_sling"))
 	if not _said.has("sling"):
 		_said["sling"] = true
@@ -1538,11 +1534,30 @@ func _draw_rings() -> void:
 		if not f.get("ring", false):
 			continue
 		var tr := float(f.t)
-		var rr := float(f.size) * (0.15 + 0.85 * sqrt(tr))
+		var rr := float(f.size) * (0.08 + 0.92 * sqrt(tr))
 		var cc: Color = f.col
 		var fp: Vector2 = stage.body.to_global(f.p) if f.get("loc", false) else f.p
-		_over.draw_arc(fp, rr, 0.0, TAU, 96, Color(cc, 0.55 * (1.0 - tr) * (1.0 - tr)), float(f.size) * 0.04 * (1.0 - 0.6 * tr), true)
-		_over.draw_arc(fp, rr * 0.86, 0.0, TAU, 96, Color(cc, 0.16 * (1.0 - tr)), float(f.size) * 0.1 * (1.0 - 0.5 * tr), true)
+		# Волна — тёмное кольцо в облаках: только по диску гиганта.
+		var gc: Vector2 = stage.body.global_position
+		var gr := _giant_r() * 0.99
+		var a := 0.32 * smoothstep(0.0, 0.05, tr) * (1.0 - tr)
+		_clip_arc(fp, rr, gc, gr, Color(cc, a), float(f.size) * 0.035 * (1.0 - 0.4 * tr))
+		_clip_arc(fp, rr * 0.9, gc, gr, Color(cc, a * 0.35), float(f.size) * 0.08 * (1.0 - 0.4 * tr))
+
+
+## Окружность, обрезанная диском гиганта (волна не выходит за облака).
+func _clip_arc(c: Vector2, rr: float, gc: Vector2, gr: float, col: Color, w: float) -> void:
+	var seg := PackedVector2Array()
+	for i in 97:
+		var q := c + Vector2.from_angle(TAU * i / 96.0) * rr
+		if q.distance_to(gc) < gr:
+			seg.append(q)
+		else:
+			if seg.size() > 1:
+				_over.draw_polyline(seg, col, w, true)
+			seg.clear()
+	if seg.size() > 1:
+		_over.draw_polyline(seg, col, w, true)
 
 
 static func _make_flash_tex() -> GradientTexture2D:

@@ -2,8 +2,9 @@ shader_type canvas_item;
 // Кусок разорванного тела. Тело снимается в текстуру в миг разрыва (своим же
 // шейдером: кратеры, моря, лёд, облака), потом режется на ячейки Вороного
 // с рваными краями. Каждый кусок несёт свою часть настоящей поверхности.
-// По трещинам светится то, что внутри: у камня — расплав, у льда — свежий
-// лёд, у углерода — тлеющие угли. Прилив стачивает кусок с краёв в пыль.
+// Прилив не плавит тело: свежий скол просто другого цвета — у льда чистый
+// яркий лёд из недр, у камня серая пыль, у углерода чёрный излом. Светится
+// только расплав у лавового тела. Прилив стачивает кусок с краёв в пыль.
 
 uniform sampler2D body_tex : filter_linear;
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
@@ -15,6 +16,8 @@ uniform vec3 crack_col : source_color = vec3(1.0, 0.45, 0.15);
 uniform float crack = 0.0;     // накал трещин 0..1
 uniform float erode = 0.0;     // сколько сточено 0..1
 uniform float seed = 0.0;
+uniform float shade = 1.0;     // 1 — на свету, меньше — в тени гиганта
+uniform float emit = 0.0;      // 1 — сколы светятся (расплав лавового тела)
 
 void fragment() {
 	vec2 q = (UV - 0.5) / disc;
@@ -41,10 +44,13 @@ void fragment() {
 	// Обломок крутится, и тёмная сторона тела тоже выходит на свет:
 	// поднимаем тени (рассеянный свет диска и звезды).
 	vec3 col = tex.rgb * 1.1 + vec3(0.05, 0.045, 0.04) + tex.rgb * (1.0 - length(tex.rgb)) * 0.6;
-	// Свежий скол темнее и шероховат, у края светятся трещины.
-	float rim = exp(-edge * 40.0);
-	col = mix(col, col * 0.55, rim * 0.6 * crack);
-	float glow = rim * crack * (0.7 + 0.6 * nn) + smoothstep(0.12, 0.0, keep) * erode * 0.8;
-	col += crack_col * glow * 1.6;
+	// Свежий скол: полоса по краю куска цвета недр, шероховатая.
+	float rim = exp(-edge * 30.0) * crack * (0.6 + 0.5 * nn);
+	col = mix(col, crack_col * (0.8 + 0.4 * nn), clamp(rim, 0.0, 0.85));
+	// Край, который стачивается, пылит: светлее и прозрачнее.
+	float dusty = smoothstep(0.12, 0.0, keep) * erode;
+	col = mix(col, crack_col, dusty * 0.5);
+	col *= shade;
+	col += crack_col * emit * (rim * 1.4 + dusty * 0.6);
 	COLOR = vec4(col, tex.a * smoothstep(0.0, 0.05, keep));
 }
