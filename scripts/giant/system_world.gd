@@ -8,12 +8,18 @@ extends Node2D
 ## обгоняют тебя, внешние отстают.
 ##
 ## Что делать с телом, решает его масса относительно твоей:
-## - мелочь (лёгкая) — съесть: прилив тянет её в задачу Хилла, у предела Роша
-##   тело вытягивается и рвётся на «нитку жемчуга» (крупные обломки) и
-##   пылевую струю (частицы газа); куски огибают тебя и падают вспышками;
-## - средние — праща: пролёт рядом бросает тело к звезде или прочь из
-##   системы, тебя отдачей толкает обратно;
-## - тяжелее тебя — опасность: тянут к себе, вырывают луны, срывают газ.
+## - мелочь (до 1/10 твоей массы) — захват: тело ложится на орбиту вокруг
+##   тебя и скручивается по спирали;
+## - крупное (до 1/1,4) — само падает на тебя, когда подлетаешь (тяготение
+##   взаимное), и его можно взять тараном: гигантский удар с разгона. Медленно
+##   подошёл — захват, как у мелочи, только спираль дольше;
+## - тяжелее — праща (бросает тело) или опасность: тянут к себе, вырывают
+##   луны, срывают газ.
+## А рвёт ли захваченное тело, решает его плотность, как в жизни. Предел Роша
+## у рыхлого и ледяного (кометы, груды обломков, газовая оболочка
+## мини-нептуна) — 2,5–2,8 радиуса гиганта, у камня — 1,7, у железа — ниже
+## облаков: железное тело не рвётся, а врезается целым. Мини-нептун сначала
+## теряет газовую оболочку, потом рвётся или врезается его ядро.
 ## Соперник, которого ты перерос, сливается с тобой.
 ## У каждого ядра своё население: лёд — кометы и ледяные миры, плотное —
 ## железные тела, тёмное — углеродные, горячее — лавовые миры у звезды.
@@ -22,7 +28,15 @@ signal body_eaten(b: Dictionary)
 
 const K_DRIFT := 0.12        # темп сдвига тел по орбитам (рад/с на единицу x^-1.5 − 1)
 const HILL_W := 0.35         # «время газа» задачи Хилла (как GasParticles.OMEGA)
-const ROCHE := 1.0           # предел Роша в радиусах Хилла: здесь тело рвётся
+# Предел Роша в радиусах гиганта по веществу (жидкое тело: 2,44·(ρ_пл/ρ_т)^⅓,
+# у Юпитера ρ 1,33): лёд ~1 г/см³ — 2,7; камень 3,3 — 1,8; железо 7,9 — 1,35,
+# а с прочностью ещё ниже. Рыхлые груды и кометы рвутся раньше всех.
+const ROCHE_R := {"ice": 2.5, "carbon": 2.1, "rock": 1.75, "lava": 1.65, "metal": 0.95, "gas": 2.0}
+const ROCHE_KIND := {"comet": 2.8, "rubble": 2.6, "trojan": 2.4, "irondwarf": 0.9, "icedwarf": 2.6}
+const ENVELOPE_R := 2.7      # здесь мини-нептун теряет газовую оболочку
+const ATTRACT := 60.0        # взаимное тяготение у края сферы Хилла, ед./с²
+const IMPACT_V := 330.0      # скорость сближения для гигантского удара, ед./с
+const BIG_RATIO := 1.4       # крупное: легче тебя хотя бы во столько раз
 const CAPTURE := 0.42        # куски ниже этого — упали в облака
 const EAT_RATIO := 0.1       # съесть можно тело легче этой доли твоей массы
 const MERGE_RATIO := 1.4     # соперника-гиганта — когда ты тяжелее во столько раз
@@ -38,6 +52,10 @@ const KINDS := {
 	"comet": {"name": "комета", "m": Vector2(0.01, 0.03), "rad": 9.0, "view": "comet", "ch": 1, "extra": 0.0008},
 	"embryo": {"name": "зародыш", "m": Vector2(0.6, 3.0), "rad": 34.0, "view": "embryo", "ch": 3, "extra": 0.004},
 	"superearth": {"name": "суперземля", "m": Vector2(4.0, 12.0), "rad": 48.0, "view": "embryo", "ch": 5, "extra": 0.008},
+	"binary": {"name": "двойная планетезималь", "m": Vector2(0.15, 0.6), "rad": 15.0, "view": "moon", "ch": 2, "extra": 0.0012},
+	"irondwarf": {"name": "железное ядро", "m": Vector2(0.05, 0.25), "rad": 15.0, "view": "moon", "ch": 2, "extra": 0.0014},
+	"icedwarf": {"name": "ледяной карлик", "m": Vector2(0.2, 0.9), "rad": 26.0, "view": "embryo", "ch": 2, "extra": 0.002},
+	"trojan": {"name": "троянец", "m": Vector2(0.03, 0.12), "rad": 12.0, "view": "moon", "ch": 1, "extra": 0.0005},
 	"minineptune": {"name": "мини-нептун", "m": Vector2(12.0, 28.0), "rad": 78.0, "view": "giant", "ch": 6, "extra": 0.015},
 	"rival": {"name": "гигант-соперник", "m": Vector2(40.0, 400.0), "rad": 0.0, "view": "giant", "ch": 12, "extra": 0.0},
 	"dwarf": {"name": "коричневый карлик", "m": Vector2(4500.0, 6500.0), "rad": 0.0, "view": "giant", "ch": 0, "extra": 0.0},
@@ -78,6 +96,8 @@ var _used := {}
 var _maps := {}              # палитра -> запечённая карта облаков
 var _flash_tex: GradientTexture2D
 var _flash_nodes: Array = []
+var _ring_list: Array = []   # кольца мини-нептунов этого кадра: задняя половина под телом, передняя поверх
+var _over := Node2D.new()    # поверх гиганта: огонь удара и ударная волна
 var _spawn_t := 4.0
 var _dwarf_t := 140.0
 var _said := {}
@@ -88,6 +108,9 @@ var _hit_cd := 0.0
 func _ready() -> void:
 	_rng.randomize()
 	_flash_tex = _make_flash_tex()
+	_over.z_index = 20
+	add_child(_over)
+	_over.draw.connect(_draw_rings)
 
 
 func setup() -> void:
@@ -99,6 +122,19 @@ func setup() -> void:
 	_spawn_rival(maxf(e * 12.0, 140.0) * _rng.randf_range(0.9, 1.4))
 	if _flavor() in ["giant_cold", "giant_hot"]:
 		_spawn_rival(maxf(e * 30.0, 300.0) * _rng.randf_range(0.9, 1.2))
+	_spawn_trojans()
+
+
+## Троянцы: рои в точках Лагранжа L4 и L5, на 60° впереди и позади тебя по
+## твоей же орбите. Сдвиг их не уносит: они ждут, пока ты к ним придёшь.
+func _spawn_trojans() -> void:
+	var o: float = stage.orbit
+	var n := 14 if _flavor() == "giant_cold" else 10
+	for side in [-1.0, 1.0]:
+		for i in n:
+			var a: float = float(stage.ang) + side * PI / 3.0 + _rng.randfn(0.0, 0.035)
+			var b := _add_body("trojan", o + _rng.randfn(0.0, 260.0), a, _material_at(o))
+			b.tag = "trojan"
 
 
 func bind(gas: GasParticles) -> void:
@@ -131,10 +167,18 @@ func _material_at(r: float) -> String:
 
 func _pick_kind(r: float) -> String:
 	var f := _flavor()
-	var w := {"rubble": 0.3, "planetesimal": 0.3, "embryo": 0.18, "superearth": 0.08, "minineptune": 0.03, "comet": 0.0}
+	var w := {"rubble": 0.24, "planetesimal": 0.22, "binary": 0.08, "irondwarf": 0.03, "icedwarf": 0.0,
+		"embryo": 0.16, "superearth": 0.08, "minineptune": 0.03, "comet": 0.0}
 	if r > GameData.SNOW_LINE:
 		w["comet"] = 0.18 * (2.2 if f == "giant_ice" else 1.0)
 		w["minineptune"] = 0.07 * (1.8 if f == "giant_ice" else 1.0)
+		w["icedwarf"] = 0.08 * (2.0 if f == "giant_ice" else 1.0)
+		w["irondwarf"] = 0.0
+	else:
+		# Железные ядра — осколки разбитых зародышей у звезды.
+		w["irondwarf"] *= 3.0 if f == "giant_dense" else 1.0
+	if f == "giant_dark":
+		w["binary"] *= 2.0
 	if f == "giant_hot" and r < GameData.HOT_ORBIT + 2500.0:
 		w["superearth"] = 0.16
 	if f == "giant_cold":
@@ -168,8 +212,11 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 	var mr: Vector2 = info["m"]
 	if m < 0.0:
 		m = _rng.randf_range(mr.x, mr.y)
-	if kind == "comet":
-		mat = "ice"
+	match kind:
+		"comet", "icedwarf":
+			mat = "ice"
+		"irondwarf":
+			mat = "metal"
 	var b := {
 		"id": _next_id, "kind": kind, "mat": mat, "m": m, "r": r, "a": a, "vr": 0.0,
 		"seed": _rng.randf() * 10.0, "spin": _rng.randf() * TAU,
@@ -181,6 +228,11 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 	if kind == "comet":
 		# Кометы падают с окраин к звезде по вытянутой орбите.
 		b["vr"] = -_rng.randf_range(90.0, 180.0)
+	if kind in ["superearth", "minineptune"] and _rng.randf() < 0.35:
+		# Своя луна: достанется тебе вместе с телом, если хватит поля.
+		b["sat"] = true
+	if kind == "minineptune" and _rng.randf() < (0.7 if _flavor() == "giant_ice" else 0.4):
+		b["rings"] = true
 	_next_id += 1
 	bodies.append(b)
 	return b
@@ -224,6 +276,8 @@ func rad_of(b: Dictionary) -> float:
 		return GameData.giant_body_r(float(b.m)) * 0.95
 	if k == "dwarf":
 		return GameData.giant_body_r(318.0) * 1.05  # карлики размером с Юпитер
+	if b.get("core", false):
+		k = "superearth"
 	return float(KINDS[k]["rad"]) * pow(float(b.m) / float((KINDS[k]["m"] as Vector2).x), 0.18)
 
 
@@ -247,7 +301,40 @@ func role(b: Dictionary) -> String:
 		return "danger" if m > e else "sling"
 	if m <= eat_limit():
 		return "food"
+	if m <= e / (BIG_RATIO - Skills.stat("giant_merge")):
+		return "big"
 	return "sling"
+
+
+## Предел Роша тела в радиусах Хилла (у тебя Хилл = 2,2 радиуса гиганта).
+func roche_h(b: Dictionary) -> float:
+	var rr: float = ROCHE_KIND.get(b.kind, ROCHE_R.get(b.mat, 1.8))
+	if b.kind == "minineptune" and not b.get("core", false):
+		rr = ENVELOPE_R
+	if b.kind == "rival":
+		rr = 2.4
+	# Навык прилива поднимает предел (как будто гигант плотнее).
+	return rr * pow(Skills.stat("giant_tidal"), 0.33) * _giant_r() / stage.hill()
+
+
+func _giant_r() -> float:
+	return stage.body.body_r * stage.body.inflate
+
+
+## Касание облаков, в радиусах Хилла.
+func contact_h(b: Dictionary) -> float:
+	return (_giant_r() + rad_of(b) * 0.8) / stage.hill()
+
+
+## Скорость тела в мире: сдвиг диска, радиальная и набранная тяготением.
+func _vel_of(b: Dictionary) -> Vector2:
+	var x := float(b.r) / float(stage.orbit)
+	var vt := -K_DRIFT * (pow(x, -1.5) - 1.0) * float(b.r)
+	return Vector2.from_angle(float(b.a) + PI * 0.5) * vt + Vector2.from_angle(float(b.a)) * float(b.vr) + (b.get("v", Vector2.ZERO) as Vector2)
+
+
+func _player_vel() -> Vector2:
+	return ((stage.vel + stage.kick) as Vector2).rotated(float(stage.ang))
 
 
 # --- Шаг ---
@@ -336,12 +423,26 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 	var ro := role(b)
 	if b.state == "gone":
 		return false
+	if ro in ["food", "big", "sling"] and b.kind != "rival":
+		_attract(b, delta, p2, gpos, d, h)
+		p2 = pos_of(b)
+		d = p2.distance_to(gpos)
 	match ro:
 		"food", "merge":
-			if d < (2.0 * h * reach if ro == "food" else h * 1.6 + rad_of(b)):
+			if d < (2.0 * h * reach if ro == "food" else h * 1.6 + rad_of(b)) and float(b.cd) <= 0.0:
 				_capture(b, gpos, h, orbit)
 				if b.state == "gone":
 					return false
+		"big":
+			var vrel := (_vel_of(b) - _player_vel()).length()
+			if d < _giant_r() + rad_of(b) * 0.8:
+				if vrel >= IMPACT_V * _impact_need():
+					_giant_impact(b, p2, vrel)
+					return false
+				_capture(b, gpos, h, orbit)
+			elif d < 1.6 * h and vrel < IMPACT_V * 0.75 and float(b.cd) <= 0.0:
+				# Подошёл медленно: тело ложится на орбиту, как мелочь.
+				_capture(b, gpos, h, orbit)
 		"sling":
 			if d < 2.2 * h + rad_of(b) and float(b.cd) <= 0.0:
 				_sling(b, p2, gpos)
@@ -349,6 +450,66 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		"danger":
 			_danger(b, delta, gpos, h)
 	return true
+
+
+## Механизм Хиллса: прилив разводит двойную. Одна половина остаётся у тебя,
+## вторая уносит лишнюю энергию и улетает быстро, как из пращи.
+func _split_binary(b: Dictionary) -> void:
+	var half := float(b.m) * 0.5
+	b.m = half
+	b.kind = "planetesimal"
+	var p := pos_of(b)
+	var gp: Vector2 = stage.body.position
+	var out: Vector2 = (p - gp).normalized().rotated(_rng.randf_range(-0.6, 0.6))
+	var o := _add_body("planetesimal", p.length(), p.angle(), b.mat, half)
+	o["v"] = out * _rng.randf_range(420.0, 560.0)
+	o["slung"] = true
+	o.cd = 6.0
+	o.vr = out.dot(p.normalized()) * 260.0
+	if not _said.has("hills"):
+		_said["hills"] = true
+		stage.hud.caption("Двойная разделилась", "прилив развёл пару: одна половина осталась у тебя, вторая улетела с лишней энергией. Так в жизни рождаются сверхбыстрые тела", 4.0)
+
+
+## Своя луна тела при захвате: твоё поле её удержит или выбросит.
+func _take_sat(b: Dictionary) -> void:
+	if not b.get("sat", false):
+		return
+	b.erase("sat")
+	if stage.moons < GameState.giant_moon_cap():
+		stage.moons += 1
+		stage.body.moons = stage.moons
+		stage.body.birth(stage.moons - 1, stage.body.to_local(pos_of(b)))
+		stage.hud.toast("Луна %s теперь твоя: перешла к тебе от тела" % stage.body.moon_name(stage.moons - 1), Color(0.85, 0.9, 1.0))
+	else:
+		stage.hud.toast("Его луну выбросило: твоё поле больше не держит", Color(0.75, 0.82, 0.95))
+
+
+## Тяготение взаимное: тело падает на тебя тем быстрее, чем ближе, а тебя
+## тянет к нему во столько раз слабее, во сколько оно легче.
+func _attract(b: Dictionary, delta: float, p: Vector2, gpos: Vector2, d: float, h: float) -> void:
+	var v: Vector2 = b.get("v", Vector2.ZERO)
+	if d < 4.0 * h:
+		var dir := (gpos - p) / maxf(d, 1.0)
+		var acc := ATTRACT * pow(h / maxf(d, h * 0.5), 2.0)
+		v += dir * acc * delta
+		var q := clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
+		if q > 0.02:
+			stage.kick += (-dir).rotated(-float(stage.ang)) * acc * q * delta
+	# Газ диска гасит набранную скорость.
+	v *= exp(-0.35 * delta)
+	if v.length_squared() < 1.0 and d > 4.0 * h:
+		b.erase("v")
+		return
+	b["v"] = v
+	var np := p + v * delta
+	b.r = np.length()
+	b.a = np.angle()
+
+
+## Сколько разгона нужно для удара: плотные тела надо бить сильнее.
+func _impact_need() -> float:
+	return 1.0 / sqrt(Skills.stat("giant_impact"))
 
 
 ## Тело попало в твою сферу Хилла: дальше его ведёт задача Хилла.
@@ -363,21 +524,24 @@ func _capture(b: Dictionary, gpos: Vector2, h: float, orbit: float) -> void:
 		b.state = "gone"
 		body_eaten.emit(b)
 		return
-	if b.kind in ["embryo", "planetesimal"] and stage.moons < GameState.giant_moon_cap() \
+	if b.kind in ["embryo", "planetesimal"] and stage.moons < GameState.giant_moon_cap() and role(b) == "food" \
 			and _rng.randf() < Skills.stat("giant_moon_grab") * (1.5 if _flavor() == "giant_dense" else 1.0):
 		b["moon"] = true
 		_capture(b, gpos, h, orbit)
 		return
+	if b.kind == "binary":
+		_split_binary(b)
+	_take_sat(b)
 	var loc: Vector2 = stage.body.to_local(pos_of(b))
-	var x := float(b.r) / orbit
-	var lvy := -K_DRIFT * (pow(x, -1.5) - 1.0) * float(b.r)   # локальная y — рост угла
+	var lv: Vector2 = _vel_of(b).rotated(-float(stage.ang))   # x — от звезды, y — рост угла
 	var s := h * HILL_W
-	b.h = Vector4(loc.x / h, -loc.y / h, float(b.vr) / s, -lvy / s)
+	b.h = Vector4(loc.x / h, -loc.y / h, lv.x / s, -lv.y / s)
+	b["q"] = clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
 	b.state = "captured"
 	b.t = 0.0
 	if not _said.has("roche"):
 		_said["roche"] = true
-		stage.hud.caption("Предел Роша", "прилив гиганта вытягивает тело и рвёт его на нитку обломков: куски огибают тебя и падают в облака", 4.0)
+		stage.hud.caption("Захват", "тело легло на орбиту вокруг тебя и скручивается по спирали. Рыхлое и ледяное рвёт приливом ещё над облаками, камень — у самых облаков, а железо врезается целым", 4.5)
 	if b.kind == "rival" and not _said.has("merge"):
 		_said["merge"] = true
 		stage.hud.caption("Слияние гигантов", "ты перерос соседа: он падает в тебя по спирали", 3.5)
@@ -389,23 +553,55 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	var steps := maxi(1, ceili(dt / 0.02))
 	var hh := dt / steps
 	var p: Vector4 = b.h
+	# Тяжёлое тело тормозится о диск дольше: спираль крупного — на пару оборотов.
+	var q: float = b.get("q", 0.0)
+	var fr := 0.9 / (1.0 + q) * (1.0 + 0.18 * float(b.t))
 	for k in steps:
-		p = GasParticles.hill_step(p, hh, g, 0.9)
-		# Трение о свой диск и прилив тянут тело к тебе, пока оно не порвётся.
+		p = GasParticles.hill_step(p, hh, g, fr)
+		# Трение о свой диск тянет тело к тебе по спирали.
 		var d := sqrt(p.x * p.x + p.y * p.y)
-		p.z -= p.x / maxf(d, 0.1) * 0.9 * hh
-		p.w -= p.y / maxf(d, 0.1) * 0.9 * hh
+		# Снаружи сферы Хилла прилив звезды тянет прочь: газ оболочки тормозит
+		# тело и не даёт ему уйти (захват трением о газ).
+		var hold := fr + maxf(3.0 * d - g / maxf(d * d, 0.05), 0.0) * 1.25 + 0.4
+		var ux := p.x / maxf(d, 0.1)
+		var uy := p.y / maxf(d, 0.1)
+		var vrad := p.z * ux + p.w * uy
+		if vrad > 0.0:
+			hold += vrad * 5.0 * smoothstep(0.6, 1.3, d)
+		p.z -= ux * hold * hh
+		p.w -= uy * hold * hh
+		# Орбита сжимается: тело отдаёт энергию газу и ложится всё ниже.
+		var shrink := 1.0 - (0.3 + 0.08 * float(b.t)) / (1.0 + q) * hh
+		p.x *= shrink
+		p.y *= shrink
 	b.h = p
 	var dist := sqrt(p.x * p.x + p.y * p.y)
-	var roche := ROCHE * (1.25 if b.kind == "rival" else 1.0)
-	b.stretch = smoothstep(roche * 1.8, roche, dist)
+	var roche := roche_h(b)
+	var touch := contact_h(b)
+	b.stretch = smoothstep(roche * 1.5, roche, dist) * (1.0 if roche > touch else 0.35)
 	b.t = float(b.t) + delta
 	# Мир помнит, где тело: для HUD и отрисовки.
 	var wp: Vector2 = stage.body.to_global(Vector2(p.x, -p.y) * h)
 	b.r = wp.length()
 	b.a = wp.angle()
-	if dist < roche or float(b.t) > 14.0:
+	if dist > 2.4:
+		# Ушло за сферу Хилла: снова свободное, со своей скоростью.
+		var s := h * HILL_W
+		b["v"] = (Vector2(p.z, -p.w) * s).rotated(float(stage.ang))
+		b.vr = 0.0
+		b.state = "free"
+		b.stretch = 0.0
+		b.cd = 4.0
+		return true
+	if b.kind == "minineptune" and not b.get("core", false) and dist < roche:
+		_strip_envelope(b, p, h)
+		return true
+	if roche > touch and dist < roche:
 		_tear(b, p, h)
+		return false
+	if dist < touch or float(b.t) > 24.0:
+		# Плотное тело прилив не рвёт: оно врезается целым.
+		_hit_whole(b, p, h)
 		return false
 	return true
 
@@ -435,19 +631,8 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	# несколько секунд, обратные падают сразу. Модель на Python: 4–7 с.
 	var vt := -tang * sqrt(gk / dist) * 0.95
 	p = Vector4(p.x, p.y, p.z * 0.2 + vt.x, p.w * 0.2 + vt.y)
-	var n := 28
-	var pts: Array[Vector4] = []
 	var stretch_len := rad * (2.5 + 2.0 * float(b.stretch))
-	for i in n:
-		var sv := float(i) / (n - 1) * 2.0 - 1.0
-		var q := Vector2(p.x, p.y) + axis * sv * stretch_len
-		var dv := axis * (sv * 0.12) - tang * sv * 0.1
-		pts.append(Vector4(q.x, q.y, p.z + dv.x, p.w + dv.y))
-	var alive := PackedByteArray()
-	alive.resize(n)
-	alive.fill(1)
-	_streams.append({"pts": pts, "alive": alive, "per": gain * share_dust / n, "pay": _pay_k(b), "col": col,
-		"seed": float(b.seed), "t": 0.0, "w": rad_of(b) * (3.6 if b.kind == "rival" else 3.0)})
+	_add_stream(p, axis, tang, stretch_len, 28, gain * share_dust, _pay_k(b), col, float(b.seed), rad_of(b) * (3.6 if b.kind == "rival" else 3.0))
 	# Поверх ленты — редкая мелкая пыль: искры на свету, без массы.
 	for i in 36:
 		var sv := _rng.randf_range(-1.0, 1.0)
@@ -470,6 +655,158 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	_reward(b, gain)
 
 
+## Лента струи: n контрольных точек вдоль оси, голова к тебе падает быстрее.
+func _add_stream(p: Vector4, axis: Vector2, tang: Vector2, stretch_len: float, n: int, mass: float, pay: float, col: Color, seed_v: float, w: float) -> void:
+	var pts: Array[Vector4] = []
+	for i in n:
+		var sv := float(i) / (n - 1) * 2.0 - 1.0
+		var q := Vector2(p.x, p.y) + axis * sv * stretch_len
+		var dv := axis * (sv * 0.12) - tang * sv * 0.1
+		pts.append(Vector4(q.x, q.y, p.z + dv.x, p.w + dv.y))
+	var alive := PackedByteArray()
+	alive.resize(n)
+	alive.fill(1)
+	_streams.append({"pts": pts, "alive": alive, "per": mass / n, "pay": pay, "col": col,
+		"seed": seed_v, "t": 0.0, "w": w})
+
+
+## Мини-нептун у предела Роша своей оболочки: газ срывает лентой, ядро
+## летит дальше по спирали (и рвётся или врезается уже как каменное/ледяное).
+func _strip_envelope(b: Dictionary, p: Vector4, h: float) -> void:
+	var env: float = float(b.m) * 0.7
+	var axis := Vector2(p.x, p.y).normalized()
+	var tang := axis.orthogonal()
+	var gk := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
+	var dist := maxf(Vector2(p.x, p.y).length(), 0.3)
+	var vt := -tang * sqrt(gk / dist) * 0.95
+	var sp := Vector4(p.x, p.y, p.z * 0.3 + vt.x, p.w * 0.3 + vt.y)
+	var col := (NEPTUNE_LOOK[0] as Color).lerp(NEPTUNE_LOOK[1], 0.3)
+	_add_stream(sp, axis, tang, rad_of(b) / h * 3.0, 28, env * 0.6, 1.2, col, float(b.seed) + 3.0, rad_of(b) * 3.4)
+	stage.earths += env * 0.4
+	stage.pay(env * 0.4 * 1.2)
+	b.m = float(b.m) - env
+	b["core"] = true
+	if b.get("rings", false):
+		# Кольца — лёд: их срывает вместе с оболочкой отдельной светлой лентой.
+		b.erase("rings")
+		_add_stream(sp, tang, axis, rad_of(b) / h * 4.0, 20, env * 0.05, 2.0, Color(0.9, 0.93, 0.97), float(b.seed) + 7.0, rad_of(b) * 1.6)
+	if b.mat == "gas":
+		b.mat = "ice" if float(b.r) > GameData.SNOW_LINE else "rock"
+	b.stretch = 0.0
+	stage.body.flash()
+	if not _said.has("envelope"):
+		_said["envelope"] = true
+		stage.hud.caption("Оболочку сорвало", "газ мини-нептуна рыхлый, и прилив срывает его первым. Осталось плотное ядро: оно ещё летит по спирали", 4.0)
+	else:
+		stage.hud.toast("Мини-нептун без оболочки: +%s масс Земли газа, ядро ещё летит" % String.num(env * 0.4, 1).replace(".", ","), col.lerp(Color.WHITE, 0.4))
+
+
+## Плотное тело дошло до облаков целым: огненный шар и шрам, без ленты.
+func _hit_whole(b: Dictionary, p: Vector4, h: float) -> void:
+	var gain := _gain(b)
+	stage.earths += gain
+	stage.pay(gain * _pay_k(b) * Skills.stat("giant_impact"))
+	var dir := Vector2(p.x, -p.y).normalized()
+	var r := _giant_r()
+	stage.body.scar(dir, rad_of(b) * 0.7)
+	stage.body.flash()
+	stage.body.flash()
+	stage.body.impact_heat = minf(stage.body.impact_heat + 0.25 * clampf(float(b.get("q", 0.05)) * 4.0, 0.2, 1.0), 1.0)
+	var at: Vector2 = stage.body.to_global(dir * r * 0.97)
+	_flashes.append({"p": at, "t": 0.0, "dur": 1.6, "size": r * 0.5 * clampf(rad_of(b) / 30.0, 0.5, 1.6), "col": Color(1.0, 0.8, 0.55)})
+	_composition_hit(b, 0.5)
+	_reward(b, gain, "hit")
+
+
+## Гигантский удар: таран с разгона. Вспышка, ударная волна по облакам,
+## выбитое вещество кольцом, раскалённая оболочка. Что ещё, решает вещество.
+func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
+	var loc: Vector2 = stage.body.to_local(wp)
+	var dir := loc.normalized()
+	var q := clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
+	var speed_bonus := clampf((vrel / IMPACT_V - 1.0) * 0.3, 0.0, 0.3)
+	var gain := _gain(b) * (1.0 + speed_bonus)
+	stage.earths += gain * 0.85
+	stage.pay(gain * 0.85 * _pay_k(b) * Skills.stat("giant_impact") * 1.3)
+	var r := _giant_r()
+	var h: float = stage.hill()
+	# Свет и волна: белое ядро вспышки, оранжевый шар и кольцо по облакам.
+	# Вспышки привязаны к гиганту (loc): он летит дальше, а огонь остаётся на нём.
+	var at := dir * r * 0.9
+	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 1.1, "size": r * 0.6, "col": Color(1.0, 0.97, 0.9)})
+	_flashes.append({"p": at, "loc": true, "t": 0.0, "dur": 3.2, "size": r * 1.3, "col": Color(1.0, 0.62, 0.32)})
+	_flashes.append({"p": at * 0.95, "loc": true, "t": 0.0, "dur": 3.4, "size": r * 1.7, "col": Color(1.0, 0.85, 0.7), "ring": true})
+	stage.body.scar(dir, rad_of(b) * 1.3)
+	for i in 6:
+		stage.body.flash()
+	stage.body.impact_heat = minf(stage.body.impact_heat + 0.45 + q, 1.0)
+	# Выбитое вещество: две ленты из точки удара, с прямым вращением —
+	# они обовьют тебя и упадут обратно позже.
+	var gk := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
+	var hd := Vector2(dir.x, -dir.y)
+	var tang := hd.orthogonal()
+	var col: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.85, 0.78, 0.66)
+	var hot_col := col.lerp(Color(1.0, 0.7, 0.45), 0.35)
+	for k in 2:
+		# Факел выброса: лента вдоль радиуса, внешний конец летит быстрее.
+		var side := 1.0 if k == 0 else -1.0
+		var ax := hd.rotated(side * 0.35)
+		var d0 := contact_h(b) * 1.1 + rad_of(b) / h * 1.2
+		var vt := -tang * sqrt(gk / d0) * (0.7 + 0.15 * k)
+		var sp := Vector4(ax.x * d0, ax.y * d0, vt.x + ax.x * 0.5, vt.y + ax.y * 0.5)
+		_add_stream(sp, ax, ax.orthogonal(), rad_of(b) / h * 3.0, 24, gain * 0.075, _pay_k(b), hot_col, float(b.seed) + k, rad_of(b) * 1.3)
+	# Брызги веером: мелкая раскалённая пыль без массы.
+	var gas: GasParticles = stage.body.gas
+	var c0 := hd * contact_h(b)
+	for i in 70:
+		var a := _rng.randfn(0.0, 0.55)
+		var vv := hd.rotated(a) * _rng.randf_range(0.6, 1.8) - tang * _rng.randf_range(0.2, 0.9)
+		gas.add(c0.x, c0.y, vv.x, vv.y, _rng.randf_range(0.008, 0.02), _rng.randf_range(0.5, 0.9), hot_col.lightened(0.2), -1)
+	# Отдача: тело приносит свой импульс.
+	var rel: Vector2 = (_vel_of(b) - _player_vel()).rotated(-float(stage.ang))
+	stage.kick += rel * q * 0.6
+	_take_sat(b)
+	var extra := _composition_hit(b, 1.0)
+	if stage.moons > 0 and _rng.randf() < 0.25 + 0.4 * q:
+		stage.moons -= 1
+		stage.body.moons = stage.moons
+		stage.body.steal(-loc * 6.0)
+		extra += " · удар выбил луну"
+	if OS.has_feature("mobile"):
+		Input.vibrate_handheld(220)
+	if not _said.has("impact"):
+		_said["impact"] = true
+		stage.hud.caption("Гигантский удар", "крупное тело с разгона: его масса твоя, оболочка раскалилась, выбитое вещество упадёт обратно", 4.0)
+	_reward(b, gain, "impact", extra)
+
+
+## Удар по веществу: у каждого состава свой след.
+func _composition_hit(b: Dictionary, k: float) -> String:
+	var f := _flavor()
+	match str(b.mat):
+		"carbon":
+			# Сажа расходится по облакам: гигант темнеет на минуту-другую.
+			stage.body.soot = minf(stage.body.soot + 0.6 * k, 1.0)
+			return " · сажа затянула облака"
+		"metal":
+			# Железо тонет к ядру: динамо крепче.
+			var add := 0.03 * k * (2.0 if f == "giant_dense" else 1.0)
+			GameState.giant["field_bonus"] = minf(float(GameState.giant.get("field_bonus", 0.0)) + add, 0.3)
+			return " · железо ушло к ядру, поле крепче"
+		"ice":
+			# Лёд испаряется в кольцо пара: из него соберётся луна.
+			stage.moon_prog += 0.6 * k * (1.5 if f == "giant_ice" else 1.0)
+			return " · лёд ушёл кольцом пара на луну"
+		"lava":
+			stage.body.impact_heat = minf(stage.body.impact_heat + 0.3 * k, 1.0)
+			stage.body.heat_hold = 2.0
+			return " · расплав: жар держится вдвое дольше"
+		"rock":
+			GameState.add_chondrules(int(round(3.0 * k)), stage.body.position)
+			return " · брызги расплава: хондры +%d" % int(round(3.0 * k))
+	return ""
+
+
 func _gain(b: Dictionary) -> float:
 	if b.kind == "rival":
 		return float(b.m)
@@ -487,7 +824,7 @@ func _pay_k(b: Dictionary) -> float:
 
 
 ## Награды за тело сразу, как его порвало: по веществу и ядру.
-func _reward(b: Dictionary, gain: float) -> void:
+func _reward(b: Dictionary, gain: float, how := "tear", more := "") -> void:
 	var info: Dictionary = KINDS[b.kind]
 	var ch: int = int(info["ch"])
 	var type := GameState.body_type()
@@ -513,11 +850,23 @@ func _reward(b: Dictionary, gain: float) -> void:
 			extra = " · сажа: пыль ×%s" % String.num(_pay_k(b), 1).replace(".", ",")
 		"lava":
 			extra = " · раскалённое"
+	if how == "hit":
+		# Целым врезалось: обломков-хондр меньше, чем при разрыве.
+		ch = ch / 2
 	if ch > 0:
 		GameState.add_chondrules(ch, stage.body.position)
 		extra += " · хондры +%d" % ch
-	var fem: bool = b.kind in ["comet", "planetesimal", "superearth"]
+	if how != "tear":
+		extra = more + extra
+	var fem: bool = b.kind in ["comet", "planetesimal", "superearth", "binary"]
 	var verb := ("Поглощён" if not fem else "Поглощена") if b.kind == "rival" else ("Разорвана" if fem else "Разорван")
+	var neut: bool = b.kind == "irondwarf"
+	if neut:
+		verb = "Разорвано"
+	if how == "hit":
+		verb = "Врезалось" if neut else ("Врезалась" if fem else "Врезался")
+	elif how == "impact":
+		verb = "Таран:"
 	var num := String.num(gain, 1 if gain >= 0.1 else 2).replace(".", ",")
 	stage.hud.toast("%s %s: +%s масс Земли%s" % [verb, info["name"], num, extra],
 		(MATS[b.mat]["col"] as Color).lerp(Color.WHITE, 0.5) if MATS.has(b.mat) else Color(1.0, 0.86, 0.7))
@@ -815,6 +1164,10 @@ func markers() -> Array:
 	var g: Vector2 = stage.body.position
 	var best := {}
 	var bd := INF
+	var big := {}
+	var bbig := INF
+	var troj := {}
+	var bt := INF
 	for b in bodies:
 		if b.state != "free" and b.state != "pass":
 			continue
@@ -824,13 +1177,25 @@ func markers() -> Array:
 			out.append({"p": pos_of(b), "col": Color(1.0, 0.4, 0.32), "text": KINDS[b.kind]["name"]})
 		elif ro == "merge":
 			out.append({"p": pos_of(b), "col": UiTheme.GOLD, "text": "слияние"})
+		elif ro == "big" and d < 7000.0:
+			var sb := d / sqrt(float(b.m))
+			if sb < bbig:
+				bbig = sb
+				big = b
+		elif b.kind == "trojan" and d < bt:
+			bt = d
+			troj = b
 		elif ro == "food" and float(b.m) > 0.4:
 			var score := d / sqrt(float(b.m))
 			if score < bd:
 				bd = score
 				best = b
-	if not best.is_empty():
+	if not best.is_empty() and best.kind != "trojan":
 		out.append({"p": pos_of(best), "col": Color(0.95, 0.85, 0.6), "text": KINDS[best.kind]["name"]})
+	if not big.is_empty():
+		out.append({"p": pos_of(big), "col": Color(1.0, 0.66, 0.36), "text": "таран: " + str(KINDS[big.kind]["name"])})
+	if not troj.is_empty() and bt > 2500.0:
+		out.append({"p": pos_of(troj), "col": Color(0.85, 0.9, 0.75), "text": "троянцы"})
 	for v in vortices:
 		out.append({"p": Vector2.from_angle(float(v.a)) * float(v.r), "col": Color(0.8, 0.7, 0.5), "text": "вихрь"})
 	return out
@@ -845,7 +1210,7 @@ func nearest_food() -> Vector2:
 		if b.state != "free":
 			continue
 		var ro := role(b)
-		if ro != "food" and ro != "merge":
+		if ro != "food" and ro != "merge" and ro != "big":
 			continue
 		var d := pos_of(b).distance_to(g) / pow(float(b.m) + 0.2, 0.3)
 		if d < bd:
@@ -955,6 +1320,7 @@ func _draw() -> void:
 		return
 	for k in _used.keys():
 		_used[k] = 0
+	_ring_list.clear()
 	var cam: Camera2D = stage.camera
 	var zoom: float = cam.zoom.x
 	var px := 1.0 / maxf(zoom, 0.001)
@@ -1033,6 +1399,8 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 	if b.mat == "lava":
 		heat = maxf(heat, 0.0)
 	var view: String = info["view"]
+	if b.get("core", false):
+		view = "embryo"
 	var min_px := {"moon": 5.0, "embryo": 8.0, "giant": 12.0, "comet": 3.0}
 	rad = maxf(rad, float(min_px.get(view, 3.0)) * px)
 	var role_s := role(b)
@@ -1040,13 +1408,26 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 		# Метка вокруг тяжёлого тела: красная — бойся, золотая — можно слиться.
 		var col := Color(1.0, 0.35, 0.28) if role_s == "danger" else UiTheme.GOLD
 		draw_arc(p, hill_of(b), 0.0, TAU, 96, Color(col, 0.08 + 0.1 * pulse), 2.0 * px, true)
+	elif role_s == "big" and b.state == "free":
+		# Крупное: оранжевая дуга, ярче, когда скорости хватает на таран.
+		var ok := (_vel_of(b) - _player_vel()).length() >= IMPACT_V * _impact_need()
+		draw_arc(p, rad * 1.9, 0.0, TAU, 64, Color(1.0, 0.62, 0.32, (0.35 + 0.3 * pulse) if ok else 0.14), (2.5 if ok else 1.5) * px, true)
+	if b.get("sat", false) and b.state == "free":
+		_draw_sat(b, p, rad, light, px)
 	match view:
 		"moon":
 			var pieces := int(info.get("pieces", 1))
+			if b.kind == "binary":
+				pieces = 2
 			for i in pieces:
 				var o := Vector2.ZERO
 				var rr := rad
-				if pieces > 1:
+				if b.kind == "binary":
+					# Пара кружит вокруг общего центра масс.
+					var ph := _time * 0.22 + float(b.seed)
+					o = Vector2.from_angle(ph) * rad * (1.1 if i == 0 else -1.5)
+					rr = rad * (0.8 if i == 0 else 0.6)
+				elif pieces > 1:
 					o = Vector2(sin(float(b.seed) + i * 2.4), cos(float(b.seed) * 1.3 + i * 1.7)) * rad * 2.6
 					rr = rad * (0.45 + 0.35 * fmod(i * 0.37, 1.0))
 				var mv := _view("moon") as MoonView
@@ -1063,7 +1444,7 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("spin", b.spin)
 			m.set_shader_parameter("tilt", b.tilt)
 			m.set_shader_parameter("seed", fmod(float(b.seed), 1.0))
-			var big: bool = b.kind == "superearth"
+			var big: bool = b.kind == "superearth" or b.get("core", false)
 			m.set_shader_parameter("magma", 0.85 if b.mat == "lava" else heat * 0.6)
 			m.set_shader_parameter("atmo", 0.55 if big else 0.1)
 			m.set_shader_parameter("veil", 0.8 if big and b.mat == "carbon" else 0.0)
@@ -1090,6 +1471,10 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 				look = RIVAL_LOOKS[int(b.look)]
 				key = "rv%d" % int(b.look)
 			m.set_shader_parameter("map", _map_for(key, look, 0.17 + 0.23 * int(b.look)))
+			if b.get("rings", false) and not b.get("core", false):
+				var rg := {"p": p, "r": rad, "a": float(b.seed) * 0.7, "light": light}
+				_ring_list.append(rg)
+				_draw_ring(self, rg, false)
 			m.set_shader_parameter("haze_col", Color(0.62, 0.74, 0.95) if b.kind != "dwarf" else Color(0.9, 0.35, 0.25))
 			m.set_shader_parameter("light_dir", light)
 			m.set_shader_parameter("spin", float(b.spin) * 3.0)
@@ -1112,6 +1497,14 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("bend", 0.25)
 			var mv := _view("moon") as MoonView
 			mv.put(p, maxf(rad * 0.6, 1.5 * px), 1, light, fmod(float(b.seed), 10.0), float(b.spin), 1.0, heat, 1.0)
+
+
+## Своя луна тела: маленький шар на орбите вокруг него.
+func _draw_sat(b: Dictionary, p: Vector2, rad: float, light: Vector2, px: float) -> void:
+	var ph := _time * 0.12 + float(b.seed) * 2.0
+	var o := Vector2(cos(ph), sin(ph) * 0.45).rotated(float(b.seed)) * rad * 2.8
+	var mv := _view("moon") as MoonView
+	mv.put(p + o, maxf(rad * 0.22, 2.5 * px), int(MATS[b.mat]["moon"]) if MATS.has(b.mat) else 0, light, fmod(float(b.seed) * 3.0, 10.0), float(b.spin), 1.0, 0.0, 1.0)
 
 
 ## Струи лентой: гладкая кривая через живые точки (Катмулл — Ром),
@@ -1190,26 +1583,60 @@ func _body_by_id(id: int) -> Dictionary:
 
 func _draw_flashes() -> void:
 	var used := 0
+	_over.queue_redraw()
 	for f in _flashes:
+		if f.get("ring", false):
+			continue
 		if used >= _flash_nodes.size():
 			var s := Sprite2D.new()
 			s.texture = _flash_tex
 			var mat := CanvasItemMaterial.new()
 			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 			s.material = mat
-			add_child(s)
+			_over.add_child(s)
 			_flash_nodes.append(s)
 		var spr: Sprite2D = _flash_nodes[used]
 		used += 1
 		var t := float(f.t)
 		spr.visible = true
-		spr.position = f.p
+		spr.position = stage.body.to_global(f.p) if f.get("loc", false) else f.p
 		var size: float = float(f.size) * (0.4 + 1.2 * sqrt(t))
 		spr.scale = Vector2.ONE * size * 2.0 / 128.0
 		var c: Color = f.col
 		spr.modulate = Color(c.r, c.g, c.b, (1.0 - t) * (1.0 - t))
 	for i in range(used, _flash_nodes.size()):
 		(_flash_nodes[i] as Sprite2D).visible = false
+
+
+## Кольца: эллипс из нескольких полос льда; задняя половина под телом.
+func _draw_ring(ci: CanvasItem, rg: Dictionary, front: bool) -> void:
+	var p: Vector2 = rg.p
+	var r: float = rg.r
+	var a: float = rg.a
+	ci.draw_set_transform(p, a, Vector2(1.0, 0.28))
+	var from := 0.0 if front else PI
+	var bands := [[1.35, 0.10, 0.35], [1.55, 0.16, 0.55], [1.78, 0.07, 0.25], [1.95, 0.12, 0.42], [2.15, 0.05, 0.18]]
+	for bd in bands:
+		var rr := r * float(bd[0])
+		var w := r * float(bd[1])
+		var c := Color(0.86, 0.84, 0.78, float(bd[2]))
+		ci.draw_arc(Vector2.ZERO, rr, from, from + PI, 48, c, w, true)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Ударная волна: кольцо бежит по облакам от точки удара и тает.
+func _draw_rings() -> void:
+	for rg in _ring_list:
+		_draw_ring(_over, rg, true)
+	for f in _flashes:
+		if not f.get("ring", false):
+			continue
+		var tr := float(f.t)
+		var rr := float(f.size) * (0.15 + 0.85 * sqrt(tr))
+		var cc: Color = f.col
+		var fp: Vector2 = stage.body.to_global(f.p) if f.get("loc", false) else f.p
+		_over.draw_arc(fp, rr, 0.0, TAU, 96, Color(cc, 0.55 * (1.0 - tr) * (1.0 - tr)), float(f.size) * 0.04 * (1.0 - 0.6 * tr), true)
+		_over.draw_arc(fp, rr * 0.86, 0.0, TAU, 96, Color(cc, 0.16 * (1.0 - tr)), float(f.size) * 0.1 * (1.0 - 0.5 * tr), true)
 
 
 static func _make_flash_tex() -> GradientTexture2D:

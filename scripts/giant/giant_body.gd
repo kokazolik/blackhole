@@ -18,6 +18,9 @@ var inflate := 1.0           # раздувание оболочки на вхо
 var flow := 0.5              # сколько газа падает сейчас, 0..1
 var field := 0.3
 var moons := 0
+var impact_heat := 0.0       # жар оболочки после гигантского удара, 0..1
+var heat_hold := 1.0         # во сколько раз дольше держится жар (расплав)
+var soot := 0.0              # сажа углеродного тела в облаках, 0..1
 var zoom := 0.3
 var sigma_at: Callable       # плотность газа по смещению от орбиты в радиусах Хилла
 
@@ -87,8 +90,14 @@ func _ready() -> void:
 
 ## Цвета полос по ядру; у самой звезды (hot до 1) облака раскаляются.
 func set_look(flavor: String, hot := 0.0) -> void:
-	var look: Array = GameData.GIANT_LOOK.get(flavor, GameData.GIANT_LOOK["giant_cold"])
+	var look: Array = (GameData.GIANT_LOOK.get(flavor, GameData.GIANT_LOOK["giant_cold"]) as Array).duplicate()
 	var burn: Array = GameData.GIANT_LOOK["giant_hot"]
+	# Удар раскаляет оболочку, как у звезды под боком; сажа темнит облака.
+	hot = maxf(hot, impact_heat)
+	if soot > 0.0:
+		var ash := Color(0.13, 0.11, 0.1)
+		for i in look.size():
+			look[i] = (look[i] as Color).lerp(ash, soot * (0.9 if i == 0 else 0.8))
 	_planet_mat.set_shader_parameter("zone_col", _muted((look[0] as Color).lerp(burn[0], hot * 0.6), 0.35))
 	_map_mat.set_shader_parameter("zone_col", _muted((look[0] as Color).lerp(burn[0], hot * 0.6), 0.35))
 	_planet_mat.set_shader_parameter("belt_col", _muted((look[1] as Color).lerp(burn[1], hot * 0.6), 0.3))
@@ -112,6 +121,10 @@ func flash() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_cpd_flash = maxf(_cpd_flash - delta * 0.8, 0.0)
+	impact_heat = maxf(impact_heat - delta * 0.035 / heat_hold, 0.0)
+	if impact_heat <= 0.0:
+		heat_hold = 1.0
+	soot = maxf(soot - delta * 0.012, 0.0)
 	var r := body_r * inflate
 	var q := r * 2.0 / 0.72  # тело — BODY (0.36) ширины квада
 	_planet.size = Vector2(q, q)

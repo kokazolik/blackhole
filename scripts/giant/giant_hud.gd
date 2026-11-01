@@ -336,7 +336,7 @@ func _draw_map() -> void:
 			var bx: float = (float(b.r) - lo) / (hi - lo) * s.x
 			if bx < 0.0 or bx > s.x:
 				continue
-			var bc := Color(1.0, 0.4, 0.32, 0.95) if role == "danger" else (UiTheme.GOLD if role == "merge" else (Color(0.95, 0.88, 0.7, 0.6) if role == "food" else Color(0.7, 0.8, 0.95, 0.6)))
+			var bc := Color(1.0, 0.4, 0.32, 0.95) if role == "danger" else (UiTheme.GOLD if role == "merge" else (Color(0.95, 0.88, 0.7, 0.6) if role == "food" else (Color(1.0, 0.62, 0.32, 0.85) if role == "big" else Color(0.7, 0.8, 0.95, 0.6))))
 			var by := top + h * (0.25 + 0.5 * fmod(float(b.seed), 1.0))
 			_map.draw_circle(Vector2(bx, by), 4.0 if b.kind in ["rival", "dwarf"] else 2.0, bc)
 	var px: float = (stage.orbit - lo) / (hi - lo) * s.x
