@@ -500,6 +500,10 @@ func _update_grain(r: float) -> void:
 		# Лавина: газ падает и сжимается — ядро под ним раскаляется до конца.
 		hot = maxf(hot, avalanche)
 		em.set_shader_parameter("magma", hot)
+		# Ветра по составу: у венеры сверхвращение, пар над льдом кипит,
+		# смог титана ленивый, у тяжёлого тела атмосфера беспокойнее.
+		var wind := {"venus": 2.2, "ice": 1.5, "titan": 0.6, "carbon": 0.85, "metal": 1.1}.get(ft, 1.0) as float
+		em.set_shader_parameter("wind", wind * (1.0 + 0.6 * bl + avalanche))
 		_update_cocoon(r * PEBBLE_SCALE * 0.36, ft)
 		em.set_shader_parameter("atmo", minf(atmo_k, 1.0))
 		em.set_shader_parameter("atmo_col", acol)

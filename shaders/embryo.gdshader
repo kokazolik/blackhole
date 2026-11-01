@@ -17,6 +17,17 @@ uniform float clouds = 0.0;       // 0..1: облака водяного пар�
 uniform float spin = 0.0;
 uniform float tilt = 0.45;
 uniform float seed = 0.37;
+uniform float wind = 1.0;         // скорость ветров атмосферы (у венеры сверхвращение, у льда кипение)
+
+// Атмосфера живая: ветер по широтам (экватор и средние широты с разной
+// скоростью) сносит дымку и облака вдоль параллелей, рисунок медленно
+// меняется сам. a — угол сноса, вокруг оси вращения тела.
+vec3 wind_shift(vec3 d, float t) {
+	float a = t * (1.0 + 0.7 * sin(d.y * 5.0 + seed * 3.0));
+	float c = cos(a);
+	float sn = sin(a);
+	return vec3(d.x * c - d.z * sn, d.y, d.x * sn + d.z * c);
+}
 
 const float BODY = 0.36;
 const float R_MAX = 1.38;
@@ -210,15 +221,28 @@ void fragment() {
 			col = mix(col * (1.0 - 0.6 * magma) * vec3(0.8, 0.75, 0.75), lava * 1.5, hot * 0.9);
 			col += vec3(1.0, 0.35, 0.08) * 0.08 * magma * (1.0 - wrap);
 		}
-		// Дымка на диске: к краю гуще, днём светится цветом атмосферы.
+		// Дымка на диске: к краю гуще, днём светится цветом атмосферы. Она
+		// течёт: ветер сносит её вдоль параллелей, плотность клубится, по
+		// дневной стороне тянутся светлые перистые полосы.
 		if (atmo > 0.0) {
+			float tw = TIME * 0.035 * wind;
+			vec3 dw = wind_shift(d, tw);
+			vec3 dq = vec3(dw.x * 2.2, dw.y * 6.0, dw.z * 2.2);
+			float flow = fbm(dq + vec3(fbm(dq * 0.6 + vec3(tw * 1.7, 0.0, seed * 4.0)) * 1.6) + vec3(0.0, 0.0, tw * 0.8));
 			float limb = pow(1.0 - nv.z, 2.0);
-			col = mix(col, atmo_col * star_light * (0.15 + 1.2 * wrap * wrap), clamp(limb * atmo * 0.9 + atmo * 0.08, 0.0, 1.0));
+			float hz = (limb * atmo * 0.9 + atmo * 0.08) * (0.65 + 0.7 * flow);
+			col = mix(col, atmo_col * star_light * (0.15 + 1.2 * wrap * wrap), clamp(hz, 0.0, 1.0));
+			float streak = smoothstep(0.56, 0.78, flow) * atmo * 0.4 * (1.0 - veil);
+			col = mix(col, mix(atmo_col, vec3(1.0), 0.45) * star_light * (0.05 + 1.1 * wrap * wrap), streak);
 		}
 		// Сплошные облака: поверхность скрыта, видны мягкие полосы и шевроны дымки.
 		if (veil > 0.0) {
-			float lat = d.y;
-			float band = fbm(vec3(d.x * 1.5, lat * 9.0, d.z * 1.5) + vec3(fbm(d * 2.0) * 1.5));
+			// Полосы облаков бегут по широтам каждая со своей скоростью,
+			// узор между ними клубится и медленно перестраивается.
+			float tv = TIME * 0.05 * wind;
+			vec3 dv = wind_shift(d, tv);
+			float lat = dv.y;
+			float band = fbm(vec3(dv.x * 1.5, lat * 9.0, dv.z * 1.5) + vec3(fbm(dv * 2.0 + vec3(0.0, tv * 0.6, 0.0)) * 1.5));
 			vec3 cloud = atmo_col * (0.78 + 0.32 * band);
 			float soft = smoothstep(-0.15, 0.9, dot(nv, L));
 			vec3 vc = cloud * star_light * (0.03 + 1.15 * soft) * (0.75 + 0.25 * pow(max(nv.z, 0.0), 0.4));
@@ -230,7 +254,10 @@ void fragment() {
 	}
 	// Атмосфера за краем диска: светящийся ободок со стороны звезды.
 	if (atmo > 0.0 && r > 1.0 - aa) {
-		float thick = 0.06 + 0.16 * atmo;
+		// Край атмосферы не циркульный: клубится и дышит по долготе.
+		float ang = atan(p.y, p.x);
+		float puff = fbm(vec3(cos(ang) * 2.5, sin(ang) * 2.5, TIME * 0.06 * wind + seed * 5.0));
+		float thick = (0.06 + 0.16 * atmo) * (0.75 + 0.55 * puff);
 		float x = (r - 1.0) / thick;
 		float halo = exp(-x * 3.0) * step(0.0, x + aa);
 		float lit = clamp(dot(normalize(p), light_dir) * 0.6 + 0.5, 0.0, 1.0);
