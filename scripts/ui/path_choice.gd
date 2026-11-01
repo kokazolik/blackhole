@@ -29,7 +29,7 @@ func _ready() -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)
 	center.add_child(box)
-	box.add_child(_line("Каким ты станешь?", UiTheme.FONT_SERIF_BOLD, 40, UiTheme.GOLD))
+	box.add_child(_line("Каким ты станешь?", UiTheme.FONT_HEAD, 29, UiTheme.GOLD))
 	box.add_child(_line("Газ диска рассеется через %d минут. Выбери путь — его уже не сменить." % roundi(GameData.GAS_TIME / 60.0),
 		UiTheme.FONT_SERIF_ITALIC, 20, UiTheme.PARCHMENT))
 	var row := HBoxContainer.new()
@@ -95,7 +95,7 @@ func _card(mat: ShaderMaterial, art_k: float, title: String, desc: String, rewar
 	art.custom_minimum_size = ART_SIZE if art_k >= 1.0 else Vector2.ONE * ART_SIZE.y * art_k / 0.72
 	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	frame.add_child(art)
-	v.add_child(_line(title, UiTheme.FONT_SERIF_BOLD, 32, UiTheme.GOLD))
+	v.add_child(_line(title, UiTheme.FONT_HEAD, 23, UiTheme.GOLD))
 	var d := _line(desc, UiTheme.FONT_SERIF_ITALIC, 18, UiTheme.PARCHMENT)
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	d.custom_minimum_size = Vector2(ART_SIZE.x, 100)

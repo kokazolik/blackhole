@@ -372,7 +372,7 @@ func _show_caption(title: String, subtitle: String) -> void:
 	_caption = box
 	$UI.add_child(box)
 	$UI.move_child(box, hud.get_index() + 1)  # под книгой и меню, не поверх них
-	for line in [[title, UiTheme.FONT_SERIF_BOLD, 30], [subtitle, UiTheme.FONT_SERIF_ITALIC, 22]]:
+	for line in [[title, UiTheme.FONT_HEAD, 22], [subtitle, UiTheme.FONT_SERIF_ITALIC, 22]]:
 		var l := Label.new()
 		l.text = line[0]
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

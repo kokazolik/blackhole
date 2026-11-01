@@ -335,8 +335,8 @@ func _build() -> void:
 	heading.offset_top = 22
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	heading.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	heading.add_theme_font_size_override("font_size", 32)
+	heading.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_HEAD, 3))
+	heading.add_theme_font_size_override("font_size", 22)
 	heading.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
 	heading.add_theme_color_override("font_outline_color", Color(0.1, 0.04, 0.0, 0.8))
 	heading.add_theme_constant_override("outline_size", 6)
@@ -347,8 +347,8 @@ func _build() -> void:
 	_info.add_child(text_box)
 
 	_info_title = Label.new()
-	_info_title.add_theme_font_size_override("font_size", 32)
-	_info_title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+	_info_title.add_theme_font_size_override("font_size", 24)
+	_info_title.add_theme_font_override("font", UiTheme.FONT_HEAD)
 	text_box.add_child(_info_title)
 	_info_desc = RichTextLabel.new()
 	_info_desc.bbcode_enabled = true
@@ -393,8 +393,8 @@ func _build() -> void:
 	_buy_button.add_child(_price_row)
 	_price_word = Label.new()
 	_price_word.text = "Изучить"
-	_price_word.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	_price_word.add_theme_font_size_override("font_size", 24)
+	_price_word.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_DISPLAY_MED, 2))
+	_price_word.add_theme_font_size_override("font_size", 17)
 	_price_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_price_row.add_child(_price_word)
 	var word_gap := Control.new()
@@ -599,8 +599,8 @@ func _refresh() -> void:
 		var node: Dictionary = Skills.nodes[_selected]
 		_info_title.text = node.title
 		# Длинное название уменьшается, чтобы влезть в панель.
-		var title_size := 32
-		while title_size > 22 and UiTheme.FONT_SERIF_BOLD.get_string_size(node.title, HORIZONTAL_ALIGNMENT_LEFT, -1, title_size).x > INFO_WIDTH - 60.0:
+		var title_size := 24
+		while title_size > 16 and UiTheme.FONT_HEAD.get_string_size(node.title, HORIZONTAL_ALIGNMENT_LEFT, -1, title_size).x > INFO_WIDTH - 60.0:
 			title_size -= 1
 		_info_title.add_theme_font_size_override("font_size", title_size)
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
@@ -641,8 +641,8 @@ func _refresh() -> void:
 			_buy_button.text = ""
 			_price_row.visible = true
 			# Чего не хватает, то красным. На тусклой кнопке цвета светлее, иначе не прочесть.
-			var short := Color(0.62, 0.12, 0.08) if not _buy_button.disabled else Color(1.0, 0.5, 0.4)
-			var ok := Color(0.28, 0.16, 0.04) if not _buy_button.disabled else Color(0.88, 0.82, 0.7)
+			var short := Color(1.0, 0.5, 0.4) if not _buy_button.disabled else Color(1.0, 0.45, 0.38, 0.85)
+			var ok := Color(1.0, 0.92, 0.8) if not _buy_button.disabled else Color(0.75, 0.76, 0.8)
 			_price_col = ok if GameState.currency >= Skills.cost(_selected) else short
 			_price_row.get_child(2).queue_redraw()
 			_price_word.add_theme_color_override("font_color", ok)

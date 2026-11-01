@@ -348,8 +348,8 @@ func _title(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	l.add_theme_font_size_override("font_size", 38)
+	l.add_theme_font_override("font", UiTheme.FONT_HEAD)
+	l.add_theme_font_size_override("font_size", 27)
 	l.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
 	_box.add_child(l)
 	return l

@@ -69,7 +69,7 @@ func _ready() -> void:
 	box.add_child(_icon)
 
 	box.add_child(_line("Концовка", UiTheme.FONT_SERIF_ITALIC, 20, Color(UiTheme.PARCHMENT, 0.7)))
-	box.add_child(_line(info["name"], UiTheme.FONT_SERIF_BOLD, 42, UiTheme.GOLD))
+	box.add_child(_line(info["name"], UiTheme.FONT_HEAD, 30, UiTheme.GOLD))
 	box.add_child(_line(info["desc"], UiTheme.FONT_SERIF_ITALIC, 21, UiTheme.PARCHMENT))
 
 	var core := "железное ядро %d%% массы" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
@@ -102,7 +102,7 @@ func _ready() -> void:
 	var legacy := "Наследие +%d" % gained
 	if gained > int(info["legacy"]):
 		legacy += " (новая концовка — вдвое)"
-	box.add_child(_line(legacy, UiTheme.FONT_SERIF_BOLD, 26, UiTheme.GOLD))
+	box.add_child(_line(legacy, UiTheme.FONT_HEAD, 19, UiTheme.GOLD))
 	box.add_child(_line("Всего наследия %d: звёздной пыли +%d%% в каждом новом забеге. Концовок открыто %d из %d." % [
 		GameState.legacy, roundi(GameState.legacy * GameData.LEGACY_BONUS * 100.0), GameState.endings_seen.size(), GameData.ENDINGS.size()],
 		UiTheme.FONT_SERIF_ITALIC, 19, UiTheme.PARCHMENT))

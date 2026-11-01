@@ -25,8 +25,8 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Упал в звезду" if GameState.burned_embryo else "Пылинка испарилась"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_font_override("font", UiTheme.FONT_HEAD)
+	title.add_theme_font_size_override("font_size", 29)
 	title.add_theme_color_override("font_color", Color(1.0, 0.72, 0.4))
 	box.add_child(title)
 

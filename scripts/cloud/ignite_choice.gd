@@ -25,7 +25,7 @@ func _ready() -> void:
 	box.offset_bottom = -24
 	box.add_theme_constant_override("separation", 10)
 	add_child(box)
-	box.add_child(_line("Ты звезда. Что дальше?", UiTheme.FONT_SERIF_BOLD, 34, UiTheme.GOLD))
+	box.add_child(_line("Ты звезда. Что дальше?", UiTheme.FONT_HEAD, 24, UiTheme.GOLD))
 	box.add_child(_line("Вокруг ещё крутится диск газа. Его можно отпустить или дожать.", UiTheme.FONT_SERIF_ITALIC, 19, UiTheme.PARCHMENT))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -46,7 +46,7 @@ func _card(title: String, desc: String, which: String, primary: bool) -> Control
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
 	panel.add_child(v)
-	v.add_child(_line(title, UiTheme.FONT_SERIF_BOLD, 28, UiTheme.GOLD))
+	v.add_child(_line(title, UiTheme.FONT_HEAD, 20, UiTheme.GOLD))
 	var d := _line(desc, UiTheme.FONT_SERIF_ITALIC, 18, UiTheme.PARCHMENT)
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	d.custom_minimum_size = Vector2(390, 96)

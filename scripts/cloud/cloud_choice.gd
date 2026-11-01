@@ -29,7 +29,7 @@ func _ready() -> void:
 	box.add_theme_constant_override("separation", 10)
 	center.add_child(box)
 	var bd := kind == "brown_dwarf"
-	box.add_child(_line("Дейтерий горит!" if bd else "Газ диска ушёл", UiTheme.FONT_SERIF_BOLD, 40, UiTheme.GOLD))
+	box.add_child(_line("Дейтерий горит!" if bd else "Газ диска ушёл", UiTheme.FONT_HEAD, 29, UiTheme.GOLD))
 	box.add_child(_line("Ты уже не планета. Можно остаться здесь, а можно стать звездой." if bd else "Ты тяжелее тысячи Земель. Можно остаться здесь, а можно попробовать стать звездой.",
 		UiTheme.FONT_SERIF_ITALIC, 20, UiTheme.PARCHMENT))
 	var row := HBoxContainer.new()
@@ -83,7 +83,7 @@ func _card(mat: ShaderMaterial, title: String, desc: String, reward: String, rou
 	frame.add_child(art)
 	if route == "cloud":
 		art.color = Color(0, 0, 0, 0)
-	v.add_child(_line(title, UiTheme.FONT_SERIF_BOLD, 28, UiTheme.GOLD))
+	v.add_child(_line(title, UiTheme.FONT_HEAD, 20, UiTheme.GOLD))
 	var d := _line(desc, UiTheme.FONT_SERIF_ITALIC, 18, UiTheme.PARCHMENT)
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	d.custom_minimum_size = Vector2(ART.x, 110)

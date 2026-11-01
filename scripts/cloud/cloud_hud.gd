@@ -84,7 +84,7 @@ func _ready() -> void:
 	top.add_theme_constant_override("separation", 4)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(top)
-	_title = _label(26, UiTheme.PARCHMENT, UiTheme.FONT_SERIF_BOLD)
+	_title = _label(19, UiTheme.PARCHMENT, UiTheme.FONT_HEAD)
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(_title)
 	_bar = Control.new()
@@ -196,7 +196,7 @@ func _ready() -> void:
 	_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_caption.modulate.a = 0.0
 	add_child(_caption)
-	_cap_title = _label(32, UiTheme.PARCHMENT, UiTheme.FONT_SERIF_BOLD)
+	_cap_title = _label(23, UiTheme.PARCHMENT, UiTheme.FONT_HEAD)
 	_cap_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_caption.add_child(_cap_title)
 	_cap_sub = _label(19, Color(UiTheme.PARCHMENT, 0.85), UiTheme.FONT_SERIF_ITALIC)

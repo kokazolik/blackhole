@@ -42,7 +42,7 @@ func _ready() -> void:
 	_box = VBoxContainer.new()
 	_box.add_theme_constant_override("separation", 14)
 	panel.add_child(_box)
-	_title = _line("", UiTheme.FONT_SERIF_BOLD, 38, UiTheme.GOLD)
+	_title = _line("", UiTheme.FONT_HEAD, 27, UiTheme.GOLD)
 	_box.add_child(_title)
 	_text = _line("", UiTheme.FONT_SERIF_ITALIC, 23, UiTheme.PARCHMENT)
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

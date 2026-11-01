@@ -87,8 +87,8 @@ func _build() -> void:
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(box)
 	_title = Label.new()
-	_title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	_title.add_theme_font_size_override("font_size", 30)
+	_title.add_theme_font_override("font", UiTheme.FONT_HEAD)
+	_title.add_theme_font_size_override("font_size", 22)
 	_title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.48))
 	box.add_child(_title)
 	_text = Label.new()
