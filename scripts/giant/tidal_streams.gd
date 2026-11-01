@@ -53,6 +53,7 @@ var _time := 0.0
 # горячим внутри (расплав лавы, тёплые недра камня, тлеющий углерод) — и
 # остывает на лету, мелочь быстрее. Ледяное и холодное — матовая пыль.
 # Вспыхивает лишь то, что входит в облака: короткий метеор у самого края.
+const MAX_DEBRIS := 6          # облаков обломков одновременно
 const K_DUST := 4.0           # как быстро газ подхватывает пылинку, 1/с
 const K_FRAG := 1.9
 const K_CHUNK := 1.25
@@ -589,6 +590,14 @@ func spawn_debris(from: Vector2, vel: Vector2, mass: float, pay: float, pal: Str
 	var R: float = world.stage.body.body_r * world.stage.body.inflate
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(seed_v * 7919.0) + 11
+	# Бюджет: одновременно не больше MAX_DEBRIS облаков. Старое облако
+	# досрочно уходит в гиганта (масса засчитывается), а новое при толпе
+	# рисуется скромнее — иначе вокруг копятся тысячи точек и всё лагает.
+	while debris.size() >= MAX_DEBRIS:
+		var old: Dictionary = debris.pop_front()
+		_sink(old, maxf(float(old.left), 0.0))
+		_free_debris(old)
+	var crowd := 1.0 / (1.0 + 0.35 * debris.size())
 	if not PALS.has(pal):
 		pal = "rock"
 	var heat_info: Array = HEAT.get(pal, HEAT["rock"])
@@ -598,7 +607,7 @@ func spawn_debris(from: Vector2, vel: Vector2, mass: float, pay: float, pal: Str
 	var d := {
 		"t": 0.0, "pal": pal, "seed": seed_v, "pay": pay, "R0": R, "r0": r0, "from": from, "rad": rad,
 		"hot": hot0, "hot_col": heat_info[0], "chunks": [], "frags": [], "scarred": false,
-		"g0": log(maxf(r0 - 0.9 * R, 1.0) / (0.1 * R)) / 11.0 * 0.6, "left": mass,
+		"g0": maxf(log(maxf(r0 - 0.9 * R, 0.2 * R) / (0.1 * R)) / 11.0 * 0.6, 0.1), "left": mass,
 		# Пыль — упакованные массивы: x, y, vx, vy, размер, жар, масса.
 		"dx": PackedFloat32Array(), "dy": PackedFloat32Array(), "dvx": PackedFloat32Array(), "dvy": PackedFloat32Array(),
 		"ds": PackedFloat32Array(), "dh": PackedFloat32Array(), "dm": PackedFloat32Array(), "dk": PackedFloat32Array(),
@@ -622,13 +631,13 @@ func spawn_debris(from: Vector2, vel: Vector2, mass: float, pay: float, pal: Str
 	if chunk_share > 0.0:
 		_debris_chunks(d, n, rad, m_chunks, snap, rng, stretch)
 	# Угловатые обломки: размер по степенному закону — мелких много, крупных мало.
-	var nf := int(opts.get("frags", 26))
+	var nf := maxi(int(float(opts.get("frags", 26)) * crowd), 2)
 	for i in nf:
 		var off := _blob(rng, rhat, rad * 0.9)
 		var sz := rad * (0.05 + 0.16 * pow(rng.randf(), 2.2))
 		(d.frags as Array).append(_new_frag(from + off, stretch.call(off) + _jit(rng, rad * 0.4), sz, m_frags / nf, hot0 * rng.randf_range(0.4, 1.0), rng))
 	# Пыль: сотни пылинок по всему диску тела.
-	var nd := int(opts.get("dust", 200))
+	var nd := maxi(int(float(opts.get("dust", 200)) * crowd), 12)
 	for i in nd:
 		var off := _blob(rng, rhat, rad)
 		_add_dust(d, from + off, stretch.call(off) + _jit(rng, rad * 0.6), m_dust / nd, hot0 * rng.randf_range(0.3, 1.0), rng)
@@ -719,6 +728,17 @@ func _gas_v(p: Vector2, R: float, g: float) -> Vector2:
 	return rh * vr + Vector2(rh.y, -rh.x) * (-DIR) * w * r
 
 
+## Шаг по орбите без «разбухания»: по касательной Эйлер уводит точку наружу,
+## поэтому радиус двигаем только радиальной скоростью.
+static func _move(p: Vector2, v: Vector2, dt: float) -> Vector2:
+	var r := p.length()
+	if r < 0.001:
+		return p + v * dt
+	var rh := p / r
+	var q := p + v * dt
+	return q.normalized() * (r + v.dot(rh) * dt)
+
+
 func _relax(p: Vector2, v: Vector2, k: float, R: float, g: float, dt: float) -> Vector2:
 	var vg := _gas_v(p, R, g)
 	return vg + (v - vg) * exp(-k * dt)
@@ -735,7 +755,9 @@ func _sink(d: Dictionary, m: float, mult := 1.0) -> void:
 func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 	d.t = float(d.t) + delta
 	var t: float = d.t
-	var g: float = d.g0
+	# Что задержалось, газ тянет вниз всё сильнее: через 10–20 с облако
+	# обломков гарантированно уходит в облака гиганта, не копится вокруг.
+	var g: float = float(d.g0) * (1.0 + maxf(t - 7.0, 0.0) * 0.45)
 	var steps := maxi(1, ceili(delta / 0.02))
 	var dt := delta / steps
 	var hot_col: Color = d.hot_col
@@ -752,7 +774,7 @@ func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 		var vv: Vector2 = ch.v
 		for i in steps:
 			vv = _relax(pp, vv, float(ch.k), R, g * 0.55, dt)
-			pp += vv * dt
+			pp = _move(pp, vv, dt)
 		ch.p = pp
 		ch.v = vv
 		var prog := clampf((float(d.r0) - pp.length()) / maxf(float(d.r0) - R, 1.0), 0.0, 1.0)
@@ -762,7 +784,7 @@ func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 			ch.er = er
 			# Что сточилось, то сыплется с куска: масса уходит в пыль и обломки.
 			var lost := float(ch.m) * der
-			ch.acc = float(ch.acc) + der * 40.0
+			ch.acc = float(ch.acc) + der * 40.0 / (1.0 + 0.35 * debris.size())
 			while float(ch.acc) >= 1.0:
 				ch.acc = float(ch.acc) - 1.0
 				var off := Vector2.from_angle(rng.randf() * TAU) * float(d.rad) * 0.3
@@ -798,7 +820,7 @@ func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 		var vv: Vector2 = f.v
 		for i in steps:
 			vv = _relax(pp, vv, float(f.k), R, g * 0.8 * float(f.g), dt)
-			pp += vv * dt
+			pp = _move(pp, vv, dt)
 		f.p = pp
 		f.v = vv
 		f.a = float(f.a) + float(f.spin) * delta
@@ -828,7 +850,7 @@ func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 		var vv := Vector2(dvx[i], dvy[i])
 		for s in steps:
 			vv = _relax(pp, vv, dkk[i], R, g * dg[i], dt)
-			pp += vv * dt
+			pp = _move(pp, vv, dt)
 		if pp.length() <= R:
 			sunk += dm[i]
 			dm[i] = -1.0
@@ -852,7 +874,7 @@ func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
 		# Пыль оседает в облаках: тёмная дымка там, где ушла голова облака.
 		d.scarred = true
 		world.stage.body.scar(first_sink.normalized(), float(d.rad) * 0.5)
-	if (alive == 0 and (d.frags as Array).is_empty() and not any) or t > 60.0:
+	if (alive == 0 and (d.frags as Array).is_empty() and not any) or t > 30.0:
 		_sink(d, maxf(float(d.left), 0.0))
 		return false
 	return true

@@ -44,7 +44,7 @@ const SLING := 380.0         # пинок пращи, ед./с
 const RADIAL_DRAG := 0.12    # газ гасит радиальную скорость тел
 const DEBRIS_BASE := 1000000 # номера учёта обломков в частицах
 const N_BODIES := 170
-const ERA_BODIES := [14, 70, 125, 170]   # сколько мелких тел в мире по эпохам
+const ERA_BODIES := [12, 40, 65, 90]   # сколько мелких тел в мире по эпохам
 
 # Виды тел: масса в массах Земли, видимый радиус, чем рисуется, что дают.
 const KINDS := {
@@ -674,7 +674,7 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	var pearls := clampi(6 + int(m * 2.0), 7, 14) if solid and not snap.is_empty() else 0
 	opts["snap"] = snap
 	opts["shards"] = pearls
-	if float(b.m) > 0.4 or b.kind in ["rival", "icedwarf", "superearth", "minineptune"]:
+	if (float(b.m) > 0.4 and float(b.m) > float(stage.earths) * 0.02) or b.kind in ["rival", "icedwarf", "superearth", "minineptune"]:
 		# Крупное тело ломается на глазах: камера подъезжает.
 		stage.focus(from * 0.6, 4.5, 0.9)
 	opts["rad"] = maxf(rad_of(b), 6.0 / maxf(stage.camera.zoom.x, 0.001))
@@ -684,11 +684,15 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 		# со скоростью тела в миг разрыва, без остановки.
 		var vel := Vector2(p.z, -p.w) * h * HILL_W
 		var flv := str(GameState.giant.get("flavor", ""))
-		var dopts := {"snap": snap, "chunks": clampi(3 + int(m * 1.2), 3, 8) if pearls > 0 else 0, "rad": opts["rad"],
+		# Сколько всего рисовать — по размеру тела рядом с тобой: мелочь
+		# (рой обломков, планетезималь) тонет тихой горсткой, крупное
+		# тело (зародыш, суперземля) рассыпается на глазах.
+		var qk := clampf(sqrt(m / maxf(float(stage.earths) * 0.1, 0.001)), 0.0, 1.0)
+		var dopts := {"snap": snap, "chunks": (clampi(2 + int(qk * 5.0), 2, 7) if qk > 0.25 else 0) if pearls > 0 else 0, "rad": opts["rad"],
 			# У звезды горячий гигант: пыль и так тёплая; в холодной зоне — нет.
 			"hot_k": 0.15 if flv == "giant_hot" else 0.0,
-			"frags": 18 if b.kind == "comet" else clampi(16 + int(m * 6.0), 18, 40),
-			"dust": 260 if b.kind == "comet" else clampi(150 + int(m * 40.0), 160, 320)}
+			"frags": roundi(lerpf(3.0, 28.0, qk)),
+			"dust": roundi(lerpf(25.0, 220.0, qk))}
 		var dpal := pal
 		if b.kind == "comet":
 			dpal = "ice"
