@@ -566,6 +566,26 @@ func apply_fps() -> void:
 	Engine.max_fps = 120 if fps_120 else 60
 
 
+## Подписи и сообщения о событиях — как обучение: каждое показывается
+## один раз за всю игру, потом не повторяется. Ключ — заголовок или первые
+## два слова сообщения (числа и имена лун не в счёт).
+func once(kind: String, text: String) -> bool:
+	var key := kind + ":" + _msg_key(text)
+	if key in tips_seen:
+		return false
+	tips_seen.append(key)
+	return true
+
+
+static func _msg_key(text: String) -> String:
+	var head := text.split(":")[0]
+	var words := head.strip_edges().split(" ", false)
+	var out := ""
+	for i in mini(words.size(), 2):
+		out += words[i].rstrip("!.,") + " "
+	return out.strip_edges().to_lower()
+
+
 func reset_run() -> void:
 	_reset_values()
 	currency_changed.emit(currency)

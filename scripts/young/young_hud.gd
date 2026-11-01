@@ -201,6 +201,8 @@ func _label(size: int, color: Color, font: Font) -> Label:
 
 
 func caption(title: String, sub: String, hold := 4.0) -> void:
+	if not GameState.once("cap", title):
+		return
 	_cap_title.text = title
 	_cap_sub.text = sub
 	var tw := _caption.create_tween()
@@ -210,6 +212,8 @@ func caption(title: String, sub: String, hold := 4.0) -> void:
 
 
 func toast(text: String, color := Color(1.0, 0.88, 0.6)) -> void:
+	if not GameState.once("toast", text):
+		return
 	_toast.text = text
 	_toast.add_theme_color_override("font_color", color)
 	var tw := _toast.create_tween()

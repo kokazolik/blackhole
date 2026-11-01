@@ -46,6 +46,7 @@ var _swarm_pos := Vector2.ZERO
 var _chance_t := -1.0  # второй шанс суперземли: секунд, чтобы нырнуть в гиганта
 var _collapse_t := -1.0  # финальный обвал гальки перед концовкой гиганта
 var _collapse_kind := ""
+var _to_giant := false  # лавина кончилась: ждём, пока экран затянет, и в гигант
 const COLLAPSE_TOTAL := PebbleField.COLLAPSE_TIME + 3.0   # обвал гальки и рост облака газа
 
 
@@ -356,6 +357,8 @@ func _on_combo(chain: int, multiplier: float) -> void:
 
 
 func _show_caption(title: String, subtitle: String) -> void:
+	if not GameState.once("cap", title):
+		return
 	var box := VBoxContainer.new()
 	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	box.offset_left = -400
@@ -495,6 +498,8 @@ func _check_embryo(delta: float) -> void:
 	if is_instance_valid(guide):
 		return  # Звездочёт рассказывает: время стоит
 	var e := GameState.earth_masses()
+	if _to_giant:
+		return
 	if _collapse_t >= 0.0:
 		# Лавина газа: кольцо гальки и всё вокруг обрушивается в тебя, потом — концовка.
 		_collapse_t -= delta
@@ -504,8 +509,13 @@ func _check_embryo(delta: float) -> void:
 		player.avalanche = clampf(1.0 - _collapse_t / COLLAPSE_TOTAL, 0.0, 1.0)
 		if _collapse_t <= 0.0:
 			_collapse_t = -1.0
-			GameState.start_giant(_collapse_kind, player.position.length())
+			_to_giant = true
 			# Не в чёрное: в тёплую мглу облака, из неё проступит этап гиганта.
+			# Этап переключаем, когда экран уже затянуло, иначе облако вокруг
+			# ядра гаснет и камера отъезжает прямо на глазах.
+			var kind := _collapse_kind
+			var at := player.position.length()
+			get_tree().create_timer(0.85, true).timeout.connect(func() -> void: GameState.start_giant(kind, at))
 			Fader.go(Fader.GIANT, 0.9, 1.8, Color(0.13, 0.07, 0.04))
 		return
 	if GameState.embryo_choice == "":

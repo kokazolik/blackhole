@@ -215,6 +215,12 @@ var _cap_queue: Array = []
 ## Большая подпись по центру: появляется и тает. Если на экране уже есть
 ## подпись, новая ждёт своей очереди, а не перебивает её на полуслове.
 func caption(title: String, sub: String, hold := 4.0) -> void:
+	if not GameState.once("cap", title):
+		return
+	_cap_show(title, sub, hold)
+
+
+func _cap_show(title: String, sub: String, hold: float) -> void:
 	if _cap_tw != null and _cap_tw.is_running():
 		if _cap_queue.size() < 3:
 			_cap_queue.append([title, sub, hold])
@@ -228,11 +234,13 @@ func caption(title: String, sub: String, hold := 4.0) -> void:
 	_cap_tw.finished.connect(func() -> void:
 		if not _cap_queue.is_empty():
 			var c: Array = _cap_queue.pop_front()
-			caption(c[0], c[1], c[2]))
+			_cap_show(c[0], c[1], c[2]))
 
 
 ## Короткое сообщение над гигантом.
 func toast(text: String, color := Color(1.0, 0.88, 0.6)) -> void:
+	if not GameState.once("toast", text):
+		return
 	_toast.text = text
 	_toast.add_theme_color_override("font_color", color)
 	var tw := _toast.create_tween()
