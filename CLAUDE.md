@@ -44,7 +44,8 @@ giant_cold, giant_ice, giant_dark, giant_dense, giant_hot.
 
 ## 4. Сборка (каждый раз одинаково)
 
-1. `export_presets.cfg`: поднять `version/code` и `version/name`.
+1. `export_presets.cfg`: поднять `version/code` и `version/name`; то же число в
+   `project.godot` `config/version` (его показывает меню).
 2. `package/signed=false`, `mv _bot /tmp/_bot_keep`.
 3. `HOME=/root timeout 300 godot --headless --import`.
 4. `godot --headless --export-release Android build/u.apk`.
@@ -233,6 +234,20 @@ merge_*, migrate, water и др.), карточка их молча пропус
 «Планетезималь и зародыш», «Газовый гигант», «Облако»; на гиганте и в облаке
 группа своего этапа в «Моих параметрах» сверху. Бот giant_bot: stats.
 Урок: новый параметр навыка — сразу строка в StatInfo.INFO.
+
+0.99.42: новое главное меню (scripts/ui/main_menu.gd): живой фон шейдером
+shaders/menu_bg.gdshader — наклонный протопланетный диск, вращение по Кеплеру
+(ω∝r^-1.5), щели с растущей планетой (как HL Тельца), ближняя половина гасит
+звезду, туманность и мерцающие звёзды, дрейф камеры. Кнопки: Продолжить (под
+ней где тело сейчас), Новая игра, Коллекция тел N/29, Пролог, Плавность, Выход;
+внизу наследие. Версия в project.godot (config/version) теперь поднимать вместе
+с export_presets. Коллекция тел (scripts/ui/collection_screen.gd,
+scripts/data/collection_data.gd, scripts/ui/body_art.gd): дерево от пылинки
+вниз — этапы и 29 концовок; открытое — тело шейдером (как на экране концовки),
+закрытое — чёрный силуэт с «?»; тап — карточка: описание или как получить.
+Тянется пальцем. GameState.stages_seen (mark_stages в save_game; старые
+сохранения — по endings_seen). Кнопка коллекции и в паузе.
+Бот _bot/menu_bot.gd: seen, legacy, coll, scroll, sel, shots, t. giant_bot: pausecoll.
 
 Открыто:
 - [ ] Живая проверка на телефоне: гигант, молодая планета, облако (баланс по ботам).

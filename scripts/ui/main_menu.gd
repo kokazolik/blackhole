@@ -1,11 +1,14 @@
 extends Control
-## Главное меню: расписная картина молодой звезды с диском, название и кнопки.
-## Картина медленно «дышит» (приближение и сдвиг), по ней плывут золотые пылинки.
+## Главное меню: живой протопланетный диск шейдером (menu_bg.gdshader) —
+## газ вращается по Кеплеру, в щелях растут планеты, звезда дышит; по нему
+## плывут пылинки. Слева название и кнопки, коллекция тел — отдельным листом.
 
-const BG := preload("res://assets/intro/menu.png")
-const MOTES := 46
+const MOTES := 40
 
-var _bg: TextureRect
+var _bg: ColorRect
+var _collection: CollectionScreen
+var _column: VBoxContainer
+var _leg: Label
 var _motes_layer: Control
 var _motes: Array = []
 var _time := 0.0
@@ -26,11 +29,12 @@ func _build() -> void:
 	under.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(under)
 
-	_bg = TextureRect.new()
-	_bg.texture = BG
-	_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_bg = ColorRect.new()
+	_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bm := ShaderMaterial.new()
+	bm.shader = preload("res://shaders/menu_bg.gdshader")
+	_bg.material = bm
 	add_child(_bg)
 
 	_motes_layer = Control.new()
@@ -46,12 +50,13 @@ func _build() -> void:
 	var column := VBoxContainer.new()
 	column.anchor_top = 0.0
 	column.anchor_bottom = 1.0
-	column.offset_left = 80
+	column.offset_left = 72
 	column.offset_right = 560
-	column.offset_top = 60
-	column.offset_bottom = -40
-	column.add_theme_constant_override("separation", 14)
+	column.offset_top = 44
+	column.offset_bottom = -24
+	column.add_theme_constant_override("separation", 10)
 	add_child(column)
+	_column = column
 
 	var title := Label.new()
 	title.text = "От пылинки"
@@ -68,17 +73,56 @@ func _build() -> void:
 	subtitle.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.75))
 	column.add_child(subtitle)
 
-	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 30)
-	column.add_child(gap)
+	# Тонкая золотая черта с ромбом под названием.
+	var rule := Control.new()
+	rule.custom_minimum_size = Vector2(0, 26)
+	rule.draw.connect(func() -> void:
+		var y := 13.0
+		rule.draw_line(Vector2(0, y), Vector2(150, y), Color(1.0, 0.82, 0.5, 0.55), 1.5, true)
+		rule.draw_line(Vector2(178, y), Vector2(330, y), Color(1.0, 0.82, 0.5, 0.55), 1.5, true)
+		var c := Vector2(164, y)
+		rule.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -6), c + Vector2(6, 0), c + Vector2(0, 6), c + Vector2(-6, 0)]), Color(1.0, 0.84, 0.5, 0.9)))
+	column.add_child(rule)
 
 	var progress := GameState.has_progress()
 	if progress:
 		_add_button(column, "Продолжить путь", true, _continue)
+		column.add_child(_small(_where_now(), Color(0.7, 0.86, 1.0, 0.85)))
 	_add_button(column, "Новая игра", not progress, _new_game)
+	var n_end := 0
+	for e in CollectionData.ENDING_NODES:
+		if e in GameState.endings_seen:
+			n_end += 1
+	_add_button(column, "Коллекция тел  %d / %d" % [n_end, CollectionData.ENDING_NODES.size()], false, _open_collection)
 	_add_button(column, "Пролог", false, func(): _open_prologue(false))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	column.add_child(row)
+	var fps := _add_button(row, "", false, func(): pass)
+	fps.custom_minimum_size = Vector2(240, 54)
+	var fps_text := func() -> void: fps.text = "Плавность: %d" % (120 if GameState.fps_120 else 60)
+	fps_text.call()
+	fps.pressed.connect(func() -> void:
+		GameState.fps_120 = not GameState.fps_120
+		GameState.apply_fps()
+		GameState.save_game()
+		fps_text.call())
 	if OS.get_name() != "Web":
-		_add_button(column, "Выход", false, func(): get_tree().quit())
+		var quit := _add_button(row, "Выход", false, func(): get_tree().quit())
+		quit.custom_minimum_size = Vector2(130, 54)
+
+	# Внизу слева — что уже унесено с собой из прошлых забегов.
+	if GameState.legacy > 0:
+		var leg := _small("Наследие %d · звёздной пыли +%d%% в каждом забеге" % [GameState.legacy,
+			roundi(GameState.legacy * GameData.LEGACY_BONUS * 100.0)], Color(1.0, 0.84, 0.5, 0.75))
+		leg.anchor_top = 1.0
+		leg.anchor_bottom = 1.0
+		leg.offset_left = 74
+		leg.offset_right = 700
+		leg.offset_top = -40
+		leg.offset_bottom = -14
+		add_child(leg)
+		_leg = leg
 
 	var version := Label.new()
 	version.text = "версия " + str(ProjectSettings.get_setting("application/config/version", ""))
@@ -123,6 +167,45 @@ func _add_button(parent: Control, text: String, primary: bool, action: Callable)
 	b.pressed.connect(action)
 	parent.add_child(b)
 	return b
+
+
+func _small(text: String, col: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
+	l.add_theme_font_size_override("font_size", 19)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.02, 0.7))
+	l.add_theme_constant_override("outline_size", 4)
+	return l
+
+
+## Где сейчас тело: под кнопкой «Продолжить».
+func _where_now() -> String:
+	if GameState.is_cloud():
+		return "сейчас: облако · %s" % GameData.format_star_mass(float(GameState.cloud.get("mj", 13.0)))
+	if GameState.is_giant():
+		return "сейчас: газовый гигант · %d масс Земли" % roundi(float(GameState.giant.get("e", 10.0)))
+	if GameState.is_young():
+		return "сейчас: молодая планета"
+	var st: Dictionary = GameData.STAGES[clampi(GameState.stage, 0, GameData.STAGES.size() - 1)]
+	return "сейчас: %s · %s" % [str(st["name"]).to_lower(), GameData.format_size(GameState.mass)]
+
+
+func _open_collection() -> void:
+	if _collection != null:
+		return
+	_collection = CollectionScreen.new()
+	# Меню под листом прячем: буквы не должны просвечивать сквозь дерево.
+	_column.visible = false
+	if _leg != null:
+		_leg.visible = false
+	_collection.closed.connect(func() -> void:
+		_column.visible = true
+		if _leg != null:
+			_leg.visible = true
+		_collection = null)
+	add_child(_collection)
 
 
 func _continue() -> void:
@@ -202,10 +285,10 @@ func _new_mote(anywhere: bool) -> Dictionary:
 
 func _process(delta: float) -> void:
 	_time += delta
-	# Картина медленно приближается и плывёт: как будто мы тоже летим.
-	var k := 1.06 + 0.03 * sin(_time * 0.08)
-	_bg.size = size * k
-	_bg.position = -(size * (k - 1.0)) * 0.5 + Vector2(sin(_time * 0.05) * 14.0, cos(_time * 0.04) * 8.0)
+	var s := size if size.x > 0 else Vector2(1280, 720)
+	(_bg.material as ShaderMaterial).set_shader_parameter("aspect", Vector2(s.x / s.y, 1.0))
+	# Звезда справа, на трети высоты ниже центра: место для заголовка слева.
+	(_bg.material as ShaderMaterial).set_shader_parameter("center", Vector2(s.x / s.y * 0.66, 0.55))
 	for i in _motes.size():
 		var m: Dictionary = _motes[i]
 		m.pos += m.vel * delta
@@ -217,11 +300,14 @@ func _process(delta: float) -> void:
 func _draw_motes() -> void:
 	for m in _motes:
 		var tw := 0.5 + 0.5 * sin(_time * 2.0 + m.phase)
-		var c := Color(1.0, 0.82, 0.5, 0.35 + 0.5 * tw)
-		_motes_layer.draw_circle(m.pos, m.r * 3.0, Color(c, c.a * 0.15))
-		_motes_layer.draw_circle(m.pos, m.r, c)
+		# Матовые пылинки, подсвеченные звездой: без ярких шаров.
+		var c := Color(1.0, 0.86, 0.66, 0.18 + 0.3 * tw)
+		_motes_layer.draw_circle(m.pos, m.r * 0.8, c)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if _collection != null:
+			_collection.close()
+			return
 		get_tree().quit()

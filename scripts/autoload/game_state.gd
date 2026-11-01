@@ -54,6 +54,7 @@ var ending := ""         # чем кончился забег (GameData.ENDINGS)
 # Не сбрасываются вместе с забегом: наследие прошлых концовок.
 var legacy := 0
 var endings_seen: Array = []
+var stages_seen: Array = []   # где уже побывал за все забеги (коллекция): dust … cloud
 ## Этап газового гиганта: flavor (гигант по ядру), e (массы Земли), r (орбита),
 ## gas (сколько секунд газа осталось), sigma (плотность газа по радиусу),
 ## moons, moon_prog. Пусто — этап не начался.
@@ -462,9 +463,29 @@ func set_skill_level(id: String, level: int) -> void:
 	skills_changed.emit()
 
 
+## Этапы, где тело сейчас (и всё, что было до него): для коллекции.
+func mark_stages() -> void:
+	var keys := ["dust", "pebble", "boulder", "plsim", "embryo"]
+	for i in mini(stage, 4) + 1:
+		_see_stage(keys[i])
+	if is_giant():
+		_see_stage("giant")
+	if is_young():
+		_see_stage("young")
+	if is_cloud():
+		_see_stage("giant")
+		_see_stage("cloud")
+
+
+func _see_stage(key: String) -> void:
+	if not key in stages_seen:
+		stages_seen.append(key)
+
+
 func save_game() -> void:
 	if burned_up:
 		_reset_values()  # закрыли игру во время гибели: начнём заново
+	mark_stages()
 	var data := {
 		"version": SAVE_VERSION,
 		"currency": currency,
@@ -494,6 +515,7 @@ func save_game() -> void:
 		"ending": ending,
 		"legacy": legacy,
 		"endings_seen": endings_seen,
+		"stages_seen": stages_seen,
 		"giant": giant,
 		"young": young,
 		"cloud": cloud,
@@ -537,6 +559,7 @@ func load_game() -> void:
 	ending = str(data.get("ending", ""))
 	legacy = int(data.get("legacy", 0))
 	endings_seen = Array(data.get("endings_seen", []))
+	stages_seen = Array(data.get("stages_seen", []))
 	giant = Dictionary(data.get("giant", {}))
 	young = Dictionary(data.get("young", {}))
 	cloud = Dictionary(data.get("cloud", {}))
@@ -544,6 +567,11 @@ func load_game() -> void:
 	tree_seen = Array(data.tree_seen) if data.has("tree_seen") else null
 	mass = maxf(GameData.DEATH_MASS * 2.0, float(data.get("mass", 1.0)))
 	stage = maxi(stage, GameData.stage_index(mass))
+	# Старые сохранения: где был — видно по открытым концовкам.
+	for e in endings_seen:
+		for k in CollectionData.stages_for(str(e)):
+			_see_stage(k)
+	mark_stages()
 	for key in data.get("materials", {}):
 		materials[key] = float(data.materials[key])
 	for key in data.get("skills", {}):

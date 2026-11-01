@@ -64,6 +64,11 @@ func _show_main() -> void:
 	_note("Пылинка ждёт. Звезда тоже подождёт.")
 	_button("Продолжить", true, close)
 	_button("Карта путей", false, _show_paths)
+	_button("Коллекция тел", false, func() -> void:
+		var col := CollectionScreen.new()
+		_panel.visible = false
+		col.closed.connect(func() -> void: _panel.visible = true)
+		add_child(col))
 	_button("Главное меню", false, func(): Fader.go(Fader.MENU))
 	_button("Плавность: 120 кадров" if GameState.fps_120 else "Плавность: 60 кадров", false, func():
 		GameState.fps_120 = not GameState.fps_120
