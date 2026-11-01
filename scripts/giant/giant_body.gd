@@ -15,7 +15,7 @@ var body_r := 200.0
 var hill := 440.0
 var reach := 1.0
 var inflate := 1.0           # раздувание оболочки на входе в этап
-var envelope := 1.0          # сколько газа осело на ядро: 0 — голое ядро, 1 — сплошные облака
+var envelope := 1.0          # путь оболочки: 0 — рыхлое облако до сферы Хилла, 1 — остывший гигант с поясами
 const CORE_R := 0.3          # радиус ядра в долях полного радиуса гиганта
 var flow := 0.5              # сколько газа падает сейчас, 0..1
 var field := 0.3
@@ -29,6 +29,10 @@ var sigma_at: Callable       # плотность газа по смещению
 var _planet := ColorRect.new()
 var _core := ColorRect.new()       # твёрдое ядро твоего состава, видно, пока оболочка тонкая
 var _core_mat := ShaderMaterial.new()
+var _cocoon := ColorRect.new()     # рыхлая оболочка: облако газа вокруг ядра, потом сжимается
+var _cocoon_mat := ShaderMaterial.new()
+var _dust_k := 1.0                 # пыльность оболочки по составу ядра
+var _temp_add := 0.0               # насколько горячее/холоднее её недра, тыс. К
 var _cpd := ColorRect.new()
 var _map_vp := SubViewport.new()   # карта облаков: печётся раз в BAKE_EVERY
 var _map_mat := ShaderMaterial.new()
@@ -94,6 +98,13 @@ func _ready() -> void:
 	_planet.material = _planet_mat
 	_planet.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_planet)
+	_cocoon_mat.shader = preload("res://shaders/young_envelope.gdshader")
+	_cocoon_mat.set_shader_parameter("noise_tex", NoiseTex.get_tex())
+	_cocoon_mat.set_shader_parameter("seed", sd)
+	_cocoon.material = _cocoon_mat
+	_cocoon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cocoon.visible = false
+	add_child(_cocoon)
 	var moons_layer := Node2D.new()
 	moons_layer.draw.connect(_draw_moons.bind(moons_layer))
 	moons_layer.set_meta("moons", true)
@@ -165,10 +176,32 @@ func set_core(type: String, flavor: String) -> void:
 			veil_col = Color(0.8, 0.76, 0.7)
 		_:
 			veil_col = Color(0.84, 0.78, 0.68)   # камень: пыльная, песочная
+	# Оболочка по составу ядра: углерод и венера дают сажу и мглу (гуще,
+	# недра холоднее на вид), железо — горячее и чище, лёд — пар воды,
+	# пыли меньше, оболочка прозрачнее.
+	match type:
+		"carbon":
+			_dust_k = 1.45
+			_temp_add = -0.4
+		"venus", "titan":
+			_dust_k = 1.25
+			_temp_add = -0.1
+		"metal":
+			_dust_k = 1.1
+			_temp_add = 0.35
+		"ice":
+			# Водяной пар прозрачнее пыли: видно более горячие глубины.
+			_dust_k = 0.7
+			_temp_add = 0.1
+		"chondrite":
+			_dust_k = 1.15
+	# Ядро под горячей оболочкой само раскалено (лёд — до пара).
+	magma = maxf(magma, 0.3 if type in ["ice", "titan"] else 0.55)
 	if flavor == "giant_hot":
 		magma = minf(magma + 0.4, 0.95)
 		frost = 0.0
 		veil_col = veil_col.lerp(Color(1.0, 0.72, 0.45), 0.35)
+	_cocoon_mat.set_shader_parameter("dust_col", veil_col.lerp(Color(0.62, 0.52, 0.42), 0.4))
 	_core_mat.set_shader_parameter("style", style)
 	_core_mat.set_shader_parameter("magma", magma)
 	_core_mat.set_shader_parameter("frost", frost)
@@ -202,7 +235,8 @@ func _process(delta: float) -> void:
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
 	_planet_mat.set_shader_parameter("envelope", envelope)
-	_core.visible = envelope < 0.999
+	_update_young(r)
+	_core.visible = envelope < 0.5
 	if _core.visible:
 		var cq := body_r * CORE_R * 2.0 / 0.72
 		_core.size = Vector2(cq, cq)
@@ -239,7 +273,7 @@ func _process(delta: float) -> void:
 			scar(at.normalized(), r * 0.07)
 			var stg = get_parent()
 			if stg != null and stg.get("world") != null and stg.world.tides != null:
-				stg.world.tides.plume(at, r * 0.35, Color(0.32, 0.29, 0.26), _rng.randf() * 5.0, 3.6)
+				stg.world.tides.plume(at, r * 0.22, Color(0.32, 0.29, 0.26), _rng.randf() * 5.0, 3.6)
 		else:
 			keep.append(f)
 	_falling = keep
@@ -351,6 +385,33 @@ func _draw_moons(ci: Node2D) -> void:
 		var q := from.lerp(to, e) + (to - from).orthogonal().normalized() * sin(e * PI) * from.distance_to(to) * 0.2
 		_moon_ball(ci, q, r * 0.08, int(st.i), 1.0, 0.0, 1.0)
 	_draw_flashes(ci, r)
+
+
+## Молодой гигант. Сначала рыхлое облако до сферы Хилла, в глубине тлеет
+## ядро. Лавина газа — облако падает к ядру, густеет и раскаляется (пик
+## светимости сжатия), потом рассеивается: открывается горячий шар, который
+## остывает от жёлтого к тёмно-красному, и в нём выпадают облака.
+func _update_young(r: float) -> void:
+	var e := envelope
+	var young := 1.0 - smoothstep(0.42, 1.0, e)
+	_planet_mat.set_shader_parameter("young", young)
+	_planet_mat.set_shader_parameter("temp", 0.5 + (1.3 + _temp_add) * young)
+	var dens := _dust_k * (0.55 + 0.9 * smoothstep(0.1, 0.42, e)) * (1.0 - smoothstep(0.45, 0.72, e))
+	_cocoon.visible = dens > 0.002
+	if not _cocoon.visible:
+		return
+	var Q := hill * 0.9
+	_cocoon.size = Vector2(Q, Q) * 2.0
+	_cocoon.position = -_cocoon.size * 0.5
+	var k := smoothstep(0.12, 0.55, e)
+	_cocoon_mat.set_shader_parameter("r_out", lerpf(0.95, r * 1.2 / Q, k))
+	var rin := lerpf(body_r * CORE_R, r, smoothstep(0.15, 0.4, e))
+	_cocoon_mat.set_shader_parameter("r_in", rin / Q)
+	_cocoon_mat.set_shader_parameter("dens", dens)
+	var pk := exp(-pow((e - 0.42) / 0.14, 2.0))
+	_cocoon_mat.set_shader_parameter("glow", 0.6 + 1.0 * pk)
+	_cocoon_mat.set_shader_parameter("temp", 1.1 + _temp_add + 0.9 * pk)
+	_cocoon_mat.set_shader_parameter("spin", _time * 0.25)
 
 
 ## Тяжёлый сосед увёл крайнюю луну.

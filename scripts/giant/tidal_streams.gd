@@ -102,8 +102,9 @@ func _init_points(st: Dictionary, rad: float, R: float) -> void:
 		var sk := float(k) / (K - 1)
 		pr.append(r0 + (sk - 0.5) * 2.0 * rad * 1.4)
 		pt.append(float(st.th0) + rng.randfn(0.0, 0.004))
-		# Мелочь у головы тормозится сильнее, у хвоста — слабее.
-		pg.append(g0 * (0.75 + 0.5 * rng.randf()) * (1.2 - 0.4 * sk))
+		# Мелочь у головы тормозится сильнее, у хвоста — слабее. Плавно по
+		# нити: соседние пылинки летят почти одинаково, нить не рвётся в клочья.
+		pg.append(g0 * (1.12 - 0.24 * sk) * (1.0 + 0.06 * sin(sk * 7.0 + float(st.seed))))
 	st["pr"] = pr
 	st["pt"] = pt
 	st["pg"] = pg
@@ -339,7 +340,8 @@ func _shard_hit(st: Dictionary, sh: Dictionary, R: float) -> void:
 	var size := float(st.get("rad", 20.0)) * (1.0 - er) * 0.6
 	world.stage.body.scar(at.normalized(), size)
 	var smoke: Color = (PALS[st.pal] as Array)[0]
-	plume(at.normalized() * R * 0.97, clampf(R * 0.05 + size * 1.4, R * 0.05, R * 0.22), smoke.darkened(0.45), float(st.seed) + float(sh.k), 2.4)
+	# Шлейф у кометы 1994 года поднимался на ~3000 км: 4% радиуса Юпитера.
+	plume(at.normalized() * R * 0.97, clampf(R * 0.025 + size * 0.5, R * 0.03, R * 0.08), smoke.darkened(0.45), float(st.seed) + float(sh.k), 2.4)
 
 
 func _erode(st: Dictionary, sh: Dictionary) -> float:
@@ -431,6 +433,24 @@ func _build(st: Dictionary, R: float) -> void:
 			pts[k] = _path(st, u, R)
 			sink[k] = 1.0 - smoothstep(0.86, 1.0, _x(st, sk))
 			prog[k] = clampf(u, 0.0, 1.0)
+	# Утонувшие пылинки стягиваем к соседней живой: иначе лента тянет
+	# хорду от точки в облаках до живой пыли — линию поперёк гиганта.
+	if spiral:
+		var last := -1
+		for k in K:
+			if pr[k] > R:
+				last = k
+			elif last >= 0:
+				pts[k] = pts[last]
+		# Голова, утонувшая раньше любой живой пылинки, — к первой живой.
+		var first := -1
+		for k in K:
+			if pr[k] > R:
+				first = k
+				break
+		if first > 0:
+			for k in first:
+				pts[k] = pts[first]
 	var length := 0.0
 	for k in range(1, K):
 		length += pts[k].distance_to(pts[k - 1])
@@ -453,6 +473,7 @@ func _build(st: Dictionary, R: float) -> void:
 		# Нить узкая: поперёк её держит только разброс скоростей обломков.
 		var w: float = W * prof * ((0.55 + 0.25 * spread) if spiral else (1.0 + 0.9 * spread))
 		w *= lerpf(1.0, 0.6, uc) if spiral else lerpf(1.0, 0.8, uc)
+		w *= sink[k] if spiral else 1.0
 		var a := fade_in * smoothstep(1.0, 0.75, s) * smoothstep(0.0, 0.07, s) * sink[k] * thin
 		# Пыль вне атмосферы холодная. Чуть тлеет только то, что входит в
 		# облака (метеоры), а выброс удара остывает на взлёте.
@@ -464,14 +485,32 @@ func _build(st: Dictionary, R: float) -> void:
 		uvs[k * 2 + 1] = Vector2(s, 1.0)
 		cols[k * 2] = c
 		cols[k * 2 + 1] = c
-	var arr := []
-	arr.resize(Mesh.ARRAY_MAX)
-	arr[Mesh.ARRAY_VERTEX] = verts
-	arr[Mesh.ARRAY_TEX_UV] = uvs
-	arr[Mesh.ARRAY_COLOR] = cols
+	# Треугольники по отрезкам: отрезок длиннее доли радиуса не рисуем —
+	# иначе разошедшиеся пылинки соединяет прямая линия через гиганта.
+	var tv := PackedVector2Array()
+	var tu := PackedVector2Array()
+	var tc := PackedColorArray()
+	var max_seg := maxf(R * 0.35, W * 2.0)
+	for k in K - 1:
+		if pts[k].distance_to(pts[k + 1]) > max_seg:
+			continue
+		var i0 := k * 2
+		var i1 := k * 2 + 1
+		var i2 := k * 2 + 2
+		var i3 := k * 2 + 3
+		for idx in [i0, i1, i2, i1, i3, i2]:
+			tv.append(verts[idx])
+			tu.append(uvs[idx])
+			tc.append(cols[idx])
 	var mesh: ArrayMesh = (st.node as MeshInstance2D).mesh
 	mesh.clear_surfaces()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLE_STRIP, arr)
+	if tv.size() >= 3:
+		var arr := []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = tv
+		arr[Mesh.ARRAY_TEX_UV] = tu
+		arr[Mesh.ARRAY_COLOR] = tc
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	var mat := (st.node as MeshInstance2D).material as ShaderMaterial
 	var fs := PackedFloat32Array()
 	var fk := PackedFloat32Array()

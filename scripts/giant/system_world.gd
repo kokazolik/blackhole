@@ -48,14 +48,14 @@ const N_BODIES := 170
 # Виды тел: масса в массах Земли, видимый радиус, чем рисуется, что дают.
 const KINDS := {
 	"rubble": {"name": "рой обломков", "m": Vector2(0.02, 0.06), "rad": 14.0, "view": "moon", "ch": 0, "extra": 0.0004, "pieces": 5},
-	"planetesimal": {"name": "планетезималь", "m": Vector2(0.1, 0.35), "rad": 20.0, "view": "moon", "ch": 1, "extra": 0.001},
-	"comet": {"name": "комета", "m": Vector2(0.01, 0.03), "rad": 9.0, "view": "comet", "ch": 1, "extra": 0.0008},
-	"embryo": {"name": "зародыш", "m": Vector2(0.6, 3.0), "rad": 34.0, "view": "embryo", "ch": 3, "extra": 0.004},
+	"planetesimal": {"name": "планетезималь", "m": Vector2(0.1, 0.35), "rad": 15.0, "view": "moon", "ch": 1, "extra": 0.001},
+	"comet": {"name": "комета", "m": Vector2(0.01, 0.03), "rad": 6.0, "view": "comet", "ch": 1, "extra": 0.0008},
+	"embryo": {"name": "зародыш", "m": Vector2(0.6, 3.0), "rad": 27.0, "view": "embryo", "ch": 3, "extra": 0.004},
 	"superearth": {"name": "суперземля", "m": Vector2(4.0, 12.0), "rad": 48.0, "view": "embryo", "ch": 5, "extra": 0.008},
-	"binary": {"name": "двойная планетезималь", "m": Vector2(0.15, 0.6), "rad": 15.0, "view": "moon", "ch": 2, "extra": 0.0012},
-	"irondwarf": {"name": "железное ядро", "m": Vector2(0.05, 0.25), "rad": 15.0, "view": "moon", "ch": 2, "extra": 0.0014},
-	"icedwarf": {"name": "ледяной карлик", "m": Vector2(0.2, 0.9), "rad": 26.0, "view": "embryo", "ch": 2, "extra": 0.002},
-	"trojan": {"name": "троянец", "m": Vector2(0.03, 0.12), "rad": 12.0, "view": "moon", "ch": 1, "extra": 0.0005},
+	"binary": {"name": "двойная планетезималь", "m": Vector2(0.15, 0.6), "rad": 12.0, "view": "moon", "ch": 2, "extra": 0.0012},
+	"irondwarf": {"name": "железное ядро", "m": Vector2(0.05, 0.25), "rad": 11.0, "view": "moon", "ch": 2, "extra": 0.0014},
+	"icedwarf": {"name": "ледяной карлик", "m": Vector2(0.2, 0.9), "rad": 18.0, "view": "embryo", "ch": 2, "extra": 0.002},
+	"trojan": {"name": "троянец", "m": Vector2(0.03, 0.12), "rad": 9.0, "view": "moon", "ch": 1, "extra": 0.0005},
 	"minineptune": {"name": "мини-нептун", "m": Vector2(12.0, 28.0), "rad": 78.0, "view": "giant", "ch": 6, "extra": 0.015},
 	"rival": {"name": "гигант-соперник", "m": Vector2(40.0, 400.0), "rad": 0.0, "view": "giant", "ch": 12, "extra": 0.0},
 	"dwarf": {"name": "коричневый карлик", "m": Vector2(4500.0, 6500.0), "rad": 0.0, "view": "giant", "ch": 0, "extra": 0.0},
@@ -748,7 +748,7 @@ func _hit_whole(b: Dictionary, p: Vector4, h: float) -> void:
 	stage.body.impact_heat = minf(stage.body.impact_heat + 0.25 * clampf(float(b.get("q", 0.05)) * 4.0, 0.2, 1.0), 1.0)
 	# Целое тело входит в облака: шлейф по размеру тела, дым его цвета.
 	var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.4, 0.33, 0.26)
-	tides.plume(dir * r * 0.97, clampf(rad_of(b) * 3.0, r * 0.12, r * 0.45), smoke.darkened(0.4), float(b.seed), 3.0)
+	tides.plume(dir * r * 0.97, clampf(rad_of(b) * 1.6, r * 0.05, r * 0.2), smoke.darkened(0.4), float(b.seed), 3.0)
 	_composition_hit(b, 0.5)
 	_reward(b, gain, "hit")
 
@@ -782,7 +782,7 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	var hot_col := col.lerp(Color(1.0, 0.7, 0.45), 0.35)
 	# Шлейф: огненный веер поднимается из облаков и опадает дымом цвета тела.
 	var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.4, 0.33, 0.26)
-	tides.plume(dir * r * 0.96, r * (0.75 + 0.6 * q), smoke.darkened(0.35), float(b.seed), 3.4)
+	tides.plume(dir * r * 0.96, r * (0.4 + 0.4 * q), smoke.darkened(0.35), float(b.seed), 3.4)
 	# Часть выбитого вещества ложится обратно дугой пыли.
 	tides.spawn(dir.rotated(0.1) * r, "arc", gain * 0.15, _pay_k(b), str(b.mat) if MATS.has(b.mat) else "rock", float(b.seed),
 		rad_of(b) * 1.2, {"T": 3.6, "Ls": 1.8, "span": 0.7, "hgt": r * 0.55, "snap": _snapshot(b)})
@@ -1002,6 +1002,15 @@ func _danger(b: Dictionary, delta: float, gpos: Vector2, h: float) -> void:
 	var guard := 1.0 + Skills.stat("giant_guard")
 	var pull := 240.0 * sqrt(clampf(float(b.m) / e, 1.0, 50.0)) / pow(maxf(d / bh, 0.6), 2.0) / guard
 	var loc: Vector2 = to.normalized().rotated(-float(stage.ang))
+	# Сквозь друг друга гиганты не проходят: ближе пары радиусов тесный
+	# пролёт швыряет обоих в стороны (праща), лёгкого — сильнее.
+	var touch := (_giant_r() + rad_of(b)) * 1.35
+	if d < touch:
+		var np := gpos + to.normalized() * touch
+		b.r = np.length()
+		b.a = np.angle()
+		stage.kick -= loc * 900.0 * delta * clampf(float(b.m) / e, 1.0, 4.0)
+		pull = 0.0
 	stage.kick += loc * pull * delta
 	if not _said.has("danger"):
 		_said["danger"] = true

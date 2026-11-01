@@ -14,10 +14,26 @@ uniform float heat = 0.0;    // жар горячего юпитера: свет
 uniform bool use_map = false;     // облака из запечённой карты (этап гиганта)
 uniform sampler2D map : filter_linear_mipmap, repeat_enable;
 uniform vec4 scars[6];             // следы ударов: долгота, широта, размер (рад), сила
-// Оболочка ещё растёт: 0 — голое ядро под тонкой дымкой, 1 — сплошные облака.
-// Сквозь неё видно ядро (embryo.gdshader под шаром).
-uniform float envelope = 1.0;
-uniform vec3 veil_col : source_color = vec3(0.75, 0.8, 0.9);   // цвет первой дымки по составу ядра
+// Молодой гигант: оболочка только что сжалась и раскалена (свет сжатия).
+// young 1 — светится сам, по нему бегут ячейки конвекции; остывая, тускнеет
+// от жёлтого к тёмно-красному, и в нём конденсируются облака — сперва
+// из того, чем богато ядро (veil_col), потом они вытягиваются в пояса.
+uniform float envelope = 1.0;    // 0 — оболочка ещё рыхлая (шар не виден), 1 — готовый гигант
+uniform float young = 0.0;       // 0..1 накал молодого гиганта
+uniform float temp = 0.6;        // температура фотосферы, тыс. К
+uniform vec3 veil_col : source_color = vec3(0.75, 0.8, 0.9);   // первые облака: конденсат по составу ядра
+
+vec3 bb(float t) {
+	vec3 c0 = vec3(0.12, 0.01, 0.0);
+	vec3 c1 = vec3(0.55, 0.07, 0.01);
+	vec3 c2 = vec3(0.95, 0.28, 0.05);
+	vec3 c3 = vec3(1.0, 0.52, 0.18);
+	vec3 c4 = vec3(1.0, 0.78, 0.52);
+	if (t < 0.8) return mix(c0, c1, clamp((t - 0.5) / 0.3, 0.0, 1.0));
+	if (t < 1.2) return mix(c1, c2, (t - 0.8) / 0.4);
+	if (t < 2.0) return mix(c2, c3, (t - 1.2) / 0.8);
+	return mix(c3, c4, clamp((t - 2.0) / 1.0, 0.0, 1.0));
+}
 
 const float BODY = 0.36;
 const float R_MAX = 1.25;
@@ -61,19 +77,16 @@ void fragment() {
 				float halo = exp(-pow(max(soft - 1.0, 0.0) / 0.8, 2.0)) * 0.45 * smoothstep(0.3, 1.0, soft);
 				alb = mix(alb, vec3(0.2, 0.14, 0.11), clamp((core * 0.8 + halo) * sc.w, 0.0, 0.7));
 			}
-			if (envelope < 0.999) {
-				// Газ оседает на ядро: сначала прозрачная дымка, потом рваные
-				// облака, вытянутые ветром вдоль параллелей, потом сплошной покров,
-				// и только в конце в нём проступают пояса.
-				// Ветер тянет облака в полосы-перья: по широте мелко, по долготе длинно,
-				// края мягкие и рваные (мелкий шум сверху).
+			if (young > 0.001) {
+				// Облака конденсируются по мере остывания: перья вдоль параллелей
+				// (вращение уже тянет их в полосы), края мягкие и рваные.
 				vec3 q = vec3(here.x * 1.5, here.y * 9.0, here.z * 1.5) + vec3(seed * 7.0);
 				vec3 w = vec3(fbm(q * 0.6 + 3.0), 0.0, fbm(q * 0.6 + 8.0)) * 0.8;
 				n_env = fbm(q + w) * 0.75 + fbm(q * 3.1 + 5.0) * 0.25;
-				float th = mix(0.82, 0.08, smoothstep(0.1, 0.92, envelope));
+				float th = mix(0.0, 1.0, smoothstep(0.05, 0.6, young));
 				cover = smoothstep(th - 0.14, th + 0.16, n_env);
-				vec3 plain = mix(veil_col, zone_col, 0.45) * (0.82 + 0.36 * n_env);
-				alb = mix(plain, alb, smoothstep(0.5, 0.95, envelope));
+				vec3 plain = mix(veil_col, zone_col, 0.35) * (0.8 + 0.4 * n_env);
+				alb = mix(alb, plain, smoothstep(0.0, 0.3, young));
 			}
 		} else {
 			alb = clouds(d, spot_k);
@@ -83,14 +96,20 @@ void fragment() {
 		float diff = smoothstep(-0.22, 0.9, ndl);
 		float limb = pow(max(nv.z, 0.0), 0.35);  // к краю облака темнеют
 		col = alb * star_light * (0.012 + 1.2 * pow(diff, 1.6)) * (0.55 + 0.45 * limb);
-		float in_a = 1.0;
-		if (envelope < 0.999) {
-			// Дымка между облаками: по краю луч идёт сквозь толщу газа — гуще.
-			float path = pow(1.0 - nv.z, 1.5);
-			float hz = (0.1 + 0.7 * smoothstep(0.1, 0.85, envelope) + 0.7 * path) * (0.8 + 0.4 * n_env);
-			vec3 hcol = veil_col * star_light * (0.04 + 1.0 * pow(diff, 1.4));
-			col = mix(hcol, col, cover);
-			in_a = clamp(mix(hz, 1.0, cover), 0.0, 1.0);
+		// Пока оболочка рыхлая, края у шара нет: он проступает, когда она сжалась.
+		float in_a = smoothstep(0.22, 0.42, envelope);
+		vec3 emis = vec3(0.0);
+		if (young > 0.001) {
+			// Свой свет: конвекция выносит горячий газ ячейками (светлые
+			// середины, тёмные края), к краю диска темнее (луч в холодных слоях).
+			vec3 dq = d * 9.0 + vec3(seed * 3.0, TIME * 0.02, 0.0);
+			float cell = fbm(dq + vec3(fbm(dq * 0.5 + 4.0) * 1.5));
+			float gran = 0.55 + 0.9 * smoothstep(0.3, 0.75, cell);
+			float ld = 0.35 + 0.65 * pow(max(nv.z, 0.0), 0.6);
+			float lum = pow(young, 1.4) * 1.15;
+			emis = bb(temp * (0.92 + 0.16 * cell)) * gran * ld * lum;
+			// Облака — сначала редкие тёмные завесы на светящемся фоне.
+			col = mix(col * (1.0 - 0.75 * young), col, cover) + emis * (1.0 - cover * 0.8);
 		}
 		// Дымка: по краю голубоватая, со стороны звезды светится.
 		float rim = pow(1.0 - nv.z, 3.0);
@@ -111,7 +130,7 @@ void fragment() {
 		float halo = exp(-x * 3.0) * step(0.0, x + aa);
 		float lit = clamp(dot(normalize(p), normalize(light_dir)) * 0.7 + 0.45, 0.0, 1.0);
 		vec3 hc = haze_col * star_light * (0.2 + 1.1 * lit);
-		float ha = halo * (0.15 + 0.6 * lit) * mix(0.5, 1.0, envelope);
+		float ha = halo * (0.15 + 0.6 * lit) * smoothstep(0.22, 0.42, envelope);
 		col = mix(hc, col, alpha);
 		alpha = max(alpha, ha);
 	}
