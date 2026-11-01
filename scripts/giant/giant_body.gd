@@ -408,6 +408,7 @@ func _update_young(r: float) -> void:
 	var rin := lerpf(body_r * CORE_R, r, smoothstep(0.15, 0.4, e))
 	_cocoon_mat.set_shader_parameter("r_in", rin / Q)
 	_cocoon_mat.set_shader_parameter("dens", dens)
+	_cocoon_mat.set_shader_parameter("slope", lerpf(1.1, 1.6, k))
 	var pk := exp(-pow((e - 0.42) / 0.14, 2.0))
 	_cocoon_mat.set_shader_parameter("glow", 0.6 + 1.0 * pk)
 	_cocoon_mat.set_shader_parameter("temp", 1.1 + _temp_add + 0.9 * pk)

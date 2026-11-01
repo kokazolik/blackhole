@@ -51,6 +51,10 @@ var _pebble := Sprite2D.new()  # процедурная галька, прост
 var _planet := Sprite2D.new()  # планетезималь: объёмный шар по запечённому рельефу
 var _planet_bake: PlanetBake   # печётся заранее, ещё на позднем валуне
 var _embryo := Sprite2D.new()  # зародыш: шар с поверхностью по составу, магмой и атмосферой
+var avalanche := 0.0           # лавина газа перед гигантом, 0..1 (ставит main)
+var _cocoon := ColorRect.new() # рыхлое облако газа, растущее вокруг ядра в лавину
+var _cocoon_mat := ShaderMaterial.new()
+var _av_t := 0.0
 var _mix := Vector4(0.25, 0.25, 0.25, 0.25)  # сглаженные доли состава для шейдера
 var temperature := GameData.SPACE_TEMP
 var burn := 0.0      # 0..1: насколько быстро сейчас испаряется вещество
@@ -103,6 +107,12 @@ func _ready() -> void:
 	_embryo.texture = _pebble.texture
 	_embryo.visible = false
 	add_child(_embryo)
+	_cocoon_mat.shader = preload("res://shaders/young_envelope.gdshader")
+	_cocoon_mat.set_shader_parameter("noise_tex", NoiseTex.get_tex())
+	_cocoon.material = _cocoon_mat
+	_cocoon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cocoon.visible = false
+	add_child(_cocoon)
 	_mix = _target_mix()
 	pebble_k = 1.0 if GameState.is_pebble() else 0.0
 	boulder_k = 1.0 if GameState.is_boulder() else 0.0
@@ -458,12 +468,78 @@ func _update_grain(r: float) -> void:
 		em.set_shader_parameter("spin", _spin)
 		em.set_shader_parameter("star_light", Color(1.0, 0.9, 0.75) * (1.0 + 0.9 * Star.flare))
 		em.set_shader_parameter("style", style)
-		em.set_shader_parameter("magma", magma)
 		var duo: Array = GameData.DUO_ATMO.get(GameState.fate_type(), [GameData.EMBRYO_ATMO[style], 1.0, 0.0])
-		em.set_shader_parameter("atmo", minf(GameData.embryo_atmo(GameState.mass) * float(duo[1]), 1.0))
-		em.set_shader_parameter("atmo_col", duo[0])
-		em.set_shader_parameter("veil", float(duo[2]))
+		# Одеяло из водорода: тяжёлый зародыш держит толстую атмосферу диска,
+		# тепло падающей гальки не уходит, и поверхность под дымкой плавится.
+		# Ближе к 10 массам Земли — океан магмы под атмосферой, плавно к лавине.
+		var bl := blanket()
+		var ft := GameState.fate_type()
+		var hot := magma
+		var atmo_k := GameData.embryo_atmo(GameState.mass) * float(duo[1]) * (1.0 + 0.6 * bl)
+		var acol: Color = duo[0]
+		var veil := float(duo[2])
+		match ft:
+			"ice":
+				# Лёд не плавится в лаву: он кипит. Густая белая атмосфера пара,
+				# снизу подсвечена жаром камня под ней.
+				veil = maxf(veil, 0.85 * bl)
+				acol = acol.lerp(Color(0.93, 0.95, 0.98), bl)
+				hot = maxf(hot, 0.45 * bl)
+			"metal":
+				hot = maxf(hot, 0.9 * bl)      # железо держит тепло: светлая раскалённая корка
+			"carbon":
+				hot = maxf(hot, 0.5 * bl)      # тлеет под сажей
+				acol = acol.lerp(Color(0.5, 0.36, 0.28), 0.5 * bl)
+			"titan", "venus":
+				hot = maxf(hot, 0.65 * bl)     # жар под своей мглой: светит сквозь неё ночью
+			_:
+				hot = maxf(hot, 0.75 * bl)     # камень и хондрит: лава под дымкой
+		# Лавина: газ падает и сжимается — ядро под ним раскаляется до конца.
+		hot = maxf(hot, avalanche)
+		em.set_shader_parameter("magma", hot)
+		_update_cocoon(r * PEBBLE_SCALE * 0.36, ft)
+		em.set_shader_parameter("atmo", minf(atmo_k, 1.0))
+		em.set_shader_parameter("atmo_col", acol)
+		em.set_shader_parameter("veil", veil)
 		_embryo.modulate = Color(Color.WHITE * (1.0 + 0.06 * _pulse), embryo_k)
+
+
+## Облако лавины: растёт от атмосферы зародыша до огромного рыхлого кокона,
+## густеет и светится от сжатия. Цвет пыли — по составу ядра (как у гиганта).
+func _update_cocoon(vis: float, ft: String) -> void:
+	_cocoon.visible = avalanche > 0.0
+	if not _cocoon.visible:
+		return
+	_av_t += get_process_delta_time()
+	var a := avalanche
+	var Q := vis * lerpf(1.4, 8.0, pow(a, 1.3))
+	_cocoon.size = Vector2(Q, Q) * 2.0
+	_cocoon.position = -_cocoon.size * 0.5
+	var dust := Color(0.72, 0.64, 0.54)
+	match ft:
+		"metal": dust = Color(0.66, 0.64, 0.64)
+		"carbon": dust = Color(0.42, 0.33, 0.27)
+		"ice": dust = Color(0.72, 0.8, 0.9)
+		"titan": dust = Color(0.8, 0.58, 0.36)
+		"venus": dust = Color(0.86, 0.76, 0.52)
+	_cocoon_mat.set_shader_parameter("dust_col", dust)
+	_cocoon_mat.set_shader_parameter("r_out", 0.95)
+	_cocoon_mat.set_shader_parameter("slope", 1.0)
+	_cocoon_mat.set_shader_parameter("r_in", clampf(vis / Q, 0.02, 0.9))
+	_cocoon_mat.set_shader_parameter("dens", 0.35 + 0.9 * smoothstep(0.0, 0.8, a))
+	_cocoon_mat.set_shader_parameter("glow", 0.4 + 0.6 * a)
+	_cocoon_mat.set_shader_parameter("temp", 0.9 + 0.5 * a + (0.3 if ft == "metal" else (-0.3 if ft == "carbon" else 0.0)))
+	_cocoon_mat.set_shader_parameter("light_dir", (-position).normalized())
+	_cocoon_mat.set_shader_parameter("spin", _av_t * 0.35)
+
+
+## Насколько зародыш раскалён под своей атмосферой: с ~2 масс Земли,
+## почти полностью к 10 (лавина газа), пока в диске есть газ.
+func blanket() -> float:
+	if not GameState.is_embryo():
+		return 0.0
+	var gas := GameState.gas_frac() if GameState.gas_left >= 0.0 else 1.0
+	return smoothstep(2.0, 9.5, GameState.earth_masses()) * clampf(0.4 + 0.6 * gas, 0.0, 1.0)
 
 
 ## Насколько видна планетезималь: пока рельеф не испечён, остаётся валун.

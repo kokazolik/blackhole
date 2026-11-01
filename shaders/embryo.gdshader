@@ -223,6 +223,8 @@ void fragment() {
 			float soft = smoothstep(-0.15, 0.9, dot(nv, L));
 			vec3 vc = cloud * star_light * (0.03 + 1.15 * soft) * (0.75 + 0.25 * pow(max(nv.z, 0.0), 0.4));
 			col = mix(col, vc, veil);
+			// Жар поверхности сквозит сквозь облака на ночной стороне.
+			col += vec3(1.0, 0.32, 0.08) * 0.22 * magma * veil * (1.0 - wrap);
 		}
 		alpha = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
 	}

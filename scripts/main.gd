@@ -46,6 +46,7 @@ var _swarm_pos := Vector2.ZERO
 var _chance_t := -1.0  # второй шанс суперземли: секунд, чтобы нырнуть в гиганта
 var _collapse_t := -1.0  # финальный обвал гальки перед концовкой гиганта
 var _collapse_kind := ""
+const COLLAPSE_TOTAL := PebbleField.COLLAPSE_TIME + 3.0   # обвал гальки и рост облака газа
 
 
 func _ready() -> void:
@@ -497,11 +498,15 @@ func _check_embryo(delta: float) -> void:
 	if _collapse_t >= 0.0:
 		# Лавина газа: кольцо гальки и всё вокруг обрушивается в тебя, потом — концовка.
 		_collapse_t -= delta
-		_shake = maxf(_shake, 0.25 + 0.5 * pebble_field.collapse_k)
+		_shake = maxf(_shake, 0.15 + 0.35 * pebble_field.collapse_k)
+		# Газ облепляет ядро: вокруг растёт светящееся рыхлое облако — то же,
+		# с которого начнётся этап гиганта.
+		player.avalanche = clampf(1.0 - _collapse_t / COLLAPSE_TOTAL, 0.0, 1.0)
 		if _collapse_t <= 0.0:
 			_collapse_t = -1.0
 			GameState.start_giant(_collapse_kind, player.position.length())
-			Fader.go(Fader.GIANT, 1.2, 1.4)
+			# Не в чёрное: в тёплую мглу облака, из неё проступит этап гиганта.
+			Fader.go(Fader.GIANT, 0.9, 1.8, Color(0.13, 0.07, 0.04))
 		return
 	if GameState.embryo_choice == "":
 		return  # путь ещё не выбран
@@ -518,9 +523,9 @@ func _check_embryo(delta: float) -> void:
 		return
 	if e >= GameData.GIANT_EARTHS and GameState.gas_left > 0.0:
 		_collapse_kind = GameData.giant_ending(GameState.fate_type(), true)  # горячим делает орбита в конце этапа
-		_collapse_t = PebbleField.COLLAPSE_TIME + 0.6
+		_collapse_t = COLLAPSE_TOTAL
 		pebble_field.start_collapse()
-		_show_caption("Лавина газа!", "ядро в десять масс Земли: газ диска рушится на тебя")
+		_show_caption("Лавина газа!", "ядро в десять масс Земли: атмосфера больше не держится, газ диска рушится на тебя")
 		return
 	if _chance_t >= 0.0:
 		_chance_t -= delta

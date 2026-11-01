@@ -476,6 +476,10 @@ func _merge(rv: Rival, at: Vector2, slant := 0.0) -> void:
 		* pow(rel / 0.2, 1.5) * GameData.boulder_value(GameState.mass) * GameData.PLANET_VALUE * Skills.stat("merge_value")
 	GameState.absorb_mix(rv.mass * keep, value, _rival_mix(rv), at)
 	pebble_field.heat = minf(pebble_field.heat + 0.25, 1.0)
+	# Любое слияние — удар: энергия падения соседа греет зародыш. Мелкий сосед
+	# — пятна расплава, крупный (ниже) — магматический океан.
+	if GameState.is_embryo() and rel_m < GameData.IMPACT_REL:
+		player.magma = minf(player.magma + clampf(rel_m * 1.5, 0.05, 0.3), 1.0)
 	if rv.kind == "twin":
 		GameState.add_chondrules(3, at)
 	# Гигантский удар зародыша: косой выбрасывает диск обломков, он летит рядом,

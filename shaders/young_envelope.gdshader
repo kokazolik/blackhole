@@ -20,6 +20,7 @@ uniform vec3 dust_col : source_color = vec3(0.7, 0.62, 0.52);
 uniform vec2 light_dir = vec2(-1.0, -0.12);
 uniform float spin = 0.0;
 uniform float seed = 0.0;
+uniform float slope = 1.6;      // как быстро редеет газ наружу (ρ ∝ r^-slope)
 
 // Цвет абсолютно чёрного тела (приближённо), T в тысячах К.
 vec3 bb(float t) {
@@ -60,7 +61,7 @@ void fragment() {
 		float t2 = n2(sw * 2.6 + vec2(seed * 1.7, z * 1.3));
 		float turb = 0.45 + 0.75 * t1 + 0.35 * (t2 - 0.5);
 		float edge = 1.0 - smoothstep(r_out * 0.55, r_out, r);
-		float rho = pow(max(r, r_in) / r_in, -1.6) * edge * turb;
+		float rho = pow(max(r, r_in) / r_in, -slope) * edge * turb;
 		float tau = rho * dens * dz * 9.0;
 		// Тепло: глубже — горячее (адиабата), снаружи холодная пыль.
 		float tl = temp * pow(r_in / max(r, r_in), 0.7);

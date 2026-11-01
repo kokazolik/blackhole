@@ -25,7 +25,7 @@ func _ready() -> void:
 
 
 ## Затемнить экран, сменить сцену и проявить новую.
-func go(path: String, out_time := 0.6, in_time := 0.9) -> void:
+func go(path: String, out_time := 0.6, in_time := 0.9, tint := Color(0.0, 0.0, 0.01)) -> void:
 	if _busy:
 		return
 	# Этап гиганта — своя сцена: продолжение забега ведёт туда.
@@ -36,6 +36,7 @@ func go(path: String, out_time := 0.6, in_time := 0.9) -> void:
 	elif path == GAME and GameState.is_young() and GameState.ending == "":
 		path = YOUNG
 	_busy = true
+	_rect.color = Color(tint.r, tint.g, tint.b, _rect.color.a)
 	_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	_rect.visible = true
 	var tw := create_tween()
