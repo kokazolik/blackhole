@@ -17,7 +17,8 @@ uniform float crack = 0.0;     // накал трещин 0..1
 uniform float erode = 0.0;     // сколько сточено 0..1
 uniform float seed = 0.0;
 uniform float shade = 1.0;     // 1 — на свету, меньше — в тени гиганта
-uniform float emit = 0.0;      // 1 — сколы светятся (расплав лавового тела)
+uniform float emit = 0.0;      // накал недр: 1 — расплав, 0 — холодное тело (остывает на лету)
+uniform vec3 hot_col : source_color = vec3(1.0, 0.4, 0.1);
 
 void fragment() {
 	vec2 q = (UV - 0.5) / disc;
@@ -51,6 +52,8 @@ void fragment() {
 	float dusty = smoothstep(0.12, 0.0, keep) * erode;
 	col = mix(col, crack_col, dusty * 0.5);
 	col *= shade;
-	col += crack_col * emit * (rim * 1.4 + dusty * 0.6);
+	// Светится только горячее нутро: свежий скол и стачиваемый край.
+	float rim_hot = exp(-edge * 22.0) * smoothstep(0.0, 0.3, crack) * (0.6 + 0.5 * nn);
+	col += hot_col * emit * (rim_hot * 0.8 + dusty * 0.25);
 	COLOR = vec4(col, tex.a * smoothstep(0.0, 0.05, keep));
 }

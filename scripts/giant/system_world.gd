@@ -679,6 +679,22 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 		stage.focus(from * 0.6, 4.5, 0.9)
 	opts["rad"] = maxf(rad_of(b), 6.0 / maxf(stage.camera.zoom.x, 0.001))
 	opts["gain_shards"] = gain * (1.0 - share_dust)
+	if solid or b.kind == "comet":
+		# Твёрдое тело рассыпается, как валун: куски, обломки, пыль — каждый
+		# со скоростью тела в миг разрыва, без остановки.
+		var vel := Vector2(p.z, -p.w) * h * HILL_W
+		var flv := str(GameState.giant.get("flavor", ""))
+		var dopts := {"snap": snap, "chunks": clampi(3 + int(m * 1.2), 3, 8) if pearls > 0 else 0, "rad": opts["rad"],
+			# У звезды горячий гигант: пыль и так тёплая; в холодной зоне — нет.
+			"hot_k": 0.15 if flv == "giant_hot" else 0.0,
+			"frags": 18 if b.kind == "comet" else clampi(16 + int(m * 6.0), 18, 40),
+			"dust": 260 if b.kind == "comet" else clampi(150 + int(m * 40.0), 160, 320)}
+		var dpal := pal
+		if b.kind == "comet":
+			dpal = "ice"
+		tides.spawn_debris(from, vel, gain, _pay_k(b), dpal, float(b.seed), dopts)
+		_reward(b, gain)
+		return
 	tides.spawn(from, "spiral", gain * share_dust, _pay_k(b), pal, float(b.seed), rad_of(b) * (3.0 if b.kind == "rival" else 2.6), opts)
 	if pearls == 0:
 		var rest := gain * (1.0 - share_dust)

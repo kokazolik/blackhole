@@ -40,7 +40,29 @@ const PALS := {
 var world                     # system_world.gd
 var streams: Array = []
 var plumes: Array = []        # шлейфы ударов: огненный веер из облаков
+var debris: Array = []        # разорванные тела: куски, обломки, пыль (см. spawn_debris)
 var _time := 0.0
+
+# Разрыв по-новому: тело не режется на ленты, а рассыпается, как валун:
+# несколько крупных кусков (настоящая поверхность со снимка), десятки
+# угловатых обломков и сотни пылинок. Каждый стартует со скоростью самого
+# тела (без остановки и рывка), дальше газ околопланетного диска сводит его
+# на свою спираль: пыль за доли секунды, обломки за секунду, куски за
+# несколько. Ближние к гиганту обгоняют дальних — облако само тянется в дугу.
+# Свет: прилив тело почти не греет. Светится только то, что уже было
+# горячим внутри (расплав лавы, тёплые недра камня, тлеющий углерод) — и
+# остывает на лету, мелочь быстрее. Ледяное и холодное — матовая пыль.
+# Вспыхивает лишь то, что входит в облака: короткий метеор у самого края.
+const K_DUST := 4.0           # как быстро газ подхватывает пылинку, 1/с
+const K_FRAG := 1.9
+const K_CHUNK := 1.25
+# Цвет нутра и накала по веществу: свежий скол, свечение расплава, начальный жар.
+const HEAT := {
+	"lava": [Color(1.0, 0.42, 0.1), 1.0], "rock": [Color(1.0, 0.36, 0.1), 0.38],
+	"carbon": [Color(0.95, 0.3, 0.06), 0.28], "metal": [Color(1.0, 0.62, 0.32), 0.18],
+	"ice": [Color(0.8, 0.9, 1.0), 0.0], "nep": [Color(0.8, 0.9, 1.0), 0.0],
+	"rival": [Color(1.0, 0.5, 0.2), 0.2], "ring": [Color(0.8, 0.9, 1.0), 0.0],
+}
 
 
 ## Струя из точки from (в системе гиганта). mode: "spiral" — к облакам по
@@ -260,6 +282,14 @@ func step(delta: float, R: float) -> void:
 	for st in streams:
 		_build(st, R)
 		_place_shards(st, R)
+	var dk := []
+	for d in debris:
+		if _step_debris(d, delta, R):
+			dk.append(d)
+		else:
+			_free_debris(d)
+	debris = dk
+	queue_redraw()
 
 
 func _free(st: Dictionary) -> void:
@@ -546,3 +576,367 @@ func _nearest_s(st: Dictionary, sh: Dictionary, R: float) -> float:
 			bd = d
 			best = k
 	return float(best) / (K - 1)
+
+
+# ---------------------------------------------------------------------------
+# Разрыв твёрдого тела: куски, обломки, пыль.
+
+## from, vel — где тело и с какой скоростью летело (система гиганта, ед./с).
+## mass — масса, которая уйдёт в гиганта; pay — множитель награды.
+## opts: snap (снимок тела), chunks (сколько крупных кусков), rad (радиус
+## тела на экране), hot_k (добавка жара: горячий гигант у звезды), comet.
+func spawn_debris(from: Vector2, vel: Vector2, mass: float, pay: float, pal: String, seed_v: float, opts := {}) -> Dictionary:
+	var R: float = world.stage.body.body_r * world.stage.body.inflate
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(seed_v * 7919.0) + 11
+	if not PALS.has(pal):
+		pal = "rock"
+	var heat_info: Array = HEAT.get(pal, HEAT["rock"])
+	var hot0 := clampf(float(heat_info[1]) + float(opts.get("hot_k", 0.0)), 0.0, 1.0)
+	var rad: float = float(opts.get("rad", 20.0))
+	var r0 := from.length()
+	var d := {
+		"t": 0.0, "pal": pal, "seed": seed_v, "pay": pay, "R0": R, "r0": r0, "from": from, "rad": rad,
+		"hot": hot0, "hot_col": heat_info[0], "chunks": [], "frags": [], "scarred": false,
+		"g0": log(maxf(r0 - 0.9 * R, 1.0) / (0.1 * R)) / 11.0 * 0.6, "left": mass,
+		# Пыль — упакованные массивы: x, y, vx, vy, размер, жар, масса.
+		"dx": PackedFloat32Array(), "dy": PackedFloat32Array(), "dvx": PackedFloat32Array(), "dvy": PackedFloat32Array(),
+		"ds": PackedFloat32Array(), "dh": PackedFloat32Array(), "dm": PackedFloat32Array(), "dk": PackedFloat32Array(),
+		"dg": PackedFloat32Array(),
+	}
+	var rhat := from.normalized()
+	# Прилив тянет тело вдоль линии на гиганта: ближняя половина уходит
+	# вперёд и вниз, дальняя отстаёт. Скорость — самого тела плюс растяжение.
+	var stretch := func(off: Vector2) -> Vector2:
+		return vel + rhat * off.dot(rhat) * 2.4 + off.orthogonal() * 0.15
+	# Крупные куски — ячейки Вороного по снимку. Их доля массы зависит от
+	# прочности: камень и металл держатся кусками, лёд и углерод сыплются.
+	var snap: Dictionary = opts.get("snap", {})
+	var n := int(opts.get("chunks", 0))
+	var chunk_share := {"metal": 0.55, "rock": 0.42, "lava": 0.3, "carbon": 0.3, "ice": 0.25}.get(pal, 0.35) as float
+	if n <= 0 or snap.is_empty():
+		chunk_share = 0.0
+	var m_chunks := mass * chunk_share
+	var m_frags := mass * (1.0 - chunk_share) * 0.4
+	var m_dust := mass * (1.0 - chunk_share) * 0.6
+	if chunk_share > 0.0:
+		_debris_chunks(d, n, rad, m_chunks, snap, rng, stretch)
+	# Угловатые обломки: размер по степенному закону — мелких много, крупных мало.
+	var nf := int(opts.get("frags", 26))
+	for i in nf:
+		var off := _blob(rng, rhat, rad * 0.9)
+		var sz := rad * (0.05 + 0.16 * pow(rng.randf(), 2.2))
+		(d.frags as Array).append(_new_frag(from + off, stretch.call(off) + _jit(rng, rad * 0.4), sz, m_frags / nf, hot0 * rng.randf_range(0.4, 1.0), rng))
+	# Пыль: сотни пылинок по всему диску тела.
+	var nd := int(opts.get("dust", 200))
+	for i in nd:
+		var off := _blob(rng, rhat, rad)
+		_add_dust(d, from + off, stretch.call(off) + _jit(rng, rad * 0.6), m_dust / nd, hot0 * rng.randf_range(0.3, 1.0), rng)
+	debris.append(d)
+	return d
+
+
+## Точка в теле, уже вытянутом приливом вдоль линии на гиганта.
+static func _blob(rng: RandomNumberGenerator, rhat: Vector2, rad: float) -> Vector2:
+	var o := Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * rad
+	return rhat * o.dot(rhat) * 1.5 + rhat.orthogonal() * o.dot(rhat.orthogonal()) * 0.8
+
+
+static func _jit(rng: RandomNumberGenerator, s: float) -> Vector2:
+	return Vector2(rng.randfn(0.0, s), rng.randfn(0.0, s))
+
+
+func _add_dust(d: Dictionary, p: Vector2, v: Vector2, m: float, heat: float, rng: RandomNumberGenerator) -> void:
+	(d.dx as PackedFloat32Array).append(p.x)
+	(d.dy as PackedFloat32Array).append(p.y)
+	(d.dvx as PackedFloat32Array).append(v.x)
+	(d.dvy as PackedFloat32Array).append(v.y)
+	(d.ds as PackedFloat32Array).append(pow(rng.randf(), 1.8))   # 0 — пылинка, 1 — песчинка
+	(d.dh as PackedFloat32Array).append(heat)
+	(d.dm as PackedFloat32Array).append(m)
+	# Мелочь газ подхватывает быстрее, песчинки дольше летят по инерции.
+	(d.dk as PackedFloat32Array).append(K_DUST * rng.randf_range(0.7, 1.3))
+	# Своя скорость дрейфа внутрь: одни пылинки тонут быстрее, другие кружат —
+	# облако расходится по радиусу, и сдвиг вращения тянет его в дугу.
+	(d.dg as PackedFloat32Array).append(rng.randf_range(0.5, 1.7))
+
+
+func _new_frag(p: Vector2, v: Vector2, sz: float, m: float, heat: float, rng: RandomNumberGenerator) -> Dictionary:
+	# Угловатый камень: 5–7 вершин с рваным радиусом, как обломки валуна.
+	var pts := PackedVector2Array()
+	var nv := rng.randi_range(5, 7)
+	var a0 := rng.randf() * TAU
+	for k in nv:
+		var a := a0 + TAU * (float(k) + rng.randf_range(-0.3, 0.3)) / nv
+		pts.append(Vector2.from_angle(a) * rng.randf_range(0.55, 1.0))
+	return {"p": p, "v": v, "sz": sz, "m": m, "heat": heat, "pts": pts, "a": rng.randf() * TAU,
+		"spin": rng.randf_range(-1.6, 1.6), "k": K_FRAG * rng.randf_range(0.75, 1.25), "g": rng.randf_range(0.5, 1.4), "tone": rng.randf_range(0.8, 1.15)}
+
+
+func _debris_chunks(d: Dictionary, n: int, rad: float, m: float, snap: Dictionary, rng: RandomNumberGenerator, stretch: Callable) -> void:
+	var seeds := PackedVector2Array()
+	for i in n:
+		seeds.append(Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * 0.85)
+	var disc: float = snap.disc
+	var wr := rad / disc
+	var ang: float = world.stage.ang
+	var p: Array = PALS[d.pal]
+	for i in n:
+		var c := seeds[i]
+		var rect := ColorRect.new()
+		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rect.size = Vector2(wr, wr)
+		rect.pivot_offset = (Vector2(0.5, 0.5) + c * disc) * wr
+		var mt := ShaderMaterial.new()
+		mt.shader = preload("res://shaders/shard.gdshader")
+		mt.set_shader_parameter("body_tex", snap.tex)
+		mt.set_shader_parameter("noise_tex", NoiseTex.get_tex())
+		mt.set_shader_parameter("seeds", seeds)
+		mt.set_shader_parameter("n", n)
+		mt.set_shader_parameter("cell", i)
+		mt.set_shader_parameter("disc", disc)
+		mt.set_shader_parameter("crack_col", p[5])
+		mt.set_shader_parameter("hot_col", d.hot_col)
+		mt.set_shader_parameter("seed", fmod(float(d.seed), 5.0))
+		rect.material = mt
+		rect.visible = false
+		add_child(rect)
+		var off := c.rotated(-ang) * rad
+		(d.chunks as Array).append({"node": rect, "c": c, "p": (d.from as Vector2) + off, "v": stretch.call(off),
+			"spin": rng.randf_range(-0.4, 0.4), "k": K_CHUNK * rng.randf_range(0.8, 1.2), "q": rng.randf(),
+			"m": m / n, "er": 0.0, "acc": 0.0, "done": false})
+	d["snap"] = snap
+
+
+## Скорость газа диска в точке: круговая по Кеплеру (прямое вращение) и
+## медленный дрейф внутрь, глубже — быстрее.
+func _gas_v(p: Vector2, R: float, g: float) -> Vector2:
+	var r := maxf(p.length(), R * 0.5)
+	var rh := p / r
+	var w := W0 * pow(r / R, -1.5)
+	var vr := -(r - 0.9 * R) * g * pow(R / r, 2.0)
+	# Прямое вращение: угол убывает (DIR = −1), касательная — (sin, −cos).
+	return rh * vr + Vector2(rh.y, -rh.x) * (-DIR) * w * r
+
+
+func _relax(p: Vector2, v: Vector2, k: float, R: float, g: float, dt: float) -> Vector2:
+	var vg := _gas_v(p, R, g)
+	return vg + (v - vg) * exp(-k * dt)
+
+
+func _sink(d: Dictionary, m: float, mult := 1.0) -> void:
+	if m <= 0.0:
+		return
+	d.left = float(d.left) - m
+	world.stage.earths += m
+	world.stage.pay(m * float(d.pay) * mult)
+
+
+func _step_debris(d: Dictionary, delta: float, R: float) -> bool:
+	d.t = float(d.t) + delta
+	var t: float = d.t
+	var g: float = d.g0
+	var steps := maxi(1, ceili(delta / 0.02))
+	var dt := delta / steps
+	var hot_col: Color = d.hot_col
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(t * 1000.0) + int(float(d.seed) * 31.0)
+	var ang: float = world.stage.ang
+	# Крупные куски: летят, стачиваются, роняют обломки и пыль.
+	var cool := 0.22   # остывание за секунду (крупное — медленнее)
+	var any := false
+	for ch in d.chunks:
+		if ch.done:
+			continue
+		var pp: Vector2 = ch.p
+		var vv: Vector2 = ch.v
+		for i in steps:
+			vv = _relax(pp, vv, float(ch.k), R, g * 0.55, dt)
+			pp += vv * dt
+		ch.p = pp
+		ch.v = vv
+		var prog := clampf((float(d.r0) - pp.length()) / maxf(float(d.r0) - R, 1.0), 0.0, 1.0)
+		var er := clampf(smoothstep(0.0, 0.9, prog) * (0.55 + 0.6 * float(ch.q)) + t * 0.03, 0.0, 1.0)
+		var der := er - float(ch.er)
+		if der > 0.0:
+			ch.er = er
+			# Что сточилось, то сыплется с куска: масса уходит в пыль и обломки.
+			var lost := float(ch.m) * der
+			ch.acc = float(ch.acc) + der * 40.0
+			while float(ch.acc) >= 1.0:
+				ch.acc = float(ch.acc) - 1.0
+				var off := Vector2.from_angle(rng.randf() * TAU) * float(d.rad) * 0.3
+				var vel := vv + _jit(rng, float(d.rad) * 0.35)
+				var heat := float(d.hot) * maxf(1.0 - t * 0.1, 0.2)
+				if rng.randf() < 0.18:
+					(d.frags as Array).append(_new_frag(pp + off, vel, float(d.rad) * rng.randf_range(0.04, 0.12), lost * 0.25, heat, rng))
+				else:
+					_add_dust(d, pp + off, vel, lost / 40.0 * 0.8, heat, rng)
+			ch.m = float(ch.m) - lost
+		if pp.length() <= R * 0.99:
+			ch.done = true
+			(ch.node as CanvasItem).visible = false
+			_chunk_hit(d, ch, R)
+			continue
+		any = true
+		var node: ColorRect = ch.node
+		node.visible = true
+		node.position = pp - node.pivot_offset
+		node.rotation = -ang + float(ch.spin) * t
+		var sc := 1.0 - 0.3 * er
+		node.scale = Vector2(sc, sc)
+		var m := node.material as ShaderMaterial
+		# Трещины проступают в первые доли секунды, пока тело ещё целое.
+		m.set_shader_parameter("crack", smoothstep(0.0, 0.5, t))
+		m.set_shader_parameter("erode", er)
+		m.set_shader_parameter("shade", _shade(pp, R))
+		m.set_shader_parameter("emit", float(d.hot) * exp(-t * cool * 0.6))
+	# Обломки.
+	var fk := []
+	for f in d.frags:
+		var pp: Vector2 = f.p
+		var vv: Vector2 = f.v
+		for i in steps:
+			vv = _relax(pp, vv, float(f.k), R, g * 0.8 * float(f.g), dt)
+			pp += vv * dt
+		f.p = pp
+		f.v = vv
+		f.a = float(f.a) + float(f.spin) * delta
+		# Мелкое остывает быстрее: тепло уходит с поверхности.
+		f.heat = float(f.heat) * exp(-delta * cool * 2.2)
+		if pp.length() <= R:
+			_sink(d, float(f.m))
+			continue
+		fk.append(f)
+	d.frags = fk
+	# Пыль.
+	var dx: PackedFloat32Array = d.dx
+	var dy: PackedFloat32Array = d.dy
+	var dvx: PackedFloat32Array = d.dvx
+	var dvy: PackedFloat32Array = d.dvy
+	var dh: PackedFloat32Array = d.dh
+	var dkk: PackedFloat32Array = d.dk
+	var dm: PackedFloat32Array = d.dm
+	var dg: PackedFloat32Array = d.dg
+	var alive := 0
+	var sunk := 0.0
+	var first_sink := Vector2.ZERO
+	for i in dx.size():
+		if dm[i] < 0.0:
+			continue
+		var pp := Vector2(dx[i], dy[i])
+		var vv := Vector2(dvx[i], dvy[i])
+		for s in steps:
+			vv = _relax(pp, vv, dkk[i], R, g * dg[i], dt)
+			pp += vv * dt
+		if pp.length() <= R:
+			sunk += dm[i]
+			dm[i] = -1.0
+			if first_sink == Vector2.ZERO:
+				first_sink = pp
+			continue
+		dx[i] = pp.x
+		dy[i] = pp.y
+		dvx[i] = vv.x
+		dvy[i] = vv.y
+		dh[i] = dh[i] * exp(-delta * cool * 4.0)
+		alive += 1
+	d.dx = dx
+	d.dy = dy
+	d.dvx = dvx
+	d.dvy = dvy
+	d.dh = dh
+	d.dm = dm
+	_sink(d, sunk)
+	if first_sink != Vector2.ZERO and not d.scarred and alive < dx.size() * 0.6:
+		# Пыль оседает в облаках: тёмная дымка там, где ушла голова облака.
+		d.scarred = true
+		world.stage.body.scar(first_sink.normalized(), float(d.rad) * 0.5)
+	if (alive == 0 and (d.frags as Array).is_empty() and not any) or t > 60.0:
+		_sink(d, maxf(float(d.left), 0.0))
+		return false
+	return true
+
+
+## Кусок дошёл до облаков. Сточенный почти весь — тонет без следа. Уцелевший
+## входит на десятках км/с: короткий шлейф и тёмный шрам (Шумейкеры — Леви 9).
+func _chunk_hit(d: Dictionary, ch: Dictionary, R: float) -> void:
+	_sink(d, float(ch.m), Skills.stat("giant_impact"))
+	if float(ch.er) > 0.95:
+		return
+	var at: Vector2 = (ch.p as Vector2).normalized()
+	var size := float(d.rad) * (1.0 - float(ch.er)) * 0.6
+	world.stage.body.scar(at, size)
+	var smoke: Color = (PALS[d.pal] as Array)[0]
+	plume(at * R * 0.97, clampf(R * 0.025 + size * 0.5, R * 0.03, R * 0.08), smoke.darkened(0.45), float(d.seed) + float(ch.q), 2.4)
+
+
+func _free_debris(d: Dictionary) -> void:
+	for ch in d.chunks:
+		(ch.node as Node).queue_free()
+	var snap: Dictionary = d.get("snap", {})
+	if snap.has("vp"):
+		(snap.vp as Node).queue_free()
+
+
+## Цвет накала по температуре: тёмно-красный → оранжевый → жёлтый.
+static func _glow_col(h: float, base: Color) -> Color:
+	return base.lerp(Color(1.0, 0.85, 0.55), clampf(h - 0.6, 0.0, 0.4) * 1.5)
+
+
+func _draw() -> void:
+	if debris.is_empty():
+		return
+	var R: float = world.stage.body.body_r * world.stage.body.inflate
+	var zoom: float = maxf(world.stage.camera.zoom.x, 0.001)
+	var px := 1.0 / zoom
+	for d in debris:
+		var p: Array = PALS[d.pal]
+		var dust_col: Color = p[0]
+		var rock_col: Color = (p[0] as Color).lerp(p[5], 0.35)
+		var hot_col: Color = d.hot_col
+		var fade := smoothstep(0.0, 0.25, float(d.t))
+		var rad: float = d.rad
+		# Обломки: многоугольник, освещённый со стороны звезды (−x).
+		for f in d.frags:
+			var c: Vector2 = f.p
+			var sz := maxf(float(f.sz), 1.6 * px)
+			var sh := _shade(c, R)
+			var heat: float = f.heat
+			var entry := smoothstep(R * 1.1, R * 1.0, c.length())
+			var pts := PackedVector2Array()
+			var cols := PackedColorArray()
+			for v in f.pts:
+				var vv: Vector2 = (v as Vector2).rotated(float(f.a))
+				pts.append(c + vv * sz)
+				var lit := 0.45 + 0.65 * maxf(-vv.normalized().x, 0.0)
+				var col := (rock_col * float(f.tone) * lit * sh)
+				col = col.lerp(_glow_col(maxf(heat, entry), hot_col), clampf(maxf(heat, entry * 0.8), 0.0, 1.0) * 0.85)
+				col.a = fade
+				cols.append(col)
+			draw_polygon(pts, cols)
+			var hh := maxf(heat, entry * 0.7)
+			if hh > 0.15:
+				# Горячий камень светится сам; ореол маленький, без «шара».
+				draw_circle(c, sz * 1.9, Color(hot_col, 0.16 * hh * fade))
+		# Пыль: матовые точки цвета тела; горячие — тлеют.
+		var dx: PackedFloat32Array = d.dx
+		var dy: PackedFloat32Array = d.dy
+		var ds: PackedFloat32Array = d.ds
+		var dh: PackedFloat32Array = d.dh
+		var dm: PackedFloat32Array = d.dm
+		for i in dx.size():
+			if dm[i] < 0.0:
+				continue
+			var c := Vector2(dx[i], dy[i])
+			var r := c.length()
+			var entry := smoothstep(R * 1.08, R * 1.0, r)
+			var hh := maxf(dh[i], entry * 0.6)
+			var s := maxf(rad * (0.012 + 0.03 * ds[i]), (0.9 + 1.4 * ds[i]) * px)
+			var col := dust_col * (0.55 + 0.45 * ds[i]) * _shade(c, R)
+			col = col.lerp(_glow_col(hh, hot_col), clampf(hh, 0.0, 1.0))
+			# Пылинка тонет в облаках: тает у самого края.
+			col.a = fade * (0.5 + 0.4 * ds[i]) * smoothstep(R * 1.0, R * 1.04, r)
+			draw_rect(Rect2(c - Vector2(s, s) * 0.5, Vector2(s, s)), col)
+			if hh > 0.3:
+				draw_circle(c, s * 1.6, Color(hot_col, 0.12 * hh * col.a))
