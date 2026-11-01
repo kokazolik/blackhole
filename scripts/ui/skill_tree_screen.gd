@@ -586,7 +586,8 @@ func _refresh() -> void:
 	_currency_label.text = "✦ " + GameData.format_number(GameState.currency)
 	_chondrule_label.visible = GameState.chondrules > 0
 	_chondrule_label.text = str(GameState.chondrules)
-	_chondrule_label.position = Vector2(28 + _currency_label.get_minimum_size().x + 46, 27)
+	# Под звёздной пылью, а не справа: справа заголовок книги, длинное число на него налезало.
+	_chondrule_label.position = Vector2(52, 70)
 	_info.visible = _selected != ""
 	if _selected != "":
 		var node: Dictionary = Skills.nodes[_selected]
@@ -1013,6 +1014,15 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 	var tp := Vector2(-w * 0.5, r + 30.0)
 	_g.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, 5, Color(0.03, 0.02, 0.06, 0.85))
 	_g.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(col.lightened(0.2), 0.95))
+	# Узел открывает эпоху этапа: под названием — какую.
+	var era: String = str(Skills.nodes[id].get("era", ""))
+	if era != "":
+		var et := "открывает «%s»" % era
+		var ef: Font = UiTheme.FONT_SERIF_ITALIC
+		var ew := ef.get_string_size(et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		var ep := Vector2(-ew * 0.5, r + 52.0)
+		_g.draw_string_outline(ef, ep, et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, 4, Color(0.03, 0.02, 0.06, 0.85))
+		_g.draw_string(ef, ep, et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.62, 0.86, 1.0, 0.95))
 	_g.draw_set_transform(Vector2.ZERO)
 
 
