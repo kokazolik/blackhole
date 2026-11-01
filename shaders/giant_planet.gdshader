@@ -46,9 +46,14 @@ void fragment() {
 				if (sc.w <= 0.0) continue;
 				vec3 c = vec3(sin(sc.x) * cos(sc.y), sin(sc.y), cos(sc.x) * cos(sc.y));
 				float ang = acos(clamp(dot(here, c), -1.0, 1.0)) / max(sc.z, 0.001);
-				float core = exp(-ang * ang * 4.0);
-				float ring = exp(-pow((ang - 1.3) / 0.25, 2.0)) * 0.6;
-				alb = mix(alb, vec3(0.16, 0.11, 0.09), clamp((core + ring) * sc.w, 0.0, 0.85));
+				// Пятно размыто ветрами: мягкое ядро и широкий тёмный ореол выброса,
+				// вытянутый вдоль пояса (по долготе).
+				vec3 dd = here - c;
+				float stretch_lat = abs(dd.y) / max(sc.z, 0.001);
+				float soft = ang * 0.7 + stretch_lat * 0.6;
+				float core = exp(-soft * soft * 1.6);
+				float halo = exp(-pow(max(soft - 1.0, 0.0) / 0.8, 2.0)) * 0.45 * smoothstep(0.3, 1.0, soft);
+				alb = mix(alb, vec3(0.2, 0.14, 0.11), clamp((core * 0.8 + halo) * sc.w, 0.0, 0.7));
 			}
 		} else {
 			alb = clouds(d, spot_k);
