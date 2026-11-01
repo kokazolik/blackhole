@@ -261,7 +261,7 @@ func _add(kind: String, at: Vector2, mass: float) -> Rival:
 	rv.name = NAMES[_name_i % NAMES.size()]
 	_name_i += 1
 	rv.spin = rng.randf() * TAU
-	rv.spin_rate = rng.randf_range(0.05, 0.2)
+	rv.spin_rate = rng.randf_range(0.01, 0.035)  # оборот за минуты, как у настоящих тел
 	var sprite := Sprite2D.new()
 	sprite.texture = _blank
 	var mat := ShaderMaterial.new()

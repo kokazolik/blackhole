@@ -24,6 +24,7 @@ var body: GiantBody
 var hud: GiantHud
 var events: GiantEvents
 var clumps: GasClumps
+var world: GiantWorld
 var joystick: VirtualJoystick
 var tree_screen: SkillTreeScreen
 var pause_menu: PauseMenu
@@ -31,6 +32,8 @@ var earths := 10.0
 var orbit := 7500.0
 var ang := 0.0               # угол гиганта на орбите: «вперёд» по экрану — вверх
 var vel := Vector2.ZERO     # x — от звезды, y — назад по орбите (экран вниз)
+var kick := Vector2.ZERO    # толчки извне: праща, притяжение тяжёлых тел; гаснут сами
+var _vortex_t := 0.0
 var gas := 0.0
 var gas_total := 1.0
 var moons := 0
@@ -113,10 +116,15 @@ func _ready() -> void:
 	clumps = GasClumps.new()
 	clumps.stage = self
 	add_child(clumps)
+	world = GiantWorld.new()
+	world.stage = self
+	add_child(world)
 	body = GiantBody.new()
 	body.sigma_at = func(x: float) -> float: return disk.at(orbit + x * body.hill)
 	add_child(body)
 	clumps.bind(body.gas)
+	world.bind(body.gas)
+	events.bind(world)
 	body.set_look(str(g.get("flavor", "giant_cold")))
 	body.moons = moons
 	# Только что после лавины: оболочка раздувается на глазах.
@@ -159,6 +167,7 @@ func _ready() -> void:
 		gas += total - gas_total
 		gas_total = total)
 
+	world.setup()
 	if _inflate < 1.0:
 		hud.caption("Газовый гигант", "ядро в десять масс Земли втягивает газ диска лавиной: ты раздуваешься", 4.5)
 	else:
@@ -203,7 +212,7 @@ func _process(delta: float) -> void:
 	if _feed0 < 0.0:
 		_feed0 = maxf(feed, 0.05)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
-	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * events.acc_mul()
+	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * events.acc_mul() * world.acc_mul()
 	var gained := mdot * delta
 	earths += gained
 	# Широкая кормовая зона расталкивает газ медленнее: щель открывается позже.
@@ -218,19 +227,25 @@ func _process(delta: float) -> void:
 	if not use_auto:
 		input += Vector2(Input.get_axis("ui_left", "ui_right"), Input.get_axis("ui_up", "ui_down"))
 	input = input.limit_length(1.0)
-	var speed := GameData.GIANT_SPEED * pow(earths / 10.0, -0.25) * Skills.stat("giant_speed")
-	vel = vel.lerp(input * speed, minf(delta * 2.2, 1.0))
+	var speed := GameData.GIANT_SPEED * pow(earths / 10.0, -0.1) * Skills.stat("giant_speed")
+	vel = vel.lerp(input * speed, minf(delta * 3.0, 1.0))
+	kick *= exp(-1.2 * delta)
 	var was := Vector2(orbit, ang)
-	orbit += vel.x * delta
-	ang = wrapf(ang + vel.y * delta / orbit, -PI, PI)
+	var move := vel + kick
+	orbit += move.x * delta
+	ang = wrapf(ang + move.y * delta / orbit, -PI, PI)
 	var mig := GameData.GIANT_MIGRATE * disk.at(orbit) * gk * maxf(1.0 - Skills.stat("giant_anchor"), 0.0)
 	orbit -= mig * delta
 	orbit = clampf(orbit, GameData.GIANT_ORBIT_MIN, GameData.GIANT_DISK.y - 600.0)
 	# Газ лежит в диске, а не едет с гигантом: сдвигаем частицы навстречу.
-	body.gas.shift(Vector2(orbit - was.x, wrapf(ang - was.y, -PI, PI) * orbit))
+	var moved := Vector2(orbit - was.x, wrapf(ang - was.y, -PI, PI) * orbit)
+	body.gas.shift(moved)
+	world.shift(moved)
 
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
 	clumps.step(delta)
+	world.step(delta)
+	_vortices(delta, h)
 	_moons_step(delta)
 	value_boost = maxf(value_boost - delta, 0.0)
 	events.step(delta)
@@ -291,11 +306,26 @@ func _moons_step(delta: float) -> void:
 			hud.caption("Магнитное поле", "поле выметает полость у гиганта и спасает луны от падения: его даёт железное ядро и «Динамо»", 4.0)
 
 
+## Вихри Россби на краях щели: газ, сгребённый приливом, закручивается.
+func _vortices(delta: float, h: float) -> void:
+	if not _said.has("gap"):
+		return
+	_vortex_t -= delta
+	if _vortex_t > 0.0:
+		return
+	_vortex_t = randf_range(45.0, 70.0)
+	var side := 1.0 if randf() < 0.5 else -1.0
+	var r := orbit + side * 2.6 * h
+	if r < GameData.GIANT_ORBIT_MIN or r > GameData.GIANT_DISK.y - 800.0:
+		r = orbit - side * 2.6 * h
+	world.spawn_vortex(r, str(GameState.giant.get("flavor", "")) == "giant_dark")
+
+
 ## Подсказки и вехи по ходу этапа.
 func _tell(feed: float, gk: float) -> void:
 	if _time > 7.0 and not _said.has("move"):
 		_said["move"] = true
-		hud.caption("Ищи газ", "стик в любую сторону: влево к звезде, вправо от неё, вверх и вниз вдоль орбиты. Догоняй сгустки газа и всё, что кружит в диске", 4.0)
+		hud.caption("Ищи газ", "стик в любую сторону. Мелкие тела рви приливом, средние бросай пращой, а от тех, что тяжелее тебя (красная метка), держись подальше", 4.5)
 	if feed < _feed0 * 0.45 and not _said.has("gap"):
 		_said["gap"] = true
 		hud.caption("Щель в диске", "ты выпил газ вдоль своей орбиты, а приливы сгребли остаток к краям: тянись к ним", 4.0)

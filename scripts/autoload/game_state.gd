@@ -197,7 +197,8 @@ func start_giant(flavor: String, r: float) -> void:
 ## Магнитное поле гиганта, 0..1: его раскручивает железное ядро.
 func giant_field() -> float:
 	var core := core_share if is_melted else 0.0
-	return clampf(0.15 + core * 1.6 + Skills.stat("giant_field"), 0.0, 1.0)
+	# Железо разорванных тел у плотного гиганта крепит поле (field_bonus).
+	return clampf(0.15 + core * 1.6 + Skills.stat("giant_field") + float(giant.get("field_bonus", 0.0)), 0.0, 1.0)
 
 
 ## Сколько лун удержит магнитное поле: оно расчищает полость у планеты,

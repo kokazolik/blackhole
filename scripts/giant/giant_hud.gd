@@ -326,6 +326,19 @@ func _draw_map() -> void:
 			_map.draw_rect(Rect2(ex - ew, top, ew * 2.0, h), Color(ec, 0.22 * a))
 		_map.draw_line(Vector2(ex, top - 2), Vector2(ex, top + h + 2), Color(ec, a), 2.0)
 		_map.draw_colored_polygon(PackedVector2Array([Vector2(ex - 6, top - 9), Vector2(ex + 6, top - 9), Vector2(ex, top - 1)]), Color(ec, a))
+	# Тела диска на карте: еда тёплая, тяжелее тебя — красная.
+	var w = stage.world
+	if w != null:
+		for b in w.bodies:
+			var role: String = w.role(b)
+			if role == "food" and float(b.m) < 0.4:
+				continue
+			var bx: float = (float(b.r) - lo) / (hi - lo) * s.x
+			if bx < 0.0 or bx > s.x:
+				continue
+			var bc := Color(1.0, 0.4, 0.32, 0.95) if role == "danger" else (UiTheme.GOLD if role == "merge" else (Color(0.95, 0.88, 0.7, 0.6) if role == "food" else Color(0.7, 0.8, 0.95, 0.6)))
+			var by := top + h * (0.25 + 0.5 * fmod(float(b.seed), 1.0))
+			_map.draw_circle(Vector2(bx, by), 4.0 if b.kind in ["rival", "dwarf"] else 2.0, bc)
 	var px: float = (stage.orbit - lo) / (hi - lo) * s.x
 	_map.draw_line(Vector2(px, top - 4), Vector2(px, top + h + 2), UiTheme.GOLD, 2.5)
 	_map.draw_circle(Vector2(px, top - 4), 5.0, UiTheme.GOLD)
@@ -334,8 +347,48 @@ func _draw_map() -> void:
 	_map.draw_string(f, Vector2(snow_x + 4, s.y - 2), "снеговая линия", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.85, 1.0, 0.8))
 
 
+## Стрелки к телам мира за краем экрана: еда, вихри, опасность.
+func _draw_world_marks() -> void:
+	var w = stage.world
+	if w == null:
+		return
+	var vp := _pointer.size
+	var cam: Camera2D = stage.camera
+	var zoom: float = cam.zoom.x
+	var center: Vector2 = cam.get_screen_center_position()
+	var used := []
+	for m in w.markers():
+		var sp: Vector2 = ((m.p as Vector2) - center).rotated(-cam.rotation) * zoom + vp * 0.5
+		var margin := 48.0
+		if sp.x > margin and sp.x < vp.x - margin and sp.y > 140.0 and sp.y < vp.y - 120.0:
+			continue
+		var dir := (sp - vp * 0.5).normalized()
+		# Точка на краю безопасной рамки экрана.
+		var half := Vector2(vp.x * 0.5 - margin, vp.y * 0.5 - 130.0)
+		var k := minf(half.x / maxf(absf(dir.x), 0.001), half.y / maxf(absf(dir.y), 0.001))
+		var at := vp * 0.5 + dir * k
+		var clash := false
+		for u in used:
+			if (u as Vector2).distance_to(at) < 90.0:
+				clash = true
+		if clash:
+			continue
+		used.append(at)
+		var c: Color = m.col
+		var a := 0.6 + 0.3 * sin(_time * 3.0)
+		var tip := at + dir * 16.0
+		var side := dir.orthogonal() * 11.0
+		_pointer.draw_colored_polygon(PackedVector2Array([tip, at - dir * 6.0 + side, at - dir * 6.0 - side]), Color(c, a))
+		var dist := ((m.p as Vector2) - center).length() / GameData.AU_UNITS
+		var txt := "%s · %s а.е." % [m.text, ("%.1f" % dist).replace(".", ",")]
+		var tp := at - dir * 40.0 - Vector2(110.0, -5.0)
+		tp.x = clampf(tp.x, 8.0, vp.x - 228.0)
+		_pointer.draw_string(UiTheme.FONT_SEMI, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 220, 14, Color(c, 0.9))
+
+
 ## Стрелка к цели события у края экрана, если сама цель за ним.
 func _draw_pointer() -> void:
+	_draw_world_marks()
 	var ev = stage.events
 	if ev == null or not ev.active():
 		return

@@ -3,39 +3,41 @@ extends Node2D
 ##
 ## Ледяной гигант ловит кометный рой с окраин диска, Юпитер из камня
 ## глотает соседний зародыш, плотный железный гигант полем захватывает
-## блуждающее тело в луны, тёмный гонится за углеродной тучей, что сползает
-## к звезде, а горячий у самой звезды уходит от её вспышки.
+## блуждающее тело в луны, тёмный держится в углеродной туче (вихрь сажи),
+## а горячий у самой звезды уходит от её вспышки.
 ## Тип тела добавляет оттенок: хондрит, Титан и парниковый мир получают своё.
 ##
-## Рисуется в мире (полоса цели вдоль орбиты и сам объект); HUD берёт
-## отсюда метку на карте газа и стрелку к цели за краем экрана.
+## Цели — настоящие тела и вихри мира (system_world.gd): их видно, их рвёт
+## прилив, как всё остальное. HUD берёт отсюда метку на карте и подсказку.
 
 const FIRST := 35.0          # первое событие, секунд от начала этапа
 const GAP := Vector2(55.0, 80.0)
 const STRAY_MOONS := 6       # больше лун не захватить даже сильным полем
+const COMETS := 7
+const COMETS_WIN := 3
 
 const KINDS := {
 	"comets": {
 		"title": "Кометный рой",
-		"sub": "с окраин диска падает рой ледяных тел: дотянись до их орбиты, пока он не прошёл мимо",
-		"time": 24.0, "color": Color(0.62, 0.86, 1.0),
+		"sub": "с окраин диска падает рой ледяных комет: порви приливом хотя бы три, пока рой не ушёл к звезде",
+		"time": 30.0, "color": Color(0.62, 0.86, 1.0),
 		"fail": "Рой прошёл мимо",
 	},
 	"rival": {
 		"title": "Соседний зародыш",
-		"sub": "в щель вошёл чужой зародыш: дойди до его орбиты и проглоти, пока его не выбросило",
-		"time": 24.0, "color": Color(0.9, 0.7, 0.5),
+		"sub": "в щель вошёл чужой зародыш: догони и порви его, пока его не выбросило",
+		"time": 30.0, "color": Color(0.9, 0.7, 0.5),
 		"fail": "Сосед ушёл: его выбросило из щели",
 	},
 	"stray": {
 		"title": "Блуждающее тело",
-		"sub": "мимо идёт тело на вытянутой орбите: подойди, и железное поле захватит его в луны",
-		"time": 26.0, "color": Color(0.8, 0.82, 0.86),
+		"sub": "мимо идёт железное тело: подойди, и поле захватит его в луны, а не порвёт",
+		"time": 30.0, "color": Color(0.8, 0.82, 0.86),
 		"fail": "Тело ушло на свою орбиту",
 	},
 	"cloud": {
 		"title": "Углеродная туча",
-		"sub": "густая тёмная туча сползает к звезде: держись в ней, пока она идёт, и пей газ вдвое быстрее",
+		"sub": "в диске закрутился вихрь сажи: держись в нём, пока он живёт, и пей газ быстрее",
 		"time": 30.0, "color": Color(0.85, 0.55, 0.3),
 		"fail": "",
 	},
@@ -52,15 +54,20 @@ var kind := ""               # текущее событие, "" — нет
 var r := 0.0                 # орбита цели
 var t := 0.0                 # секунд до конца события
 var inside := 0.0            # секунд внутри тучи
-var _base := 0.0             # центр колебаний блуждающего тела
+var caught := 0              # комет поймано
+var _targets: Array = []     # тела мира, что относятся к событию
+var _vortex: Dictionary = {}
 var _next := FIRST
 var _time := 0.0
 var _rng := RandomNumberGenerator.new()
-var _view: MoonView = null
 
 
 func _ready() -> void:
 	_rng.randomize()
+
+
+func bind(world: GiantWorld) -> void:
+	world.body_eaten.connect(_on_eaten)
 
 
 ## Какое событие у этого гиганта: решает ядро (флейвор).
@@ -91,24 +98,30 @@ func title() -> String:
 
 ## Допуск: насколько близко к цели надо подойти, в единицах диска.
 func tol() -> float:
-	if kind == "cloud":
-		return maxf(1.4 * stage.hill(), 650.0)
+	if kind == "cloud" and not _vortex.is_empty():
+		return float(_vortex.size)
 	return maxf(1.15 * stage.hill(), 500.0)
 
 
 func hint() -> String:
 	match kind:
 		"cloud":
-			return "%s · %d с · ты в туче %d с" % [title(), ceili(t), int(inside)] if absf(stage.orbit - r) < tol() \
-				else "%s · %d с · догони тучу" % [title(), ceili(t)]
+			return "%s · %d с · ты в туче %d с" % [title(), ceili(t), int(inside)] if _in_cloud() \
+				else "%s · %d с · зайди в тучу" % [title(), ceili(t)]
 		"flare":
 			return "%s · %d с · уйди за границу" % [title(), ceili(t)]
-	return "%s · %d с · дотянись до метки" % [title(), ceili(t)]
+		"comets":
+			return "%s · %d с · поймано %d из %d" % [title(), ceili(t), caught, COMETS_WIN]
+	return "%s · %d с · догони тело" % [title(), ceili(t)]
 
 
-## Множители для этапа: аккреция и звёздная пыль.
+## Множители для этапа: аккреция.
 func acc_mul() -> float:
-	return 2.0 if kind == "cloud" and absf(stage.orbit - r) < tol() else 1.0
+	return 1.4 if kind == "cloud" and _in_cloud() else 1.0
+
+
+func _in_cloud() -> bool:
+	return not _vortex.is_empty() and stage.world.in_vortex() == _vortex
 
 
 func step(delta: float) -> void:
@@ -120,26 +133,38 @@ func step(delta: float) -> void:
 			_start(kind_for(str(GameState.giant.get("flavor", "giant_cold"))))
 		return
 	t -= delta
-	var lo := GameData.GIANT_ORBIT_MIN
-	var hi := GameData.GIANT_DISK.y - 600.0
+	# Цель — живое тело: метка на карте идёт за ним.
+	var live := []
+	for b in _targets:
+		if b.state != "gone" and stage.world.bodies.has(b):
+			live.append(b)
+	_targets = live
+	if not _targets.is_empty():
+		r = float(_targets[0].r)
 	match kind:
-		"stray":
-			r = clampf(_base + 650.0 * sin(_time * 0.7), lo, hi)
 		"cloud":
-			r -= 85.0 * delta
-			if absf(stage.orbit - r) < tol():
-				if inside == 0.0:
-					stage.hud.toast("Ты в туче: газ вдвое гуще", color())
-				inside += delta
-			if r < lo + 200.0:
+			if _vortex.is_empty() or not stage.world.vortices.has(_vortex):
 				t = 0.0
-	if kind == "flare":
-		if t <= 0.0:
-			_flare_end()
-		return
-	if kind != "cloud" and absf(stage.orbit - r) < tol():
-		_win()
-		return
+			else:
+				r = float(_vortex.r)
+				if _in_cloud():
+					if inside == 0.0:
+						stage.hud.toast("Ты в туче: газ гуще, сажа идёт в пыль", color())
+					inside += delta
+		"flare":
+			if t <= 0.0:
+				_flare_end()
+			return
+		"comets":
+			if caught >= COMETS_WIN:
+				_comets_win()
+				return
+			if _targets.is_empty():
+				t = 0.0
+		"rival", "stray":
+			if _targets.is_empty() and t > 0.0:
+				# Тело ушло не к тебе (соперник, звезда): событие кончилось.
+				t = 0.0
 	if t <= 0.0:
 		if kind == "cloud":
 			_cloud_end()
@@ -152,80 +177,106 @@ func _start(k: String) -> void:
 	kind = k
 	t = KINDS[k]["time"]
 	inside = 0.0
+	caught = 0
+	_targets = []
+	_vortex = {}
+	var w: GiantWorld = stage.world
 	var o: float = stage.orbit
+	var g: float = stage.ang
 	var lo := GameData.GIANT_ORBIT_MIN + 400.0
 	var hi := GameData.GIANT_DISK.y - 1000.0
-	var d := _rng.randf_range(1900.0, 3200.0)
+	var d := _rng.randf_range(1900.0, 3000.0)
 	match k:
 		"comets":
-			# Кометы приходят с холодной окраины: цель снаружи, за снеговой линией.
-			r = maxf(o + d, GameData.SNOW_LINE + 700.0)
-			if r > hi:
-				r = o - d
+			# Кометы приходят с холодной окраины и летят к звезде.
+			r = clampf(maxf(o + d, GameData.SNOW_LINE + 700.0), lo, hi)
+			# Рой приходит издалека по орбите: его ещё надо догнать.
+			var ahead := _rng.randf_range(0.3, 0.42) * (1.0 if _rng.randf() < 0.5 else -1.0)
+			for i in COMETS:
+				var b := w._add_body("comet", r + _rng.randf_range(-300.0, 900.0), g + ahead + _rng.randf_range(-0.05, 0.05), "ice")
+				b.tag = "ev"
+				_targets.append(b)
 		"cloud":
-			r = o + d + 600.0
-			if r > hi:
-				r = hi
+			r = clampf(o + d * (1.0 if _rng.randf() < 0.5 else -1.0), lo, hi)
+			_vortex = w.spawn_vortex(r, true, 34.0, true)
 		"flare":
 			r = minf(o + 1500.0, 9000.0)
 		_:
 			r = o + d * (1.0 if _rng.randf() < 0.5 else -1.0)
 			if r > hi or r < lo:
 				r = o - (r - o)
-	r = clampf(r, lo, hi)
-	_base = r
+			r = clampf(r, lo, hi)
+			var off := _rng.randf_range(0.08, 0.16) * (1.0 if _rng.randf() < 0.5 else -1.0)
+			if k == "rival":
+				var mat := "carbon" if GameState.body_type() == "venus" else "rock"
+				var b := w._add_body("embryo", r, g + off, mat, clampf(w.eat_limit() * 0.8, 0.6, 6.0))
+				b.tag = "ev"
+				_targets.append(b)
+			else:
+				var b := w._add_body("embryo", r, g + off, "metal", clampf(w.eat_limit() * 0.5, 0.6, 3.0))
+				b.tag = "ev"
+				b["moon"] = stage.moons < STRAY_MOONS
+				_targets.append(b)
 	stage.hud.caption(KINDS[k]["title"], KINDS[k]["sub"], 3.5)
+
+
+func _on_eaten(b: Dictionary) -> void:
+	if not active() or not _targets.has(b):
+		return
+	match kind:
+		"comets":
+			caught += 1
+		"rival":
+			_rival_win()
+		"stray":
+			_stray_win(b)
 
 
 func _finish() -> void:
 	kind = ""
+	_targets = []
+	_vortex = {}
 	_next = _rng.randf_range(GAP.x, GAP.y)
 
 
-func _win() -> void:
-	var col := color()
+func _comets_win() -> void:
+	var at: Vector2 = stage.body.position
+	var gain: float = 2.0 + 0.04 * stage.earths
+	stage.earths += gain
+	stage.pay(gain * 3.0)
+	GameState.add_chondrules(4, at)
+	if GameState.body_type() == "titan":
+		# Метановый лёд Титана: обломки комет слипаются в спутник.
+		stage.moon_prog += 0.5
+		stage.hud.toast("Рой пойман: +%s масс Земли, метановый лёд пошёл на луну" % String.num(gain, 1).replace(".", ","), color())
+	else:
+		stage.hud.toast("Рой пойман: +%s масс Земли, хондры +4" % String.num(gain, 1).replace(".", ","), color())
+	_finish()
+
+
+func _rival_win() -> void:
 	var type := GameState.body_type()
 	var at: Vector2 = stage.body.position
-	match kind:
-		"comets":
-			stage.clumps.shred_now("rubble", "ice", Vector2(stage.hill() * 1.2, -stage.hill() * 0.6).rotated(stage.ang), 7)
-			var gain: float = 3.0 + 0.06 * stage.earths
-			stage.earths += gain
-			stage.pay(gain * 3.0)
-			GameState.add_chondrules(4, at)
-			if type == "titan":
-				# Метановый лёд Титана: обломки комет слипаются в спутник.
-				stage.moon_prog += 0.5
-				stage.hud.toast("Рой пойман: +%.1f M⊕, метановый лёд пошёл на луну" % gain, col)
-			else:
-				stage.hud.toast("Рой пойман: +%.1f масс Земли, хондры +4" % gain, col)
-		"rival":
-			stage.clumps.shred_now("embryo", "rock", Vector2(0.0, -stage.hill() * 1.3).rotated(stage.ang))
-			var gain: float = _rng.randf_range(4.0, 8.0) + 0.08 * stage.earths
-			stage.earths += gain
-			stage.pay(gain * 2.0)
-			var ch := 8 if type == "chondrite" else 4
-			GameState.add_chondrules(ch, at)
-			var text := "Сосед проглочен: +%.1f масс Земли, хондры +%d" % [gain, ch]
-			if type == "venus":
-				stage.value_boost = 25.0
-				text += ", углерод соседа: пыль ×1,5 на 25 с"
-			if _rng.randf() < 0.35:
-				stage.moon_prog += 1.0
-				text += ", из обломков соберётся луна"
-			stage.hud.toast(text, col)
-		"stray":
-			GameState.add_chondrules(6, at)
-			if stage.moons < STRAY_MOONS:
-				stage.moons += 1
-				stage.body.moons = stage.moons
-				# Тело подходит со своей орбиты и садится на лунную, а не возникает.
-				stage.body.birth(stage.moons - 1, Vector2(clampf(r - stage.orbit, -2.0 * stage.hill(), 2.0 * stage.hill()) + 0.01, -stage.hill() * 0.8))
-				stage.hud.toast("Поле захватило луну %s! Хондры +6" % stage.body.moon_name(stage.moons - 1), col)
-			else:
-				stage.earths += 1.5
-				stage.body.fall()
-				stage.hud.toast("Лунам тесно: тело упало в тебя, +1,5 массы Земли", col)
+	var gain: float = _rng.randf_range(2.0, 5.0) + 0.05 * stage.earths
+	stage.earths += gain
+	stage.pay(gain * 2.0)
+	var ch := 8 if type == "chondrite" else 4
+	GameState.add_chondrules(ch, at)
+	var text := "Сосед порван: ещё +%s масс Земли, хондры +%d" % [String.num(gain, 1).replace(".", ","), ch]
+	if type == "venus":
+		stage.value_boost = 25.0
+		text += ", углерод соседа: пыль ×1,5 на 25 с"
+	if _rng.randf() < 0.35:
+		stage.moon_prog += 1.0
+		text += ", из обломков соберётся луна"
+	stage.hud.toast(text, color())
+	_finish()
+
+
+func _stray_win(b: Dictionary) -> void:
+	GameState.add_chondrules(6, stage.body.position)
+	if not b.get("moon", false):
+		stage.hud.toast("Лунам тесно: тело порвало, хондры +6", color())
 	_finish()
 
 
@@ -233,9 +284,9 @@ func _cloud_end() -> void:
 	if inside > 3.0:
 		var ch := clampi(int(inside / 4.0), 1, 6)
 		GameState.add_chondrules(ch, stage.body.position)
-		stage.hud.toast("Туча прошла: %d с в ней, хондры +%d" % [int(inside), ch], color())
+		stage.hud.toast("Туча рассеялась: %d с в ней, хондры +%d" % [int(inside), ch], color())
 	else:
-		stage.hud.toast("Туча прошла мимо", Color(1.0, 0.7, 0.55))
+		stage.hud.toast("Туча рассеялась без тебя", Color(1.0, 0.7, 0.55))
 	_finish()
 
 
@@ -249,71 +300,16 @@ func _flare_end() -> void:
 	_finish()
 
 
-# --- Вид ---
+# --- Вид: граница вспышки. Остальные цели — тела и вихри мира. ---
 
 func _draw() -> void:
-	if _view != null:
-		_view.visible = false
-	if not active() or stage == null:
+	if kind != "flare" or stage == null:
 		return
 	var zoom: float = stage.camera.zoom.x
 	var px := 1.0 / maxf(zoom, 0.01)
 	var vp: Vector2 = get_viewport_rect().size
 	var span := clampf(vp.y * 0.6 * px / r, 0.02, PI)
-	var col := color()
 	var pulse := 0.6 + 0.4 * sin(_time * 3.0)
-	var w := tol()
-	var g: float = stage.ang  # гигант не всегда на оси x: цель рисуем рядом с ним
-	if kind == "flare":
-		# Горячая зона вокруг звезды: всё, что ближе границы.
-		draw_circle(Vector2.ZERO, r, Color(1.0, 0.45, 0.25, 0.05 + 0.04 * pulse))
-		draw_arc(Vector2.ZERO, r, g - span, g + span, 96, Color(1.0, 0.55, 0.35, 0.55 * pulse), 3.0 * px, true)
-		return
-	# Полоса цели вдоль орбиты: мягкая, с яркими краями.
-	draw_arc(Vector2.ZERO, r, g - span, g + span, 128, Color(col, 0.06 + 0.04 * pulse), w * 2.0, true)
-	draw_arc(Vector2.ZERO, r - w, g - span, g + span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
-	draw_arc(Vector2.ZERO, r + w, g - span, g + span, 128, Color(col, 0.3 * pulse), 1.5 * px, true)
-	var ang := g + 0.35 * span * sin(_time * 0.25)
-	var p := Vector2(cos(ang), sin(ang)) * r
-	var light := -p.normalized()
-	match kind:
-		"comets":
-			for i in 7:
-				var q := p + Vector2(sin(i * 2.4) * 45.0, cos(i * 1.7) * 120.0) * px
-				var tail := -light * (90.0 + 40.0 * (i % 3)) * px
-				for k in 6:
-					var f := float(k) / 6.0
-					draw_line(q + tail * f, q + tail * (f + 1.0 / 6.0), Color(0.7, 0.88, 1.0, 0.22 * (1.0 - f)), (3.0 - 2.4 * f) * px, true)
-				_ball(q, (2.5 + (i % 3)) * px, Color(0.82, 0.9, 1.0), light)
-		"rival":
-			_moon(p, 14.0 * px, MoonView.style_for_type(GameState.body_type()), light)
-		"stray":
-			# Вытянутая орбита: тело качается туда-сюда поперёк орбит.
-			draw_arc(Vector2.ZERO, _base - 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
-			draw_arc(Vector2.ZERO, _base + 650.0, g - span * 0.5, g + span * 0.5, 64, Color(col, 0.12), px, true)
-			_moon(p, 9.0 * px, 4, light)
-		"cloud":
-			for i in 26:
-				var f := float(i) / 26.0
-				var off := Vector2(sin(i * 3.1 + _time * 0.2) * w * 0.7, cos(i * 1.9 + _time * 0.15) * w * 1.6)
-				draw_circle(p + off, w * (0.35 + 0.4 * f), Color(0.3, 0.19, 0.11, 0.1) if i % 2 == 0 else Color(0.06, 0.04, 0.03, 0.16))
-			for i in 8:
-				var off := Vector2(sin(i * 2.3) * w * 0.5, cos(i * 1.3 + _time * 0.3) * w * 1.2)
-				draw_circle(p + off, 4.0 * px, Color(1.0, 0.6, 0.3, 0.35 + 0.2 * sin(_time * 4.0 + i)))
-
-
-## Шар, освещённый со стороны звезды.
-func _ball(c: Vector2, rad: float, col: Color, light: Vector2) -> void:
-	var steps := 9
-	for k in steps:
-		var f := float(k) / steps
-		var lum := 0.07 + 0.93 * pow(f, 0.7)
-		draw_circle(c + light * rad * 0.5 * f, rad * (1.0 - f * 0.85), Color(col.r * lum, col.g * lum, col.b * lum))
-
-
-## Тело события шейдером, а не кружками.
-func _moon(c: Vector2, rad: float, style: int, light: Vector2) -> void:
-	if _view == null:
-		_view = MoonView.new()
-		add_child(_view)
-	_view.put(c, rad, style, light, 2.3, _time * 0.2)
+	var g: float = stage.ang
+	draw_circle(Vector2.ZERO, r, Color(1.0, 0.45, 0.25, 0.05 + 0.04 * pulse))
+	draw_arc(Vector2.ZERO, r, g - span, g + span, 96, Color(1.0, 0.55, 0.35, 0.55 * pulse), 3.0 * px, true)

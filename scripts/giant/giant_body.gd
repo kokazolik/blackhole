@@ -27,12 +27,19 @@ var _map_vp := SubViewport.new()   # карта облаков: печётся �
 var _map_mat := ShaderMaterial.new()
 var _bake_t := 0.0
 const BAKE_EVERY := 0.4
+const SPIN := 0.12
+const MOON_W := 0.22          # угловая скорость ближней луны у поверхности, рад/с
+const FALL_TIME := 7.0
 var gas := GasParticles.new()   # газ частицами: струи и сгустки
 var _planet_mat := ShaderMaterial.new()
 var _cpd_mat := ShaderMaterial.new()
 var _birth := {}                      # луна -> {t, from}: рождение или захват на глазах
 var _falling: Array = []              # луны, что падают в гиганта
 var _impacts: Array = []
+var _stolen: Array = []               # луны, которые увёл тяжёлый сосед
+var _scars: Array = []                # тёмные следы ударов в облаках, как у Юпитера в 1994-м
+var _flash_nodes: Array = []
+var _flash_tex := GiantWorld._make_flash_tex()
 var _views: Array = []                # MoonView на каждую видимую луну
 var _used := 0
 var _time := 0.0
@@ -111,12 +118,13 @@ func _process(delta: float) -> void:
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
 	_planet_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
-	_planet_mat.set_shader_parameter("spin", _time * 0.12)  # оборот меньше чем за минуту: вращение видно
+	_planet_mat.set_shader_parameter("spin", _time * SPIN)  # оборот меньше чем за минуту: вращение видно
+	_update_scars(delta)
 	_bake_t -= delta
 	if _bake_t <= 0.0:
 		_bake_t = BAKE_EVERY
 		# Пояса со своими скоростями: соседние полосы скользят друг по другу.
-		_map_mat.set_shader_parameter("spin_jet", _time * 0.12)
+		_map_mat.set_shader_parameter("spin_jet", _time * SPIN)
 		_map_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
 		_map_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var cr := hill * 0.95
@@ -132,10 +140,12 @@ func _process(delta: float) -> void:
 			_birth.erase(i)
 	var keep := []
 	for f in _falling:
-		f.t = float(f.t) + delta / 3.0
+		f.t = float(f.t) + delta / FALL_TIME
 		if f.t >= 1.0:
-			var an := float(f.ang) + _time * 0.9 + 4.0
-			_impacts.append({"t": 0.0, "p": Vector2(cos(an), sin(an)) * r * 0.95})
+			var an := _fall_angle(f, r, 1.0)
+			var at := Vector2(cos(an), sin(an)) * r * 0.95
+			_impacts.append({"t": 0.0, "p": at})
+			scar(at.normalized(), r * 0.07)
 			flash()
 		else:
 			keep.append(f)
@@ -144,10 +154,16 @@ func _process(delta: float) -> void:
 	for j in range(_used, _views.size()):
 		(_views[j] as MoonView).visible = false
 	for im in _impacts:
-		im.t = float(im.t) + delta / 1.2
+		im.t = float(im.t) + delta / 1.4
 		if im.t < 1.0:
 			ik.append(im)
 	_impacts = ik
+	var sk := []
+	for st in _stolen:
+		st.t = float(st.t) + delta / 3.0
+		if st.t < 1.0:
+			sk.append(st)
+	_stolen = sk
 	gas.hill = hill
 	gas.reach = reach
 	gas.flow = flow
@@ -180,48 +196,46 @@ func _moon_ball(ci: Node2D, p: Vector2, mr: float, i: int, shadow: float, heat :
 	view.put(p, mr, style, Vector2(-1.0, -0.12), float(i) * 1.37, _time * 0.04 + i, shadow, heat, form)
 
 
+func _moon_orbit(i: int, r: float) -> Vector2:
+	var a := r * (1.55 + 0.55 * i)
+	var ang := _time * MOON_W * pow(a / r, -1.5) + i * 2.1
+	return Vector2(cos(ang), sin(ang)) * a
+
+
+func _fall_angle(f: Dictionary, r: float, e: float) -> float:
+	var a2: float = lerpf(float(f.a), r * 0.98, e)
+	return float(f.ang) + _time * MOON_W * pow(a2 / r, -1.5) + e * 1.6
+
+
 func _draw_moons(ci: Node2D) -> void:
 	var r := body_r * inflate
 	var px := 1.0 / maxf(zoom, 0.01)
-	var cols := [Color(0.78, 0.68, 0.42), Color(0.74, 0.72, 0.68), Color(0.5, 0.47, 0.44), Color(0.42, 0.39, 0.37)]
 	_used = 0
 	for i in moons:
 		var a := r * (1.55 + 0.55 * i)
-		var w := 0.9 * pow(a / r, -1.5)
-		var ang := _time * w + i * 2.1
-		var p := Vector2(cos(ang), sin(ang)) * a
+		var p := _moon_orbit(i, r)
+		var ang := p.angle()
 		var mr := maxf(r * (0.06 + 0.02 * (i % 3)), 2.0 * px)
-		var c: Color = cols[i % cols.size()]
 		var grow := 1.0
+		var form := 1.0
+		var ring := 0.035
 		if _birth.has(i):
 			var b: Dictionary = _birth[i]
 			var e := smoothstep(0.0, 1.0, float(b.t))
 			var from: Vector2 = b.from
+			ring *= e
 			if from.x == INF:
-				# Пыль своего диска стягивается в комок: облачко по орбите сжимается в шар.
-				for k in 28:
-					var f := float(k) / 28.0
-					var spread := (1.0 - e) * (0.4 + 2.2 * f)
-					var aa := ang - spread * (0.3 + 0.7 * fmod(k * 0.618, 1.0))
-					var rr := a * (1.0 + (1.0 - e) * 0.18 * sin(k * 2.3))
-					ci.draw_circle(Vector2(cos(aa), sin(aa)) * rr, maxf(mr * (0.12 + 0.18 * (1.0 - f)), 0.8 * px), Color(c.lightened(0.2), 0.5 * (1.0 - e * 0.7)))
-				grow = smoothstep(0.3, 1.0, e)
+				# Пыль своего диска стягивается в комок: дуга пыли по орбите
+				# сжимается, а рыхлый шар уплотняется (шейдер луны, form).
+				var spread := (1.0 - e) * 2.2
+				ci.draw_arc(Vector2.ZERO, a, ang - spread, ang, 48, Color(0.8, 0.76, 0.68, 0.1 * (1.0 - e)), mr * (1.6 - e), true)
+				grow = smoothstep(0.15, 1.0, e)
+				form = smoothstep(0.3, 1.0, e)
 			else:
 				# Захваченное тело подходит по дуге и садится на орбиту.
-				var q := from.lerp(p, e)
-				q += (p - from).orthogonal().normalized() * sin(e * PI) * from.distance_to(p) * 0.25
-				for k in 10:
-					var f := float(k + 1) / 10.0
-					var ek := clampf(e - f * 0.15, 0.0, 1.0)
-					var qk := from.lerp(p, ek) + (p - from).orthogonal().normalized() * sin(ek * PI) * from.distance_to(p) * 0.25
-					ci.draw_circle(qk, mr * 0.35 * (1.0 - f), Color(0.8, 0.85, 1.0, 0.2 * (1.0 - f)))
-				p = q
-			ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035 * e), px, true)
-		else:
-			ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, 0.035), px, true)
-		var form := 1.0
-		if _birth.has(i) and (_birth[i].from as Vector2).x == INF:
-			form = smoothstep(0.3, 1.0, float(_birth[i].t))
+				var bend := (p - from).orthogonal().normalized() * sin(e * PI) * from.distance_to(p) * 0.25
+				p = from.lerp(p, e) + bend
+		ci.draw_arc(Vector2.ZERO, a, 0.0, TAU, 128, Color(0.75, 0.82, 0.95, ring), px, true)
 		if grow <= 0.01:
 			continue
 		# Тень гиганта: луна за ним гаснет.
@@ -229,22 +243,82 @@ func _draw_moons(ci: Node2D) -> void:
 		if p.x > 0.0 and absf(p.y) < r:
 			shadow = 0.18 + 0.82 * smoothstep(r * 0.8, r, absf(p.y))
 		_moon_ball(ci, p, maxf(mr * grow, 2.0 * px) * 1.3, i, shadow, 0.0, form)
-	# Падающие луны: спираль вниз, вспышка в облаках.
+	# Падающие луны: медленная спираль вниз, накал у самых облаков.
 	for f in _falling:
 		var e := smoothstep(0.0, 1.0, float(f.t))
 		var a2: float = lerpf(float(f.a), r * 0.98, e)
-		var an: float = float(f.ang) + _time * 0.9 * pow(a2 / r, -1.5) + e * 4.0
+		var an := _fall_angle(f, r, e)
 		var p2 := Vector2(cos(an), sin(an)) * a2
-		var mr2 := r * 0.07 * (1.0 - 0.4 * e)
-		for k in 8:
-			var bk := float(k + 1) / 8.0
-			var anb := an - bk * 0.35
-			ci.draw_circle(Vector2(cos(anb), sin(anb)) * (a2 + bk * r * 0.05), mr2 * 0.4 * (1.0 - bk), Color(1.0, 0.7, 0.45, 0.3 * e * (1.0 - bk)))
-		_moon_ball(ci, p2, mr2 * 1.3, moons + 1, 1.0, smoothstep(0.6, 1.0, e))
+		_moon_ball(ci, p2, r * 0.07 * (1.0 - 0.3 * e) * 1.3, moons + 1, 1.0, smoothstep(0.55, 1.0, e))
+	# Уведённые луны: уходят к тому, кто их сорвал.
+	for st in _stolen:
+		var e := smoothstep(0.0, 1.0, float(st.t))
+		var from: Vector2 = st.from
+		var to: Vector2 = st.to
+		var q := from.lerp(to, e) + (to - from).orthogonal().normalized() * sin(e * PI) * from.distance_to(to) * 0.2
+		_moon_ball(ci, q, r * 0.08, int(st.i), 1.0, 0.0, 1.0)
+	_draw_flashes(ci, r)
+
+
+## Тяжёлый сосед увёл крайнюю луну.
+func steal(to: Vector2) -> void:
+	var r := body_r * inflate
+	_stolen.append({"t": 0.0, "from": _moon_orbit(moons, r), "to": to, "i": moons})
+
+
+## Тёмный след удара в облаках: на карте облаков, крутится вместе с шаром
+## и расплывается за минуту. dir — точка удара на диске (локально, длина 1).
+func scar(dir: Vector2, size: float) -> void:
+	var r := body_r * inflate
+	var tl := 0.12
+	var nv := Vector3(dir.x * 0.9, dir.y * 0.9, sqrt(1.0 - 0.81))
+	var d := Vector3(nv.x, cos(tl) * nv.y + sin(tl) * nv.z, -sin(tl) * nv.y + cos(tl) * nv.z)
+	var lon := atan2(d.x, d.z) + _time * SPIN
+	var lat := asin(clampf(d.y, -1.0, 1.0))
+	_scars.append({"lon": lon, "lat": lat, "size": clampf(size / r, 0.04, 0.2), "t": 0.0})
+	if _scars.size() > 6:
+		_scars.pop_front()
+
+
+func _update_scars(delta: float) -> void:
+	var arr: Array[Vector4] = []
+	var keep := []
+	for sc in _scars:
+		sc.t = float(sc.t) + delta / 70.0
+		if float(sc.t) < 1.0:
+			keep.append(sc)
+	_scars = keep
+	for i in 6:
+		if i < _scars.size():
+			var sc: Dictionary = _scars[i]
+			var k := float(sc.t)
+			arr.append(Vector4(float(sc.lon), float(sc.lat), float(sc.size) * (1.0 + 1.5 * k), (1.0 - k) * minf(k * 20.0, 1.0)))
+		else:
+			arr.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	_planet_mat.set_shader_parameter("scars", arr)
+
+
+## Вспышки ударов в облаках: мягкий спрайт, складывается со светом.
+func _draw_flashes(ci: Node2D, r: float) -> void:
+	var used := 0
 	for im in _impacts:
-		var k := 1.0 - float(im.t)
-		ci.draw_circle(im.p, r * 0.08 * (1.0 + 2.0 * float(im.t)), Color(1.0, 0.75, 0.5, 0.5 * k * k))
-		ci.draw_circle(im.p, r * 0.04, Color(1.0, 0.95, 0.85, 0.9 * k))
+		if used >= _flash_nodes.size():
+			var sp := Sprite2D.new()
+			sp.texture = _flash_tex
+			var mat := CanvasItemMaterial.new()
+			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+			sp.material = mat
+			ci.add_child(sp)
+			_flash_nodes.append(sp)
+		var spr: Sprite2D = _flash_nodes[used]
+		used += 1
+		var t := float(im.t)
+		spr.visible = true
+		spr.position = im.p
+		spr.scale = Vector2.ONE * r * 0.3 * (0.5 + 1.5 * sqrt(t)) * 2.0 / 128.0
+		spr.modulate = Color(1.0, 0.8, 0.6, (1.0 - t) * (1.0 - t))
+	for i in range(used, _flash_nodes.size()):
+		(_flash_nodes[i] as Sprite2D).visible = false
 
 
 static func moon_name(i: int) -> String:

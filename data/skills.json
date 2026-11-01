@@ -2596,6 +2596,257 @@
 			"requires_route": "giant"
 		},
 		{
+			"id": "g_tidal",
+			"title": "Приливная сила",
+			"desc": "Прилив гиганта рвёт тела крупнее: можно съесть тело на 25% тяжелее за уровень. Суперземли и мини-нептуны становятся едой раньше.",
+			"cost": 120000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				-5.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"effects": {
+				"giant_tidal": 0.25
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "pulse"
+		},
+		{
+			"id": "g_grab",
+			"title": "Длинный прилив",
+			"desc": "Прилив хватает тела дальше от тебя: радиус захвата +12% за уровень.",
+			"cost": 120000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				5.0,
+				31.25
+			],
+			"requires": [
+				"g_root"
+			],
+			"effects": {
+				"giant_grab": 0.12
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "reach_1"
+		},
+		{
+			"id": "g_sling",
+			"title": "Гравитационная праща",
+			"desc": "Пролёт рядом бросает тело сильнее: праща +30% за уровень, и за брошенные в звезду или прочь из системы тела больше пыли.",
+			"cost": 250000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				-5.0,
+				32.5
+			],
+			"requires": [
+				"g_tidal"
+			],
+			"effects": {
+				"giant_sling": 0.3
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "thrust"
+		},
+		{
+			"id": "g_guard",
+			"title": "Тяжёлая поступь",
+			"desc": "Твоя масса держит крепче: тела тяжелее тебя тянут слабее, реже уводят луны и срывают меньше газа. −20% за уровень.",
+			"cost": 250000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				5.0,
+				32.5
+			],
+			"requires": [
+				"g_grab"
+			],
+			"effects": {
+				"giant_guard": 0.25
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "armor"
+		},
+		{
+			"id": "g_speed",
+			"title": "Свободная миграция",
+			"desc": "Ты учишься скользить по диску: скорость гиганта +12% за уровень.",
+			"cost": 200000000,
+			"cost_growth": 1.6,
+			"max_level": 4,
+			"pos": [
+				-1.0,
+				32.5
+			],
+			"requires": [
+				"g_reach",
+				"g_anchor"
+			],
+			"effects": {
+				"giant_speed": 0.12
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "drift_1"
+		},
+		{
+			"id": "g_impact",
+			"title": "Огненные шары",
+			"desc": "Обломки, врезаясь в облака, взрываются огненными шарами, как куски кометы Шумейкеров–Леви 9 на Юпитере: пыль за удары +30% за уровень.",
+			"cost": 200000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				1.0,
+				32.5
+			],
+			"requires": [
+				"g_anchor",
+				"g_reach"
+			],
+			"effects": {
+				"giant_impact": 0.3
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "geode"
+		},
+		{
+			"id": "g_soot",
+			"title": "Сажа в облаках",
+			"desc": "Углерод разорванных тел темнит облака и даёт больше пыли: +30% за уровень. Лучше всего тёмному гиганту и «Венере».",
+			"cost": 500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				-6.5,
+				33.75
+			],
+			"requires": [
+				"g_sling"
+			],
+			"effects": {
+				"giant_soot": 0.3
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "mat_carbon"
+		},
+		{
+			"id": "g_moongrab",
+			"title": "Магнитная хватка",
+			"desc": "Поле ловит зародыши и планетезимали целыми и сажает на лунные орбиты: шанс 10% за уровень (у плотного гиганта в полтора раза выше).",
+			"cost": 500000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				6.5,
+				33.75
+			],
+			"requires": [
+				"g_guard"
+			],
+			"effects": {
+				"giant_moon_grab": 0.1
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "halo",
+			"chondrules": [
+				10,
+				20,
+				30
+			]
+		},
+		{
+			"id": "g_bodies",
+			"title": "Населённый диск",
+			"desc": "Ты гонишь волны плотности, и тела из внешнего диска стекаются к тебе: тел вокруг +15% за уровень.",
+			"cost": 400000000,
+			"cost_growth": 1.6,
+			"max_level": 3,
+			"pos": [
+				-3.0,
+				33.75
+			],
+			"requires": [
+				"g_glow",
+				"g_flow"
+			],
+			"effects": {
+				"giant_bodies": 0.15
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "swarm"
+		},
+		{
+			"id": "g_merge",
+			"title": "Слияние гигантов",
+			"desc": "Легендарный навык. Соседний гигант падает в тебя, едва ты тяжелее его в 1,15 раза, а не в 1,4.",
+			"cost": 2500000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				-4.0,
+				35.0
+			],
+			"requires": [
+				"g_sling"
+			],
+			"effects": {
+				"giant_merge": 0.25
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "chain",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 2
+		},
+		{
+			"id": "g_worlds",
+			"title": "Пожиратель миров",
+			"desc": "Легендарный навык. Прилив рвёт тела вдвое тяжелее и хватает их дальше: суперземли падают в тебя с первых минут.",
+			"cost": 2500000000,
+			"cost_growth": 1.0,
+			"max_level": 1,
+			"pos": [
+				4.0,
+				35.0
+			],
+			"requires": [
+				"g_guard",
+				"g_grab"
+			],
+			"effects": {
+				"giant_tidal": 0.5,
+				"giant_grab": 0.2
+			},
+			"requires_route": "giant",
+			"requires_stage": 5,
+			"icon": "gravity_1",
+			"legendary": true,
+			"chondrules": [
+				40
+			],
+			"requires_level": 2
+		},
+		{
 			"id": "c_root",
 			"title": "Колыбель звёзд",
 			"desc": "Ты в молекулярном облаке. Газ падает на тебя на 10% быстрее, звёздной пыли с каждой массы Юпитера на 25% больше.",

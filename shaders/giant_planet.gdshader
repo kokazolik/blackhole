@@ -13,6 +13,7 @@ uniform float heat = 0.0;    // жар горячего юпитера: свет
 
 uniform bool use_map = false;     // облака из запечённой карты (этап гиганта)
 uniform sampler2D map : filter_linear_mipmap, repeat_enable;
+uniform vec4 scars[6];             // следы ударов: долгота, широта, размер (рад), сила
 
 const float BODY = 0.36;
 const float R_MAX = 1.25;
@@ -37,6 +38,18 @@ void fragment() {
 			// Карта уже содержит пояса со своими скоростями; целиком шар крутит spin.
 			float lon = atan(d.x, d.z) + spin;
 			alb = texture(map, vec2(fract(lon / 6.2832 + 0.5), clamp(0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.1416, 0.0, 1.0))).rgb;
+			// Тёмные пятна ударов: ядро, кольцо выброса и тонкий ободок, как у следов кометы в 1994-м.
+			float lat0 = asin(clamp(d.y, -1.0, 1.0));
+			vec3 here = vec3(sin(lon) * cos(lat0), sin(lat0), cos(lon) * cos(lat0));
+			for (int i = 0; i < 6; i++) {
+				vec4 sc = scars[i];
+				if (sc.w <= 0.0) continue;
+				vec3 c = vec3(sin(sc.x) * cos(sc.y), sin(sc.y), cos(sc.x) * cos(sc.y));
+				float ang = acos(clamp(dot(here, c), -1.0, 1.0)) / max(sc.z, 0.001);
+				float core = exp(-ang * ang * 4.0);
+				float ring = exp(-pow((ang - 1.3) / 0.25, 2.0)) * 0.6;
+				alb = mix(alb, vec3(0.16, 0.11, 0.09), clamp((core + ring) * sc.w, 0.0, 0.85));
+			}
 		} else {
 			alb = clouds(d, spot_k);
 		}

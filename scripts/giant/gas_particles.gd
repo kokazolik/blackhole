@@ -13,7 +13,7 @@ extends MultiMeshInstance2D
 
 signal particle_eaten(clump: int)
 
-const MAX := 700
+const MAX := 1400
 const OMEGA := 0.35          # темп течения газа, 1/с в единицах задачи Хилла
 const CAPTURE := 0.42        # ближе — газ упал в свой диск
 const FLOATS := 12           # 8 на Transform2D + 4 на цвет
@@ -68,6 +68,11 @@ func _ready() -> void:
 	tex.width = 64
 	tex.height = 64
 	texture = tex
+
+
+## Частица в координатах Хилла: газ, обломки, пыль. clump — чей это учёт (−1 — фон).
+func add(x: float, y: float, ux: float, uy: float, size: float, alpha: float, c: Color, clump: int) -> void:
+	_add(x, y, ux, uy, size, alpha, c, clump)
 
 
 func _add(x: float, y: float, ux: float, uy: float, size: float, alpha: float, c: Color, clump: int) -> void:
@@ -226,7 +231,8 @@ func _upload() -> void:
 		var d := sqrt(x * x + y * y)
 		var near := clampf(1.0 - d / 2.5, 0.0, 1.0)
 		var w := sz[i] * hill
-		var stretch := 1.0 + minf(sp * 0.9, 5.0) * (0.4 if cid[i] >= 0 else 1.6)
+		# Пыль разорванных тел (номера от миллиона) тянется в нить сильнее газа.
+		var stretch := 1.0 + minf(sp * 0.9, 5.0) * (1.6 if cid[i] < 0 else (1.3 if cid[i] >= 1000000 else 0.4))
 		var l := w * stretch
 		var cx := ux / sp
 		var cy := uy / sp
@@ -254,3 +260,19 @@ func _upload() -> void:
 	multimesh.visible_instance_count = n
 	if n > 0:
 		multimesh.buffer = b
+
+
+## Один шаг задачи Хилла для отдельного тела (обломки, захваченные тела):
+## то же уравнение, что у частиц. p = (x, y, vx, vy) в радиусах Хилла,
+## h — шаг во «времени газа», drag — трение о свой диск.
+static func hill_step(p: Vector4, h: float, g: float, drag: float) -> Vector4:
+	var d2 := p.x * p.x + p.y * p.y + 0.02
+	var inv := g / (d2 * sqrt(d2))
+	var ax := 2.0 * p.w + 3.0 * p.x - inv * p.x
+	var ay := -2.0 * p.z - inv * p.y
+	var vx := p.z + ax * h
+	var vy := p.w + ay * h
+	var damp := 1.0 - drag * h
+	vx *= damp
+	vy *= damp
+	return Vector4(p.x + vx * h, p.y + vy * h, vx, vy)
