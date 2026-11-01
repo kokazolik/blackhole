@@ -490,7 +490,13 @@ func _fill_stats() -> void:
 	var stage := mini(GameState.stage, 2)
 	var income := Skills.stat("value") * Skills.stat("value_mul") * (1.0 if GameState.is_boulder() else Skills.stat("pebble_value_mul"))
 	_stats_row("Доход с добычи", "×" + StatInfo.num(income), "всё, что прибавляет к звёздной пыли, перемножено", true)
-	for g in StatInfo.GROUPS.size():
+	# Свой этап сверху: на гиганте и в облаке не листать мимо пылинки.
+	var order := range(StatInfo.GROUPS.size())
+	var own_g := GameState.stage if GameState.stage >= GameData.GIANT_STAGE else -1
+	if own_g >= 0 and own_g < order.size():
+		order.erase(own_g)
+		order.push_front(own_g)
+	for g in order:
 		var rows := []
 		for key in StatInfo.INFO:
 			if StatInfo.group(key) != g:
