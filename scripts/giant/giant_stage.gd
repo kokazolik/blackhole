@@ -38,6 +38,11 @@ var gas := 0.0
 var gas_total := 1.0
 var moons := 0
 var moon_prog := 0.0
+var ring_m := 0.0                 # кольцо из разорванных тел, масс Земли
+var ring_col := Color(0.8, 0.8, 0.82)
+var ring_col2 := Color(0.6, 0.55, 0.5)
+const RING_DECAY := 0.006         # доля кольца в секунду: оседает в гиганта и копится в луны у края
+const RING_MOON := 6.0            # прогресс луны с массы Земли, ушедшей из кольца
 var mdot := 0.0             # аккреция сейчас, M⊕/с
 var auto_input := 0.0       # для бота: радиальный ввод вместо стика
 var auto_y := 0.0           # для бота: ввод вдоль орбиты
@@ -75,6 +80,11 @@ func _ready() -> void:
 	gas = float(g.get("gas", gas_total))
 	moons = int(g.get("moons", 0))
 	moon_prog = float(g.get("moon_prog", 0.0))
+	ring_m = float(g.get("ring_m", 0.0))
+	var rc: Array = g.get("ring_col", [])
+	if rc.size() >= 6:
+		ring_col = Color(rc[0], rc[1], rc[2])
+		ring_col2 = Color(rc[3], rc[4], rc[5])
 	GameState.stage = GameData.GIANT_STAGE
 
 	var bg := CanvasLayer.new()
@@ -426,6 +436,20 @@ func pay(gained: float) -> void:
 ## Луны собираются из пыли в своём диске; поле решает, сколько их удержится.
 func _moons_step(delta: float) -> void:
 	moon_prog += delta * (0.35 + 0.65 * _flow) * Skills.stat("giant_moons") / MOON_TIME
+	# Кольцо медленно тает: внутренний край оседает в облака, у внешнего края
+	# (за пределом Роша) обломки слипаются в луны. У горячего гиганта звезда
+	# выпаривает кольцо втрое быстрее.
+	if ring_m > 0.0:
+		var hot := 3.0 if str(GameState.giant.get("flavor", "")) == "giant_hot" else 1.0
+		var lost := ring_m * RING_DECAY * hot * delta
+		ring_m = maxf(ring_m - lost, 0.0)
+		if ring_m < 0.002:
+			ring_m = 0.0
+		moon_prog += lost * RING_MOON * Skills.stat("giant_moons") / hot
+	body.ring_m = ring_m
+	body.ring_col = ring_col
+	body.ring_col2 = ring_col2
+	body.ring_bands = 1.0 if GameState.body_type() == "neutral" else 0.0
 	if moon_prog < 1.0:
 		return
 	moon_prog -= 1.0
@@ -527,6 +551,8 @@ func save() -> void:
 	g["gas"] = gas
 	g["moons"] = moons
 	g["moon_prog"] = moon_prog
+	g["ring_m"] = ring_m
+	g["ring_col"] = [ring_col.r, ring_col.g, ring_col.b, ring_col2.r, ring_col2.g, ring_col2.b]
 	g["env"] = envelope
 	var arr := []
 	for v in disk.sigma:

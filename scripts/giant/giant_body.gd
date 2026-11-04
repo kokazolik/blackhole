@@ -23,6 +23,13 @@ var moons := 0
 var impact_heat := 0.0       # жар оболочки после гигантского удара, 0..1
 var heat_hold := 1.0         # во сколько раз дольше держится жар (расплав)
 var soot := 0.0              # сажа углеродного тела в облаках, 0..1
+var ring_m := 0.0            # кольцо из разорванных тел, масс Земли
+var ring_col := Color(0.8, 0.8, 0.82)
+var ring_col2 := Color(0.6, 0.55, 0.5)
+var ring_bands := 0.0        # переходное тело: кольцо полосами из двух веществ
+var _ring := ColorRect.new()
+var _ring_mat := ShaderMaterial.new()
+var _ring_shown := 0.0       # видимая плотность кольца: растёт плавно
 var zoom := 0.3
 var sigma_at: Callable       # плотность газа по смещению от орбиты в радиусах Хилла
 
@@ -95,6 +102,12 @@ func _ready() -> void:
 	_core.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_core.visible = false
 	add_child(_core)
+	_ring_mat.shader = preload("res://shaders/giant_ring.gdshader")
+	_ring_mat.set_shader_parameter("seed", sd * 10.0)
+	_ring.material = _ring_mat
+	_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ring.visible = false
+	add_child(_ring)
 	_planet.material = _planet_mat
 	_planet.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_planet)
@@ -245,6 +258,7 @@ func _process(delta: float) -> void:
 	_planet_mat.set_shader_parameter("churn", clampf(flow + _cpd_flash * 0.5, 0.0, 1.0))
 	_planet_mat.set_shader_parameter("spin", _time * SPIN)  # оборот меньше чем за минуту: вращение видно
 	_update_scars(delta)
+	_update_ring(r, delta)
 	_bake_t -= delta
 	if _bake_t <= 0.0:
 		_bake_t = BAKE_EVERY
@@ -433,6 +447,27 @@ func scar(dir: Vector2, size: float, col := Color(0.2, 0.14, 0.11)) -> void:
 	_scars.append({"lon": lon, "lat": lat, "size": clampf(size / r, 0.04, 0.2), "t": 0.0, "col": col})
 	if _scars.size() > 6:
 		_scars.pop_front()
+
+
+## Кольцо из обломков: густеет плавно (обломки расходятся по орбите), видно,
+## только когда в нём есть вещество.
+func _update_ring(r: float, delta: float) -> void:
+	# Насыщение: первые обломки — тонкая дорожка, дальше гуще.
+	var target := 1.0 - exp(-ring_m / 0.35)
+	_ring_shown = move_toward(_ring_shown, target, delta * 0.12)
+	_ring.visible = _ring_shown > 0.004 and envelope > 0.5
+	if not _ring.visible:
+		return
+	var hs := r * 1.6
+	_ring.size = Vector2(hs, hs) * 2.0
+	_ring.position = -_ring.size * 0.5
+	_ring_mat.set_shader_parameter("half_size", hs)
+	_ring_mat.set_shader_parameter("planet_r", r)
+	_ring_mat.set_shader_parameter("opacity", _ring_shown)
+	_ring_mat.set_shader_parameter("col", Vector3(ring_col.r, ring_col.g, ring_col.b))
+	_ring_mat.set_shader_parameter("col2", Vector3(ring_col2.r, ring_col2.g, ring_col2.b))
+	_ring_mat.set_shader_parameter("bands", ring_bands)
+	_ring_mat.set_shader_parameter("time", _time)
 
 
 func _update_scars(delta: float) -> void:

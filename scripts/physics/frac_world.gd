@@ -63,6 +63,7 @@ var gh := PackedFloat32Array()   # жар 0..1
 var gk := PackedFloat32Array()   # своя связь с газом (множитель времени торможения)
 var gt := PackedFloat32Array()   # возраст
 var gsrc: Array = []             # Source пылинки
+var gr := PackedByteArray()      # 1 — хондра: круглое светлое зерно
 var _free_g := PackedInt32Array()
 # Дымка: пар льда, сажа, облачка пыли из трещин — мягкие пятна, без массы.
 const MAX_HAZE := 240
@@ -693,6 +694,19 @@ func _break(ch: Chunk, bd: Bond) -> void:
 		var hc: Color = src.mat.get("dust_col", Color(0.6, 0.55, 0.5))
 		hc.a = 0.22 + 0.25 * hk
 		_add_haze(at, v, bd.len * 0.5, bd.len * (0.4 + 0.8 * hk), _rng.randf_range(2.5, 4.5), hc, Vector2.ZERO)
+	var chk := float(src.mat.get("chondrules", 0.0))
+	if chk > 0.0:
+		# Хондрит: из рыхлого цемента выкатываются круглые зёрна-хондры,
+		# крупнее пыли и светлее её.
+		var nch := clampi(int(bd.len / maxf(src.L0, 0.1) * 6.0 * chk) + 1, 1, 5)
+		for i in nch:
+			var along := axis * bd.len * _rng.randf_range(-0.5, 0.5)
+			var gi := _add_grain(src, at + along, v + _rng.randf_range(-1.0, 1.0) * axis.orthogonal() * src.L0 * 0.25,
+				(ma + mb) * 0.3 / nch, src.L0 * _rng.randf_range(0.08, 0.13), maxf(bd.a.heat, bd.b.heat))
+			if gi >= 0:
+				gr[gi] = 1
+		ma *= 0.7
+		mb *= 0.7
 	var cnt := clampi(int(bd.len / maxf(src.L0, 0.1) * 8.0 * (0.5 + float(src.mat["dust"]))), 2, 7)
 	for i in cnt:
 		var along := axis * bd.len * _rng.randf_range(-0.5, 0.5)
@@ -1074,7 +1088,7 @@ func _trail(ch: Chunk, at: float, vr: float, delta: float) -> void:
 	if vap >= soot:
 		# Пар: со стороны звезды, тонкой струйкой; давление света и
 		# испарения сносит его прочь от звезды.
-		var c: Color = src.mat.get("dust_col", Color(0.85, 0.9, 1.0)).lerp(Color(0.92, 0.95, 1.0), 0.6)
+		var c: Color = src.mat.get("vap_col", Color(0.92, 0.95, 1.0))
 		c.a = clampf(0.13 + 0.18 * vap, 0.0, 0.38)
 		var off := L.rotated(_rng.randf_range(-0.6, 0.6)) * ch.rad * 0.8
 		_add_haze(ch.pos + off, ch.vel + off.normalized() * src.L0 * 0.9, ch.rad * 0.08, ch.rad * 0.55, _rng.randf_range(1.2, 2.0), c, -L * src.L0 * 0.7)
@@ -1082,7 +1096,7 @@ func _trail(ch: Chunk, at: float, vr: float, delta: float) -> void:
 		# Дым: срывается с хвоста, газ уносит его назад.
 		var vrel := ch.vel - field.gas_v(ch.pos, 0.0)
 		var back := -vrel.normalized() if vrel.length_squared() > 1e-4 else -ch.pos.normalized()
-		var c: Color = Color(0.08, 0.065, 0.055) if float(src.mat.get("soot", 0.0)) > 0.7 else Color(0.32, 0.27, 0.23)
+		var c: Color = src.mat.get("smoke", Color(0.32, 0.27, 0.23))
 		c.a = clampf(0.3 + 0.35 * soot, 0.0, 0.6)
 		_add_haze(ch.pos + back * ch.rad * 0.8, field.gas_v(ch.pos, 0.0) + vrel * 0.35, ch.rad * 0.5, ch.rad * 2.5, _rng.randf_range(1.2, 2.2), c, Vector2.ZERO)
 
@@ -1138,7 +1152,7 @@ func _pay(src: Source, m: float, chunk: bool, at: Vector2, size: float) -> void:
 		src.sink.call(m, chunk, at, size, src)
 
 
-func _add_grain(src: Source, p: Vector2, v: Vector2, m: float, size: float, heat: float) -> void:
+func _add_grain(src: Source, p: Vector2, v: Vector2, m: float, size: float, heat: float) -> int:
 	var i: int
 	if not _free_g.is_empty():
 		i = _free_g[_free_g.size() - 1]
@@ -1148,10 +1162,11 @@ func _add_grain(src: Source, p: Vector2, v: Vector2, m: float, size: float, heat
 		gx.append(0.0); gy.append(0.0); gvx.append(0.0); gvy.append(0.0)
 		gm.append(0.0); gs.append(0.0); gh.append(0.0); gk.append(0.0); gt.append(0.0)
 		gsrc.append(null)
+		gr.append(0)
 	else:
 		# Пыли и так полно: эта сразу уходит в мир.
 		_pay(src, m, false, p, 0.0)
-		return
+		return -1
 	gx[i] = p.x
 	gy[i] = p.y
 	gvx[i] = v.x
@@ -1162,7 +1177,9 @@ func _add_grain(src: Source, p: Vector2, v: Vector2, m: float, size: float, heat
 	gk[i] = _rng.randf_range(0.6, 1.5)
 	gt[i] = 0.0
 	gsrc[i] = src
+	gr[i] = 0
 	src.refs += 1
+	return i
 
 
 func _kill_grain(i: int) -> void:
@@ -1307,17 +1324,18 @@ func _draw_bolides(px: float) -> void:
 		if shock < 0.08 or sp < 1e-3:
 			continue
 		var back := -vrel / sp
-		var len := ch.rad * (2.0 + 7.0 * clampf(heat - 0.5, 0.0, 1.0)) * clampf(sp / maxf(field.v_ref(), 1.0) * 2.0, 0.4, 1.6)
-		var w := maxf(ch.rad * 0.7, 1.2 * px)
+		var len := ch.rad * (1.2 + 2.8 * shock) * clampf(sp / maxf(field.v_ref(), 1.0) * 2.0, 0.4, 1.3)
+		var w := maxf(ch.rad * 0.45, 1.2 * px)
 		var side := back.orthogonal()
 		var c := glow_col(heat)
 		c.a = clampf(shock * 2.0, 0.0, 0.8)
 		var tail := c
 		tail.a = 0.0
+		# Мягкий след: ярко по оси, к краям и к хвосту прозрачно.
 		var i0 := pts.size()
-		pts.append_array([ch.pos + side * w, ch.pos - side * w, ch.pos + back * len])
-		cols.append_array([c, c, tail])
-		idx.append_array([i0, i0 + 1, i0 + 2])
+		pts.append_array([ch.pos + side * w, ch.pos, ch.pos - side * w, ch.pos + back * len])
+		cols.append_array([tail, c, tail, tail])
+		idx.append_array([i0, i0 + 1, i0 + 3, i0 + 1, i0 + 2, i0 + 3])
 	if not idx.is_empty():
 		RenderingServer.canvas_item_add_triangle_array(_dust.get_canvas_item(), idx, pts, cols)
 
@@ -1448,4 +1466,12 @@ func _draw_dust() -> void:
 		var col: Color = src.col * field.shade(p)
 		col = col.lerp(glow_col(h), clampf(h * 1.2, 0.0, 1.0))
 		col.a = clampf(0.55 + 0.35 * gs[i] / maxf(2.0 * px, 0.01), 0.3, 0.95) * smoothstep(0.0, 0.15, gt[i] + 0.15)
-		_dust.draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), col)
+		if gr[i] == 1:
+			# Хондра: светлое округлое зерно с бликом со стороны звезды.
+			var hc: Color = col.lerp(Color(0.86, 0.82, 0.74) * field.shade(p), 0.55)
+			hc.a = col.a
+			_dust.draw_circle(p, s * 0.5, hc)
+		elif s > 2.2 * px:
+			_dust.draw_circle(p, s * 0.5, col)
+		else:
+			_dust.draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), col)

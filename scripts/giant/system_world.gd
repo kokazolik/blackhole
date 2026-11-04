@@ -204,6 +204,30 @@ func _material_at(r: float) -> String:
 	return "metal" if roll < 0.2 else ("carbon" if roll < 0.35 else "rock")
 
 
+## Смешанное вещество тела (для движка разрушения): хондрит, лёд с органикой
+## (титан), камень с углеродом (венера). Своего состава вокруг вдвое больше;
+## у переходного тела смесей больше всех. Пусто — чистое вещество.
+func _sub_mat(mat: String, r: float) -> String:
+	var type := GameState.body_type()
+	var k := 1.5 if type == "neutral" else 1.0
+	var cand := {}
+	var snow := r > GameData.SNOW_LINE
+	match mat:
+		"rock":
+			cand["chondrite"] = 0.25
+			if not snow:
+				cand["venus"] = 0.12
+		"carbon":
+			cand["titan" if snow else "venus"] = 0.35
+		"ice":
+			cand["titan"] = 0.2
+	for key in cand:
+		var pk: float = float(cand[key]) * k * (2.0 if key == type else 1.0)
+		if _rng.randf() < pk:
+			return key
+	return ""
+
+
 func _pick_kind(r: float) -> String:
 	var f := _flavor()
 	var w := {"rubble": 0.24, "planetesimal": 0.22, "binary": 0.08, "irondwarf": 0.03, "icedwarf": 0.0,
@@ -277,6 +301,9 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 		"tilt": _rng.randf_range(0.2, 0.6), "state": "free", "t": 0.0,
 		"h": Vector4.ZERO, "stretch": 0.0, "cd": 0.0, "tag": "", "look": _rng.randi() % RIVAL_LOOKS.size(),
 	}
+	var sub := _sub_mat(mat, r)
+	if sub != "":
+		b["sub"] = sub
 	if kind == "comet":
 		# Кометы падают с окраин к звезде по вытянутой орбите.
 		b["vr"] = -_rng.randf_range(90.0, 180.0)
@@ -729,11 +756,13 @@ func _to_engine(b: Dictionary, p: Vector4, h: float, tidal: bool) -> FracWorld.S
 	var mat: String = str(b.mat) if FracMat.MATS.has(str(b.mat)) else "rock"
 	if b.kind == "comet":
 		mat = "ice"
+	if FracMat.MATS.has(str(b.get("sub", ""))):
+		mat = str(b.sub)
 	var o := {
 		"pos": from, "vel": vel, "w": float(b.spin_rate) * 0.5, "rad": rad, "mass": gain, "mat": mat,
 		"cells": cells, "seed": fmod(float(b.seed), 97.0) / 97.0, "r_crit": roche_h(b) * h,
 		"inflow": 0.22, "sink": _frac_sink, "notify": _frac_notify,
-		"tag": {"b": b, "gain": gain, "pay": _pay_k(b), "done": false, "big": qk > 0.6},
+		"tag": {"b": b, "gain": gain, "pay": _pay_k(b), "done": false, "big": qk > 0.6, "tidal": tidal},
 	}
 	if b.kind in ["comet", "rubble"]:
 		# Рыхлое: груда и кометное ядро держатся только тяготением.
@@ -787,6 +816,8 @@ func _frac_notify(ev: String, src: FracWorld.Source) -> void:
 	match ev:
 		"break", "done":
 			t.done = true
+			if ev == "break" and t.get("tidal", false):
+				_to_ring(src.mat_name, float(t.gain))
 			_reward(b, float(t.gain))
 		"hit":
 			# Не треснуло и врезалось целым: огненный след, жар оболочки.
@@ -795,6 +826,37 @@ func _frac_notify(ev: String, src: FracWorld.Source) -> void:
 			stage.body.impact_heat = minf(stage.body.impact_heat + 0.25 * clampf(float(b.get("q", 0.05)) * 4.0, 0.2, 1.0), 1.0)
 			_composition_hit(b, 0.5)
 			_reward(b, float(t.gain), "hit")
+
+
+## Часть разорванного приливом тела остаётся на орбите и ложится в кольцо.
+## Доля — по веществу (лёд больше всех, железо — нисколько), по гиганту
+## (ледяной держит кольца лучше, горячий хуже, плотный тянет обломки вниз)
+## и по твоему составу (ледяное и титан — кольца гуще, металл — реже).
+func _to_ring(mat: String, gain: float) -> void:
+	var fm := FracMat.get_mat(mat)
+	var share := float(fm.get("ring", 0.0))
+	if share <= 0.0:
+		return
+	share *= {"giant_ice": 1.4, "giant_hot": 0.5, "giant_dense": 0.75, "giant_dark": 1.0}.get(_flavor(), 1.0)
+	share *= {"ice": 1.3, "titan": 1.2, "metal": 0.7, "chondrite": 1.1}.get(GameState.body_type(), 1.0)
+	var add := gain * share
+	if add <= 0.0:
+		return
+	var col: Color = fm.get("ring_col", Color(0.7, 0.68, 0.65))
+	var old: float = stage.ring_m
+	var k := add / maxf(old + add, 1e-6)
+	if GameState.body_type() == "neutral" and old > 0.0 and absf(col.v - (stage.ring_col as Color).v) > 0.08:
+		# Переходное: новое вещество ложится своей полосой, не смешиваясь.
+		stage.ring_col2 = (stage.ring_col2 as Color).lerp(col, maxf(k, 0.35))
+	else:
+		stage.ring_col = (stage.ring_col as Color).lerp(col, k if old > 0.0 else 1.0)
+		if old <= 0.0:
+			stage.ring_col2 = col.darkened(0.25)
+	stage.ring_m = old + add
+	if old <= 0.0 and add > 0.01:
+		var line := "обломки легли на орбиту, у края кольцо слипается в луны"
+		if GameState.once("ring", line):
+			stage.hud.caption("Своё кольцо", line, 3.5)
 
 
 ## У предела Роша тело рвётся: нитка обломков и пылевая струя.
