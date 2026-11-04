@@ -423,23 +423,25 @@ func steal(to: Vector2) -> void:
 
 ## Тёмный след удара в облаках: на карте облаков, крутится вместе с шаром
 ## и расплывается за минуту. dir — точка удара на диске (локально, длина 1).
-func scar(dir: Vector2, size: float) -> void:
+func scar(dir: Vector2, size: float, col := Color(0.2, 0.14, 0.11)) -> void:
 	var r := body_r * inflate
 	var tl := 0.12
 	var nv := Vector3(dir.x * 0.9, dir.y * 0.9, sqrt(1.0 - 0.81))
 	var d := Vector3(nv.x, cos(tl) * nv.y + sin(tl) * nv.z, -sin(tl) * nv.y + cos(tl) * nv.z)
 	var lon := atan2(d.x, d.z) + _time * SPIN
 	var lat := asin(clampf(d.y, -1.0, 1.0))
-	_scars.append({"lon": lon, "lat": lat, "size": clampf(size / r, 0.04, 0.2), "t": 0.0})
+	_scars.append({"lon": lon, "lat": lat, "size": clampf(size / r, 0.04, 0.2), "t": 0.0, "col": col})
 	if _scars.size() > 6:
 		_scars.pop_front()
 
 
 func _update_scars(delta: float) -> void:
 	var arr: Array[Vector4] = []
+	var arr2: Array[Vector4] = []
 	var keep := []
 	for sc in _scars:
-		sc.t = float(sc.t) + delta / 70.0
+		# Шрам живёт пару минут: ветер растягивает его по поясу в полосу.
+		sc.t = float(sc.t) + delta / 130.0
 		if float(sc.t) < 1.0:
 			keep.append(sc)
 	_scars = keep
@@ -447,10 +449,14 @@ func _update_scars(delta: float) -> void:
 		if i < _scars.size():
 			var sc: Dictionary = _scars[i]
 			var k := float(sc.t)
-			arr.append(Vector4(float(sc.lon), float(sc.lat), float(sc.size) * (1.0 + 1.5 * k), (1.0 - k) * minf(k * 20.0, 1.0)))
+			arr.append(Vector4(float(sc.lon), float(sc.lat), float(sc.size) * (1.0 + 0.8 * k), (1.0 - k) * minf(k * 35.0, 1.0)))
+			var c: Color = sc.get("col", Color(0.2, 0.14, 0.11))
+			arr2.append(Vector4(c.r, c.g, c.b, 1.0 + 7.0 * k))
 		else:
 			arr.append(Vector4(0.0, 0.0, 0.0, 0.0))
+			arr2.append(Vector4(0.2, 0.14, 0.11, 1.0))
 	_planet_mat.set_shader_parameter("scars", arr)
+	_planet_mat.set_shader_parameter("scar_col", arr2)
 
 
 ## Вспышки ударов в облаках: мягкий спрайт, складывается со светом.

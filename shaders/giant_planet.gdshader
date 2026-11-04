@@ -13,6 +13,7 @@ uniform float heat = 0.0;    // жар горячего юпитера: свет
 
 uniform bool use_map = false;     // облака из запечённой карты (этап гиганта)
 uniform sampler2D map : filter_linear_mipmap, repeat_enable;
+uniform vec4 scar_col[6];          // цвет шрама (вещество тела) и растяжение по долготе
 uniform vec4 scars[6];             // следы ударов: долгота, широта, размер (рад), сила
 // Молодой гигант: оболочка только что сжалась и раскалена (свет сжатия).
 // young 1 — светится сам, по нему бегут ячейки конвекции; остывая, тускнеет
@@ -67,15 +68,17 @@ void fragment() {
 				vec4 sc = scars[i];
 				if (sc.w <= 0.0) continue;
 				vec3 c = vec3(sin(sc.x) * cos(sc.y), sin(sc.y), cos(sc.x) * cos(sc.y));
-				float ang = acos(clamp(dot(here, c), -1.0, 1.0)) / max(sc.z, 0.001);
 				// Пятно размыто ветрами: мягкое ядро и широкий тёмный ореол выброса,
-				// вытянутый вдоль пояса (по долготе).
-				vec3 dd = here - c;
-				float stretch_lat = abs(dd.y) / max(sc.z, 0.001);
-				float soft = ang * 0.7 + stretch_lat * 0.6;
+				// со временем ветер пояса тянет его по долготе в полосу.
+				float dlon = mod(lon - sc.x + 3.1416, 6.2832) - 3.1416;
+				float dlat = lat0 - sc.y;
+				float str = max(scar_col[i].w, 1.0);
+				// Пояса на разных широтах дуют с разной скоростью: полоса чуть косит.
+				dlon -= dlat * (str - 1.0) * 0.6;
+				float soft = length(vec2(dlon * cos(lat0) / str, dlat * 1.3)) / max(sc.z, 0.001);
 				float core = exp(-soft * soft * 1.6);
 				float halo = exp(-pow(max(soft - 1.0, 0.0) / 0.8, 2.0)) * 0.45 * smoothstep(0.3, 1.0, soft);
-				alb = mix(alb, vec3(0.2, 0.14, 0.11), clamp((core * 0.8 + halo) * sc.w, 0.0, 0.7));
+				alb = mix(alb, scar_col[i].rgb, clamp((core * 0.8 + halo) * sc.w / sqrt(str), 0.0, 0.7));
 			}
 			if (young > 0.001) {
 				// Облака конденсируются по мере остывания: перья вдоль параллелей

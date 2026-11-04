@@ -36,6 +36,7 @@ const ROCHE_KIND := {"comet": 2.8, "rubble": 2.6, "trojan": 2.4, "irondwarf": 0.
 const ENVELOPE_R := 2.7      # здесь мини-нептун теряет газовую оболочку
 const GAS_ROT := 0.92        # газ своего диска кружит с такой долей круговой скорости
 const HANDOVER := 1.2        # тело уходит в движок разрушения на стольких пределах Роша
+const FRAC_SLOW := 0.6       # раскол и полёт кусков идут медленнее (автор: «чуть замедлим»)
 const ATTRACT := 60.0        # взаимное тяготение у края сферы Хилла, ед./с²
 const IMPACT_V := 330.0      # скорость сближения для гигантского удара, ед./с
 const BIG_RATIO := 1.4       # крупное: легче тебя хотя бы во столько раз
@@ -127,6 +128,7 @@ func setup() -> void:
 	_ffield.refresh()
 	frac = FracWorld.new()
 	frac.field = _ffield
+	frac.time_k = FRAC_SLOW
 	stage.body.add_child(frac)
 
 
@@ -605,6 +607,13 @@ func _capture(b: Dictionary, gpos: Vector2, h: float, orbit: float) -> void:
 
 func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	var g := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
+	if _solid(b):
+		# У предела Роша время тела плавно замедляется до времени движка:
+		# куски стартуют с той же скоростью, что видна была у целого тела.
+		var p0: Vector4 = b.h
+		var d0 := sqrt(p0.x * p0.x + p0.y * p0.y)
+		var ho0 := maxf(roche_h(b) * HANDOVER, contact_h(b) * 1.6)
+		delta *= lerpf(1.0, FRAC_SLOW, smoothstep(ho0 * 1.9, ho0 * 1.05, d0))
 	var dt := delta * HILL_W
 	var steps := maxi(1, ceili(dt / 0.02))
 	var hh := dt / steps
@@ -762,7 +771,7 @@ func _frac_sink(m: float, chunk: bool, at: Vector2, size: float, src: FracWorld.
 	# Кусок вошёл в облака на десятках км/с: короткий шлейф и тёмный след,
 	# как у осколков кометы Шумейкеров — Леви 9. Мелочь — без шлейфа.
 	if size > r * 0.02:
-		stage.body.scar(at.normalized(), size * 0.6)
+		stage.body.scar(at.normalized(), size * 0.6, FracMat.get_mat(src.mat_name).get("scar", Color(0.2, 0.14, 0.11)))
 		var np := int(t.get("plumes", 0))
 		if tides.plumes.size() < 6 and np < 3 and size > r * 0.035:
 			t["plumes"] = np + 1

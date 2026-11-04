@@ -35,11 +35,14 @@ const FATIGUE := 0.62        # шов под нагрузкой выше это�
 const FATIGUE_K := 2.2
 const TS_CHUNK := 2.6        # время торможения куска газом при плотности 1, с
 const TS_GRAIN := 0.45
-const TS_SPIN := 0.25         # доля бокового ветра, что раскручивает куски
+const TS_SPIN := 0.25
+const CRACK_RATE := 6.0
+const SPARK_V := 0.06         # удар быстрее этой доли v_ref — искры (у металла)       # швов в секунду на кусок (плюс 0,6 на ячейку)         # доля бокового ветра, что раскручивает куски
 const RAM_K := 2.4           # напор атмосферы в долях прочности шва при скорости v_ref
 const HEAT_K := 1.6          # нагрев трением в атмосфере
 const IMPACT_K := 0.8        # скорость удара, что колет шов: IMPACT_K·L·√прилива_разрыва
 var prof := Vector3.ZERO
+var time_k := 1.0             # замедление времени движка (раскол виден глазом)
 const LIFE := 40.0           # кусок дольше этого не живёт: тонет с учётом массы
 const GRAIN_LIFE := 30.0
 
@@ -61,6 +64,10 @@ var gk := PackedFloat32Array()   # своя связь с газом (множи
 var gt := PackedFloat32Array()   # возраст
 var gsrc: Array = []             # Source пылинки
 var _free_g := PackedInt32Array()
+# Дымка: пар льда, сажа, облачка пыли из трещин — мягкие пятна, без массы.
+const MAX_HAZE := 240
+var hz: Array = []               # [pos, vel, t, life, size, grow, color, push]
+var _vap_t := {}                 # Chunk → время до следующей струйки пара/дыма
 var _n_cells := 0
 var stats := {"breaks": 0, "splits": 0, "hits": 0, "dust": 0}
 
@@ -147,6 +154,7 @@ class Chunk:
 	var dead := false
 	var stress_t := 0.0
 	var intact := 0                  # целых швов
+	var crack_acc := 0.0             # сколько швов трещина успеет пройти
 
 
 func _ready() -> void:
@@ -432,6 +440,7 @@ func _drop_source(src: Source) -> void:
 func step(delta: float) -> void:
 	if field == null:
 		return
+	delta *= time_k
 	_time += delta
 	delta = minf(delta, 0.05)
 	var n := maxi(1, ceili(delta / DT_MAX))
@@ -450,6 +459,7 @@ func step(delta: float) -> void:
 	var t2 := Time.get_ticks_usec()
 	_entry(delta)
 	_step_grains(delta)
+	_step_haze(delta)
 	_cleanup()
 	prof = Vector3(t1 - t0, t2 - t1, Time.get_ticks_usec() - t2)
 	queue_redraw()
@@ -522,7 +532,12 @@ func _stress(delta: float) -> void:
 		# Трещина бежит с конечной скоростью: за кадр лопается несколько
 		# самых нагруженных швов, остальные — в следующих кадрах.
 		cand.sort_custom(func(x, y) -> bool: return x[0] > y[0])
-		var lim := 1 + nc / 10
+		# Скорость трещины — швов в секунду, а не в кадр: раскол виден.
+		ch.crack_acc = minf(ch.crack_acc + delta * (CRACK_RATE + nc * 0.6), float(cand.size()))
+		var lim := int(ch.crack_acc)
+		if lim < 1:
+			continue
+		ch.crack_acc -= lim
 		for i in mini(lim, cand.size()):
 			_break(ch, cand[i][1] as Bond)
 		_split(ch, born, Vector2.ZERO, 0.0)
@@ -673,6 +688,11 @@ func _break(ch: Chunk, bd: Bond) -> void:
 	var at := ch.pos + r
 	var v := ch.vel + Vector2(-r.y, r.x) * ch.w
 	var axis := (bd.b.c - bd.a.c).normalized().rotated(ch.ang).orthogonal()
+	var hk := float(src.mat.get("haze", 0.5))
+	if hk > 0.05:
+		var hc: Color = src.mat.get("dust_col", Color(0.6, 0.55, 0.5))
+		hc.a = 0.22 + 0.25 * hk
+		_add_haze(at, v, bd.len * 0.5, bd.len * (0.4 + 0.8 * hk), _rng.randf_range(2.5, 4.5), hc, Vector2.ZERO)
 	var cnt := clampi(int(bd.len / maxf(src.L0, 0.1) * 8.0 * (0.5 + float(src.mat["dust"]))), 2, 7)
 	for i in cnt:
 		var along := axis * bd.len * _rng.randf_range(-0.5, 0.5)
@@ -947,6 +967,14 @@ func _contact(a: Chunk, b: Chunk, born: Array) -> void:
 	a.w -= r1.cross(imp) / a.inertia
 	b.w += r2.cross(imp) / b.inertia
 	stats.hits += 1
+	var sk := maxf(float(a.src.mat.get("sparks", 0.0)), float(b.src.mat.get("sparks", 0.0)))
+	if sk > 0.0 and -vn > SPARK_V * field.v_ref():
+		# Удар на километрах в секунду плавит край: брызги капель, светятся и гаснут.
+		var n := clampi(int(sk * 3.0 + -vn / field.v_ref() * 20.0 * sk), 1, 8)
+		var vc := (a.vel * inv2 + b.vel * inv1) / (inv1 + inv2)
+		for i in n:
+			var dv := (tg * _rng.randf_range(-1.0, 1.0) + nrm * _rng.randf_range(-0.4, 0.4)) * -vn * _rng.randf_range(0.3, 0.9)
+			_add_grain(a.src, p, vc + dv, 1e-9, a.src.L0 * 0.025, 1.25)
 	# Удар колет швы у точки касания, дальше — слабее.
 	_impact_crack(a, p, -vn, born)
 	_impact_crack(b, p, -vn, born)
@@ -1006,6 +1034,7 @@ func _entry(delta: float) -> void:
 			cell.heat = maxf(cell.heat - cell.heat * cool * 0.15 * delta, 0.0)
 			if at > 0.0:
 				cell.heat = minf(cell.heat + HEAT_K * at * vr * vr * vr * delta * src.L0 / maxf(cell.size, 0.5) * 0.25, 1.4)
+		_trail(ch, at, vr, delta)
 		if at > 0.3 and vr > 0.25:
 			# Обгорает: самая горячая ячейка тает пылью с конечной скоростью.
 			var hot: Cell = null
@@ -1019,6 +1048,71 @@ func _entry(delta: float) -> void:
 		var gone := ch.age > LIFE or field.lost(ch.pos)
 		if field.sunk(ch.pos, ch.rad) or gone:
 			_sink_chunk(ch, gone)
+
+
+## Следы куска по веществу: лёд на свету парит (струйка от звезды, потом
+## её сносит прочь), раскалённое в атмосфере дымит — углерод сажей, лава и
+## камень дымком. Пар и дым — без массы, только вид.
+func _trail(ch: Chunk, at: float, vr: float, delta: float) -> void:
+	var src: Source = ch.src
+	var heat := 0.0
+	for cell: Cell in ch.cells:
+		heat = maxf(heat, cell.heat)
+	var big := clampf(ch.size / maxf(src.L0, 0.1) * 2.0, 0.25, 1.0)
+	var vap := float(src.mat.get("vapor", 0.0)) * (clampf(field.shade(ch.pos) * 1.4 - 0.3, 0.0, 1.0) * 0.6 + heat * 2.0)
+	# Дымит то, что горит: накал куска или ударная волна перед ним.
+	var soot := float(src.mat.get("soot", 0.0)) * clampf(maxf(heat * 1.6 - 0.4, at * vr * 2.0), 0.0, 1.0) * minf(at * 4.0, 1.0)
+	var rate := (vap * 9.0 + soot * 14.0) * big
+	if rate < 0.05:
+		return
+	var tleft: float = _vap_t.get(ch, 0.0) - delta
+	if tleft > 0.0:
+		_vap_t[ch] = tleft
+		return
+	_vap_t[ch] = 1.0 / rate * _rng.randf_range(0.6, 1.4)
+	var L := field.light_dir(ch.pos)
+	if vap >= soot:
+		# Пар: со стороны звезды, тонкой струйкой; давление света и
+		# испарения сносит его прочь от звезды.
+		var c: Color = src.mat.get("dust_col", Color(0.85, 0.9, 1.0)).lerp(Color(0.92, 0.95, 1.0), 0.6)
+		c.a = clampf(0.13 + 0.18 * vap, 0.0, 0.38)
+		var off := L.rotated(_rng.randf_range(-0.6, 0.6)) * ch.rad * 0.8
+		_add_haze(ch.pos + off, ch.vel + off.normalized() * src.L0 * 0.9, ch.rad * 0.08, ch.rad * 0.55, _rng.randf_range(1.2, 2.0), c, -L * src.L0 * 0.7)
+	else:
+		# Дым: срывается с хвоста, газ уносит его назад.
+		var vrel := ch.vel - field.gas_v(ch.pos, 0.0)
+		var back := -vrel.normalized() if vrel.length_squared() > 1e-4 else -ch.pos.normalized()
+		var c: Color = Color(0.08, 0.065, 0.055) if float(src.mat.get("soot", 0.0)) > 0.7 else Color(0.32, 0.27, 0.23)
+		c.a = clampf(0.3 + 0.35 * soot, 0.0, 0.6)
+		_add_haze(ch.pos + back * ch.rad * 0.8, field.gas_v(ch.pos, 0.0) + vrel * 0.35, ch.rad * 0.5, ch.rad * 2.5, _rng.randf_range(1.2, 2.2), c, Vector2.ZERO)
+
+
+func _add_haze(p: Vector2, v: Vector2, size: float, grow: float, life: float, col: Color, push: Vector2) -> void:
+	if hz.size() >= MAX_HAZE:
+		hz.pop_front()
+	hz.append([p, v, 0.0, life, maxf(size, 0.3), grow, col, push])
+
+
+func _step_haze(delta: float) -> void:
+	if hz.is_empty():
+		return
+	var keep: Array = []
+	for h: Array in hz:
+		var t: float = h[2] + delta
+		if t >= float(h[3]):
+			continue
+		var p: Vector2 = h[0]
+		if field.sunk(p, 0.0):
+			continue
+		var v: Vector2 = h[1]
+		# Дымка — газ: быстро сходится со скоростью газа, плюс свой снос.
+		var vg := field.gas_v(p, 0.0)
+		v = vg + (v - vg) * exp(-delta / 0.8) + (h[7] as Vector2) * delta
+		h[0] = p + v * delta
+		h[1] = v
+		h[2] = t
+		keep.append(h)
+	hz = keep
 
 
 func _sink_chunk(ch: Chunk, quiet: bool) -> void:
@@ -1129,6 +1223,10 @@ func _cleanup() -> void:
 		if not ch.dead:
 			keep.append(ch)
 	chunks = keep
+	if not _vap_t.is_empty():
+		for k in _vap_t.keys():
+			if (k as Chunk).dead:
+				_vap_t.erase(k)
 	var ks: Array = []
 	for src: Source in sources:
 		src.t += get_process_delta_time()
@@ -1158,6 +1256,72 @@ func grain_count() -> int:
 # Рисование
 
 ## Цвет накала по температуре: тёмно-красный → оранжевый → жёлтый.
+## Дымка: мягкие пятна (веер треугольников, к краю прозрачные), одним вызовом.
+func _draw_haze(px: float) -> void:
+	if hz.is_empty():
+		return
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	const SEG := 9
+	for h: Array in hz:
+		var k: float = float(h[2]) / float(h[3])
+		var r := maxf(float(h[4]) + float(h[5]) * sqrt(k), 1.5 * px)
+		var c: Color = h[6]
+		var p: Vector2 = h[0]
+		var sh := field.shade(p)
+		var cc := Color(c.r * (0.35 + 0.65 * sh), c.g * (0.35 + 0.65 * sh), c.b * (0.35 + 0.65 * sh), c.a * (1.0 - k) * minf(k * 8.0 + 0.2, 1.0))
+		var edge := cc
+		edge.a = 0.0
+		var i0 := pts.size()
+		pts.append(p)
+		cols.append(cc)
+		for j in SEG:
+			pts.append(p + Vector2.from_angle(TAU * j / SEG) * r)
+			cols.append(edge)
+		for j in SEG:
+			idx.append_array([i0, i0 + 1 + j, i0 + 1 + (j + 1) % SEG])
+	RenderingServer.canvas_item_add_triangle_array(_dust.get_canvas_item(), idx, pts, cols)
+
+
+## Болид: раскалённый кусок в атмосфере тянет за собой светящийся след
+## (сжатый и нагретый газ перед ним), узкий и короткий, цвета накала.
+func _draw_bolides(px: float) -> void:
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	for ch: Chunk in chunks:
+		if ch.dead:
+			continue
+		var at := field.atm(ch.pos)
+		if at < 0.05:
+			continue
+		var heat := 0.0
+		for cell: Cell in ch.cells:
+			heat = maxf(heat, cell.heat)
+		var vrel := ch.vel - field.gas_v(ch.pos, 0.0)
+		var sp := vrel.length()
+		# Светится сжатый ударной волной газ перед куском: ярче — быстрее и глубже.
+		var shock := at * clampf(sp / maxf(field.v_ref(), 1.0) * 1.5, 0.0, 1.0)
+		heat = maxf(heat, 0.45 + shock)
+		if shock < 0.08 or sp < 1e-3:
+			continue
+		var back := -vrel / sp
+		var len := ch.rad * (2.0 + 7.0 * clampf(heat - 0.5, 0.0, 1.0)) * clampf(sp / maxf(field.v_ref(), 1.0) * 2.0, 0.4, 1.6)
+		var w := maxf(ch.rad * 0.7, 1.2 * px)
+		var side := back.orthogonal()
+		var c := glow_col(heat)
+		c.a = clampf(shock * 2.0, 0.0, 0.8)
+		var tail := c
+		tail.a = 0.0
+		var i0 := pts.size()
+		pts.append_array([ch.pos + side * w, ch.pos - side * w, ch.pos + back * len])
+		cols.append_array([c, c, tail])
+		idx.append_array([i0, i0 + 1, i0 + 2])
+	if not idx.is_empty():
+		RenderingServer.canvas_item_add_triangle_array(_dust.get_canvas_item(), idx, pts, cols)
+
+
 static func glow_col(h: float) -> Color:
 	var a := Color(0.55, 0.06, 0.02)
 	var b := Color(1.0, 0.42, 0.08)
@@ -1265,13 +1429,15 @@ func _draw() -> void:
 
 
 func _draw_dust() -> void:
-	if gm.is_empty():
-		return
 	var zoom := 1.0
 	var vp := get_viewport()
 	if vp != null and vp.get_camera_2d() != null:
 		zoom = maxf(vp.get_camera_2d().zoom.x, 0.0001)
 	var px := 1.0 / zoom
+	_draw_haze(px)
+	_draw_bolides(px)
+	if gm.is_empty():
+		return
 	for i in gm.size():
 		if gm[i] < 0.0:
 			continue

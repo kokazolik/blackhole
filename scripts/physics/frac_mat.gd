@@ -14,18 +14,26 @@ extends RefCounted
 ## ram — как легко рвёт напор атмосферы (рыхлое — сразу);
 ## coh — доля прочности от сцепления: остальное держит тяготение груды, и
 ##   мелкий кусок его теряет (рыхлое рассыпается до пыли, монолит — плитами).
+## Следы (0..1): haze — облачко пыли из трещины; vapor — пар со свежего льда
+##   на свету; soot — дым и сажа раскалённого куска в атмосфере; sparks —
+##   искры при ударе кусков (капли расплава); scar — цвет шрама в облаках.
 
 const MATS := {
 	"rock": {"coh": 0.8, "rho": 1.0, "weib": 7.0, "cells": 1.0, "jag": 0.16, "dust": 0.35, "rest": 0.18, "fric": 0.5,
-		"inner": Color(0.66, 0.6, 0.53), "dust_col": Color(0.6, 0.54, 0.47), "heat": 0.2, "ram": 1.0},
+		"inner": Color(0.66, 0.6, 0.53), "dust_col": Color(0.6, 0.54, 0.47), "heat": 0.2, "ram": 1.0,
+			"haze": 1.0, "vapor": 0.0, "soot": 0.2, "sparks": 0.2, "scar": Color(0.24, 0.16, 0.11)},
 	"metal": {"coh": 0.97, "rho": 2.4, "weib": 12.0, "cells": 0.65, "jag": 0.07, "dust": 0.12, "rest": 0.1, "fric": 0.35,
-		"inner": Color(0.8, 0.82, 0.86), "dust_col": Color(0.55, 0.56, 0.6), "heat": 0.15, "ram": 0.35},
+		"inner": Color(0.8, 0.82, 0.86), "dust_col": Color(0.55, 0.56, 0.6), "heat": 0.15, "ram": 0.35,
+			"haze": 0.1, "vapor": 0.0, "soot": 0.0, "sparks": 1.0, "scar": Color(0.22, 0.12, 0.08)},
 	"ice": {"coh": 0.35, "rho": 0.5, "weib": 4.0, "cells": 1.3, "jag": 0.2, "dust": 0.6, "rest": 0.12, "fric": 0.15,
-		"inner": Color(0.86, 0.94, 1.0), "dust_col": Color(0.8, 0.88, 0.97), "heat": 0.0, "ram": 1.6},
+		"inner": Color(0.86, 0.94, 1.0), "dust_col": Color(0.8, 0.88, 0.97), "heat": 0.0, "ram": 1.6,
+			"haze": 0.45, "vapor": 1.0, "soot": 0.0, "sparks": 0.0, "scar": Color(0.42, 0.4, 0.38)},
 	"carbon": {"coh": 0.25, "rho": 0.7, "weib": 5.0, "cells": 1.2, "jag": 0.2, "dust": 0.55, "rest": 0.08, "fric": 0.6,
-		"inner": Color(0.14, 0.12, 0.11), "dust_col": Color(0.3, 0.26, 0.22), "heat": 0.25, "ram": 1.4},
+		"inner": Color(0.14, 0.12, 0.11), "dust_col": Color(0.3, 0.26, 0.22), "heat": 0.25, "ram": 1.4,
+			"haze": 0.6, "vapor": 0.0, "soot": 1.0, "sparks": 0.0, "scar": Color(0.07, 0.055, 0.05)},
 	"lava": {"coh": 0.55, "rho": 1.0, "weib": 5.0, "cells": 1.0, "jag": 0.18, "dust": 0.4, "rest": 0.05, "fric": 0.7,
-		"inner": Color(1.0, 0.52, 0.16), "dust_col": Color(0.72, 0.36, 0.2), "heat": 1.0, "ram": 1.2},
+		"inner": Color(1.0, 0.52, 0.16), "dust_col": Color(0.72, 0.36, 0.2), "heat": 1.0, "ram": 1.2,
+			"haze": 0.5, "vapor": 0.0, "soot": 0.5, "sparks": 0.4, "scar": Color(0.17, 0.1, 0.07)},
 }
 
 
