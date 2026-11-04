@@ -35,6 +35,7 @@ const FATIGUE := 0.62        # шов под нагрузкой выше это�
 const FATIGUE_K := 2.2
 const TS_CHUNK := 2.6        # время торможения куска газом при плотности 1, с
 const TS_GRAIN := 0.45
+const TS_SPIN := 0.25         # доля бокового ветра, что раскручивает куски
 const RAM_K := 2.4           # напор атмосферы в долях прочности шва при скорости v_ref
 const HEAT_K := 1.6          # нагрев трением в атмосфере
 const IMPACT_K := 0.8        # скорость удара, что колет шов: IMPACT_K·L·√прилива_разрыва
@@ -465,6 +466,11 @@ func _move_chunks(dt: float) -> void:
 		var vg := field.gas_v(ch.pos, src.inflow * (1.0 + maxf(ch.age - 5.0, 0.0) * 0.35))
 		var ts := TS_CHUNK * sqrt(ch.size / maxf(src.L0, 0.1)) * float(src.mat["rho"]) / maxf(rho, 0.02)
 		var v := ch.vel + a * dt
+		# Кусок тяжёл: газ тормозит его падение и сносит внутрь, но вбок
+		# почти не раскручивает (кусок летит по своей орбите, а не с ветром).
+		var rh := ch.pos.normalized()
+		var tg := Vector2(-rh.y, rh.x)
+		vg = rh * vg.dot(rh) + tg * lerpf(v.dot(tg), vg.dot(tg), TS_SPIN)
 		ch.vel = vg + (v - vg) * exp(-dt / maxf(ts, 0.005))
 		ch.pos += ch.vel * dt
 		ch.ang += ch.w * dt
