@@ -34,6 +34,8 @@ const HILL_W := 0.35         # «время газа» задачи Хилла (
 const ROCHE_R := {"ice": 2.5, "carbon": 2.1, "rock": 1.75, "lava": 1.65, "metal": 0.95, "gas": 2.0}
 const ROCHE_KIND := {"comet": 2.8, "rubble": 2.6, "trojan": 2.4, "irondwarf": 0.9, "icedwarf": 2.6}
 const ENVELOPE_R := 2.7      # здесь мини-нептун теряет газовую оболочку
+const GAS_ROT := 0.92        # газ своего диска кружит с такой долей круговой скорости
+const HANDOVER := 1.2        # тело уходит в движок разрушения на стольких пределах Роша
 const ATTRACT := 60.0        # взаимное тяготение у края сферы Хилла, ед./с²
 const IMPACT_V := 330.0      # скорость сближения для гигантского удара, ед./с
 const BIG_RATIO := 1.4       # крупное: легче тебя хотя бы во столько раз
@@ -84,7 +86,9 @@ var stage                    # giant_stage.gd
 var bodies: Array = []
 var vortices: Array = []
 var _pearls: Array = []      # крупные обломки разорванных тел: летят по задаче Хилла
-var tides: TidalStreams     # приливные струи: светящиеся нити в системе гиганта
+var tides: TidalStreams     # газовые струи (оболочки, кольца) и шлейфы ударов
+var frac: FracWorld          # движок разрушения: всё твёрдое ломается в нём
+var _ffield: GiantFracField
 var _white: ImageTexture
 var _width_curve: Curve
 var _flashes: Array = []     # вспышки ударов в облаках и падений в звезду
@@ -118,6 +122,12 @@ func setup() -> void:
 	tides = TidalStreams.new()
 	tides.world = self
 	stage.body.add_child(tides)
+	_ffield = GiantFracField.new()
+	_ffield.world = self
+	_ffield.refresh()
+	frac = FracWorld.new()
+	frac.field = _ffield
+	stage.body.add_child(frac)
 
 
 ## Мир сразу такой, какой положен эпохе (начало этапа или загрузка посреди).
@@ -394,6 +404,8 @@ func step(delta: float) -> void:
 	bodies = keep
 	_step_pearls(delta, h)
 	tides.step(delta, _giant_r())
+	_ffield.refresh()
+	frac.step(delta)
 	_step_vortices(delta, gpos, h)
 	# Тела не кончаются: новые приходят с окраин и из-за края экрана.
 	_spawn_t -= delta
@@ -600,13 +612,25 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	# Тяжёлое тело тормозится о диск дольше: спираль крупного — на пару оборотов.
 	var q: float = b.get("q", 0.0)
 	var fr := 0.9 / (1.0 + q) * (1.0 + 0.18 * float(b.t))
+	var ho := maxf(roche_h(b) * HANDOVER, contact_h(b) * 1.6) if _solid(b) else 0.0
 	for k in steps:
-		p = GasParticles.hill_step(p, hh, g, fr)
-		# Трение о свой диск тянет тело к тебе по спирали.
+		p = GasParticles.hill_step(p, hh, g, 0.0)
+		# Трение о свой диск тянет тело к тебе по спирали. Диск сам кружит
+		# в прямую сторону, поэтому трение не гасит скорость в ноль, а
+		# сводит тело на его вращение (чуть медленнее круговой): тело
+		# подходит к пределу Роша по орбите, а не падает отвесно.
 		var d := sqrt(p.x * p.x + p.y * p.y)
+		var vk := maxf(sqrt(g / maxf(d, 0.05)) - d, 0.0) * GAS_ROT
+		# Ближе к пределу Роша газ плотнее и сильнее закручивает тело.
+		var fr2 := fr + (14.0 * smoothstep(ho * 2.6, ho * 1.3, d) if ho > 0.0 else 0.0)
+		p.z -= (p.z + p.y / maxf(d, 0.05) * vk) * fr2 * hh
+		p.w -= (p.w - p.x / maxf(d, 0.05) * vk) * fr2 * hh
 		# Снаружи сферы Хилла прилив звезды тянет прочь: газ оболочки тормозит
 		# тело и не даёт ему уйти (захват трением о газ).
-		var hold := fr + maxf(3.0 * d - g / maxf(d * d, 0.05), 0.0) * 1.25 + 0.4
+		# Твёрдое тело у предела Роша газ уже не тащит вниз: оно подходит по
+		# пологой спирали, и движок разрушения успевает показать раскол.
+		var pull := (fr + 0.4) * ((0.08 + 0.92 * smoothstep(ho, ho * 1.8, d)) if ho > 0.0 else 1.0)
+		var hold := pull + maxf(3.0 * d - g / maxf(d * d, 0.05), 0.0) * 1.25
 		var ux := p.x / maxf(d, 0.1)
 		var uy := p.y / maxf(d, 0.1)
 		var vrad := p.z * ux + p.w * uy
@@ -622,7 +646,9 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	var dist := sqrt(p.x * p.x + p.y * p.y)
 	var roche := roche_h(b)
 	var touch := contact_h(b)
-	b.stretch = smoothstep(roche * 1.5, roche, dist) * (1.0 if roche > touch else 0.35)
+	var solid := _solid(b)
+	# Твёрдое тело не тянется картинкой: его рвёт движок разрушения.
+	b.stretch = 0.0 if solid else smoothstep(roche * 1.5, roche, dist) * (1.0 if roche > touch else 0.35)
 	b.t = float(b.t) + delta
 	# Мир помнит, где тело: для HUD и отрисовки.
 	var wp: Vector2 = stage.body.to_global(Vector2(p.x, -p.y) * h)
@@ -640,6 +666,21 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	if b.kind == "minineptune" and not b.get("core", false) and dist < roche:
 		_strip_envelope(b, p, h)
 		return true
+	if solid:
+		# Движку тело отдаём чуть раньше предела Роша: трещины пойдут сами,
+		# когда прилив превысит прочность. Плотное (железо) — у самых облаков:
+		# прилив его не берёт, а напор атмосферы и удар — может.
+		var at := roche * HANDOVER if roche > touch else touch * 1.6
+		if dist < at * 1.15 and not b.has("snap"):
+			b["snap"] = _snapshot(b)   # снимок готов к следующему кадру
+		if dist < at:
+			_to_engine(b, p, h, roche > touch)
+			return false
+		if float(b.t) > 24.0:
+			# Долго кружит далеко: без движка, чтобы куски не улетали из сферы Хилла.
+			_hit_whole(b, p, h)
+			return false
+		return true
 	if roche > touch and dist < roche:
 		_tear(b, p, h)
 		return false
@@ -648,6 +689,103 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 		_hit_whole(b, p, h)
 		return false
 	return true
+
+
+## Твёрдое ли тело (его ломает движок), или газ (рвётся лентой).
+func _solid(b: Dictionary) -> bool:
+	if b.kind in ["rival", "dwarf"]:
+		return false
+	if b.kind == "minineptune":
+		return b.get("core", false)
+	return true
+
+
+## Тело уходит в движок разрушения. Оно летит дальше само, под тем же
+## тяготением; прилив, удары и атмосфера ломают его по прочности вещества.
+## Награда — в миг, когда тело треснуло (или врезалось целым).
+func _to_engine(b: Dictionary, p: Vector4, h: float, tidal: bool) -> FracWorld.Source:
+	var from := Vector2(p.x, -p.y) * h
+	var vel := Vector2(p.z, -p.w) * h * HILL_W
+	var gain := _gain(b)
+	var snap: Dictionary = b.get("snap", {})
+	if snap.is_empty():
+		snap = _snapshot(b)
+	b.erase("snap")
+	var zoom := maxf(stage.camera.zoom.x, 0.001)
+	var rad := maxf(rad_of(b), 6.0 / zoom)
+	var m: float = b.m
+	# Сколько ячеек: крупное рядом с тобой режется мельче, мелочь — горсткой.
+	var qk := clampf(sqrt(m / maxf(float(stage.earths) * 0.1, 0.001)), 0.0, 1.0)
+	var cells := roundi(lerpf(7.0, 34.0, qk) + clampf(rad * zoom / 6.0, 0.0, 10.0))
+	var mat: String = str(b.mat) if FracMat.MATS.has(str(b.mat)) else "rock"
+	if b.kind == "comet":
+		mat = "ice"
+	var o := {
+		"pos": from, "vel": vel, "w": float(b.spin_rate) * 0.5, "rad": rad, "mass": gain, "mat": mat,
+		"cells": cells, "seed": fmod(float(b.seed), 97.0) / 97.0, "r_crit": roche_h(b) * h,
+		"inflow": 0.22, "sink": _frac_sink, "notify": _frac_notify,
+		"tag": {"b": b, "gain": gain, "pay": _pay_k(b), "done": false, "big": qk > 0.6},
+	}
+	if b.kind in ["comet", "rubble"]:
+		# Рыхлое: груда и кометное ядро держатся только тяготением.
+		o["inflow"] = 0.3
+		o["coh"] = 0.05
+	elif b.kind in ["trojan", "binary", "icedwarf"]:
+		o["coh"] = minf(float(FracMat.get_mat(mat)["coh"]), 0.3)
+	if not snap.is_empty():
+		o["tex"] = snap.tex
+		o["vp"] = snap.vp
+		o["disc"] = snap.disc
+		o["tex_rot"] = float(stage.ang)
+	else:
+		o["col"] = (MATS[mat]["col"] as Color) if MATS.has(mat) else Color(0.8, 0.85, 0.9)
+	if b.mat == "lava":
+		o["heat"] = 1.0
+	elif str(GameState.giant.get("flavor", "")) == "giant_hot":
+		o["heat"] = float(FracMat.get_mat(mat)["heat"]) + 0.15
+	var src := frac.spawn_body(o)
+	if (float(b.m) > 0.4 and float(b.m) > float(stage.earths) * 0.02) or b.kind in ["icedwarf", "superearth", "minineptune"]:
+		# Крупное тело ломается на глазах: камера подъезжает.
+		stage.focus(from * 0.6, 5.0, 0.9)
+	return src
+
+
+## Масса из движка: пыль и куски ушли в облака.
+func _frac_sink(m: float, chunk: bool, at: Vector2, size: float, src: FracWorld.Source) -> void:
+	var t: Dictionary = src.tag
+	stage.earths += m
+	stage.pay(m * float(t.pay) * (Skills.stat("giant_impact") if chunk else 1.0))
+	if not chunk or size <= 0.0:
+		return
+	var r := _giant_r()
+	var b: Dictionary = t.b
+	# Кусок вошёл в облака на десятках км/с: короткий шлейф и тёмный след,
+	# как у осколков кометы Шумейкеров — Леви 9. Мелочь — без шлейфа.
+	if size > r * 0.02:
+		stage.body.scar(at.normalized(), size * 0.6)
+		var np := int(t.get("plumes", 0))
+		if tides.plumes.size() < 6 and np < 3 and size > r * 0.035:
+			t["plumes"] = np + 1
+			var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.6, 0.55, 0.5)
+			tides.plume(at.normalized() * r * 0.97, clampf(r * 0.02 + size * 0.5, r * 0.025, r * 0.09), smoke.darkened(0.45), float(b.seed) + size, 2.4)
+
+
+func _frac_notify(ev: String, src: FracWorld.Source) -> void:
+	var t: Dictionary = src.tag
+	if t.done:
+		return
+	var b: Dictionary = t.b
+	match ev:
+		"break", "done":
+			t.done = true
+			_reward(b, float(t.gain))
+		"hit":
+			# Не треснуло и врезалось целым: огненный след, жар оболочки.
+			t.done = true
+			stage.body.flash()
+			stage.body.impact_heat = minf(stage.body.impact_heat + 0.25 * clampf(float(b.get("q", 0.05)) * 4.0, 0.2, 1.0), 1.0)
+			_composition_hit(b, 0.5)
+			_reward(b, float(t.gain), "hit")
 
 
 ## У предела Роша тело рвётся: нитка обломков и пылевая струя.
@@ -723,7 +861,8 @@ func _snapshot(b: Dictionary) -> Dictionary:
 	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var light := (-pos_of(b)).normalized()
 	var disc := 0.36
-	var heat := 0.25 if b.mat in ["rock", "lava"] else 0.0
+	# Снимок — тот же вид, что и у целого тела (без накала: прилив не греет).
+	var heat := 0.85 if b.mat == "lava" else 0.0
 	match view:
 		"moon":
 			var mv := MoonView.new()
@@ -836,7 +975,6 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	stage.body.impact_heat = minf(stage.body.impact_heat + 0.45 + q, 1.0)
 	# Выбитое вещество: две ленты из точки удара, с прямым вращением —
 	# они обовьют тебя и упадут обратно позже.
-	var gk := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
 	var hd := Vector2(dir.x, -dir.y)
 	var tang := hd.orthogonal()
 	var col: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.85, 0.78, 0.66)
@@ -844,13 +982,39 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 	# Шлейф: огненный веер поднимается из облаков и опадает дымом цвета тела.
 	var smoke: Color = MATS[b.mat]["col"] if MATS.has(b.mat) else Color(0.4, 0.33, 0.26)
 	tides.plume(dir * r * 0.96, r * (0.4 + 0.4 * q), smoke.darkened(0.35), float(b.seed), 3.4)
-	# Часть выбитого вещества ложится обратно дугой пыли.
-	tides.spawn(dir.rotated(0.1) * r, "arc", gain * 0.15, _pay_k(b), str(b.mat) if MATS.has(b.mat) else "rock", float(b.seed),
-		rad_of(b) * 1.2, {"T": 3.6, "Ls": 1.8, "span": 0.7, "hgt": r * 0.55, "snap": _snapshot(b)})
+	# Само тело врезается и крошится в облаках: напор атмосферы рвёт его
+	# спереди назад. Выбитое вещество — брызги расплава по дугам: они
+	# падают обратно или ложатся в диск, каждая по своей орбите.
+	var rel_l: Vector2 = (_vel_of(b) - _player_vel()).rotated(-float(stage.ang))
+	var zoom := maxf(stage.camera.zoom.x, 0.001)
+	var rad := maxf(rad_of(b), 6.0 / zoom)
+	var mat: String = str(b.mat) if FracMat.MATS.has(str(b.mat)) else "rock"
+	var snap := _snapshot(b)
+	var o := {
+		"pos": loc - rel_l.normalized() * rad * 0.2, "vel": rel_l, "rad": rad, "mass": gain * 0.15, "mat": mat,
+		"cells": 26, "seed": fmod(float(b.seed), 97.0) / 97.0, "r_crit": r * 3.0,
+		"impact_at": -dir * rad * 0.8, "inflow": 0.3, "sink": _frac_sink, "notify": func(_e, _s) -> void: pass,
+		"tag": {"b": b, "gain": gain, "pay": _pay_k(b), "done": true, "big": true},
+	}
+	if not snap.is_empty():
+		o["tex"] = snap.tex
+		o["vp"] = snap.vp
+		o["disc"] = snap.disc
+		o["tex_rot"] = float(stage.ang)
+	else:
+		o["col"] = col
+	var src := frac.spawn_body(o)
+	var vesc := sqrt(2.0) * _ffield.v_ref()
+	var hot := {"ice": 0.0, "metal": 0.7, "carbon": 0.6, "lava": 1.0}.get(mat, 0.85) as float
+	# Конус выброса наклонён по ходу удара (косой удар бросает вперёд).
+	var fwd := rel_l.normalized()
+	var ej_dir := (dir + (fwd - dir * fwd.dot(dir)) * 0.6).normalized()
+	frac.spray(src, dir * r * 1.01, ej_dir, int(70 + 60 * q), 0.0, vesc * (0.45 + 0.25 * q), 0.45, hot, rad * 0.08)
+	frac.spray(src, dir * r * 1.01, dir, 40, 0.0, vesc * 0.3, 0.9, hot * 0.7, rad * 0.05)
 	# Брызги веером: мелкая раскалённая пыль без массы.
 	var gas: GasParticles = stage.body.gas
 	var c0 := hd * contact_h(b)
-	for i in 70:
+	for i in 30:
 		var a := _rng.randfn(0.0, 0.55)
 		var vv := hd.rotated(a) * _rng.randf_range(0.6, 1.8) - tang * _rng.randf_range(0.2, 0.9)
 		gas.add(c0.x, c0.y, vv.x, vv.y, _rng.randf_range(0.008, 0.02), _rng.randf_range(0.4, 0.75), hot_col.darkened(0.15), -1)
