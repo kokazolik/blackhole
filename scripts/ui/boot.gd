@@ -15,7 +15,7 @@ const SHADERS := [
 	"menu_bg", "moon", "nebula", "pebble", "pebble_body", "planetesimal",
 	"planetesimal_bake", "planetesimal_normals", "pressure_rings", "protostar",
 	"pulse_ripple", "shard", "space_bg", "spotlight", "star_halo", "tidal_stream",
-	"vortex", "young_envelope", "young_star", "bake/star_surface_bake",
+	"vortex", "young_envelope", "young_star",
 ]
 ## Эти шейдеры рисуются через MultiMesh — у них свой вариант программы.
 const MULTI := ["dust", "pebble", "lit_grain"]
@@ -25,6 +25,28 @@ const GLYPHS := "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭ�
 const SIZES := [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 56, 64]
 const PHASES := ["Собираем пыль", "Раскручиваем диск", "Зажигаем звёзды", "Почти готово"]
 const MIN_TIME := 1.2
+## Что сейчас готовится — по-человечески (автор: «пусть показывается процент
+## и что там компилируется»).
+const TITLES := {
+	"comet": "кометы", "dust": "пыль диска", "eddy": "вихри газа", "embryo": "зародыши планет",
+	"far_body": "далёкие тела", "frac": "раскол тел", "gas_disk": "газовый диск",
+	"gas_giant": "газовые гиганты", "giant_bake": "облака гиганта", "giant_cpd": "диск у гиганта",
+	"giant_map": "карты облаков", "giant_planet": "шар гиганта", "giant_ring": "кольца",
+	"giant_rock": "ядро гиганта", "herald_rock": "валуны", "herald_shadow": "тени валунов",
+	"herald_tile_bake": "поверхность валунов", "impact_plume": "шлейфы ударов",
+	"lit_grain": "зёрна на свету", "menu_bg": "диск в меню", "moon": "малые тела",
+	"nebula": "туманность", "pebble": "гальки", "pebble_body": "тело гальки",
+	"planetesimal": "планетезимали", "planetesimal_bake": "рельеф планетезималей",
+	"planetesimal_normals": "свет на рельефе", "pressure_rings": "кольца давления",
+	"protostar": "протозвезда", "pulse_ripple": "волны", "shard": "осколки",
+	"space_bg": "звёздное небо", "spotlight": "свет звезды", "star_halo": "сияние звезды",
+	"tidal_stream": "приливные струи", "vortex": "вихри", "young_envelope": "оболочка молодого гиганта",
+	"young_star": "молодая звезда",
+}
+const SCENE_TITLES := {
+	Fader.MENU: "меню", Fader.GAME: "диск и пыль", Fader.GIANT: "этап гиганта",
+	Fader.YOUNG: "молодая планета", Fader.CLOUD: "облако и звезда", Fader.PROLOGUE: "пролог",
+}
 
 static var keep: Array = []      # сцены этапов: держим, чтобы не грузить второй раз
 
@@ -32,6 +54,7 @@ var _warm := Control.new()       # под экраном загрузки: сю�
 var _bar := ColorRect.new()
 var _bar_bg := ColorRect.new()
 var _status := Label.new()
+var _detail := Label.new()
 var _jobs: Array = []
 var _done := 0
 var _total := 1
@@ -98,12 +121,17 @@ func _build_ui() -> void:
 	_status.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.55))
 	_status.text = PHASES[0]
 	box.add_child(_status)
+	_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_detail.add_theme_font_override("font", UiTheme.FONT_TEXT)
+	_detail.add_theme_font_size_override("font_size", 12)
+	_detail.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.35))
+	box.add_child(_detail)
 
 
 func _process(delta: float) -> void:
 	_t += delta
 	# Несколько задач за кадр: каждая — один шейдер или один шрифт.
-	var budget := 3
+	var budget := 1
 	while budget > 0 and not _jobs.is_empty():
 		var j: Array = _jobs[0]
 		if j[0] == "scene":
@@ -112,16 +140,21 @@ func _process(delta: float) -> void:
 				break
 			if st == ResourceLoader.THREAD_LOAD_LOADED:
 				keep.append(ResourceLoader.load_threaded_get(j[1]))
+			_detail.text = "сцена: " + str(SCENE_TITLES.get(j[1], j[1]))
 		elif j[0] == "shader":
 			_warm_shader(j[1])
+			_detail.text = "шейдер: %s · %s.gdshader" % [TITLES.get(j[1], j[1]), str(j[1]).get_file()]
 		else:
 			_warm_font(j[1])
+			_detail.text = "шрифт: " + str((j[1] as Font).resource_path.get_file().get_basename())
 		_jobs.pop_front()
 		_done += 1
 		budget -= 1
-	var k := float(_done) / float(_total)
-	_bar.size = Vector2(_bar_bg.custom_minimum_size.x * minf(k, _t / MIN_TIME), 2)
-	_status.text = PHASES[mini(int(k * PHASES.size()), PHASES.size() - 1)]
+	var k := minf(float(_done) / float(_total), _t / MIN_TIME)
+	_bar.size = Vector2(_bar_bg.custom_minimum_size.x * k, 2)
+	_status.text = "%s · %d%%" % [PHASES[mini(int(k * PHASES.size()), PHASES.size() - 1)], roundi(k * 100.0)]
+	if _jobs.is_empty():
+		_detail.text = "всё готово"
 	if _jobs.is_empty() and _t >= MIN_TIME and not _leaving:
 		_leaving = true
 		# Ещё кадр — дорисовать последний прогрев, потом в меню.

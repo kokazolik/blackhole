@@ -70,11 +70,11 @@ func _show_main() -> void:
 		col.closed.connect(func() -> void: _panel.visible = true)
 		add_child(col))
 	_button("Главное меню", false, func(): Fader.go(Fader.MENU))
-	_button("Плавность: 120 кадров" if GameState.fps_120 else "Плавность: 60 кадров", false, func():
-		GameState.fps_120 = not GameState.fps_120
-		GameState.apply_fps()
-		GameState.save_game()
-		_show_main())
+	_button("Настройки", false, func() -> void:
+		var st := SettingsScreen.new()
+		_panel.visible = false
+		st.closed.connect(func() -> void: _panel.visible = true)
+		add_child(st))
 	_button("Начать заново", false, _show_confirm)
 
 

@@ -13,6 +13,7 @@ var _motes_layer: Control
 var _motes: Array = []
 var _time := 0.0
 var _confirm: PanelContainer
+var _settings: SettingsScreen
 
 
 func _ready() -> void:
@@ -99,16 +100,9 @@ func _build() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	column.add_child(row)
-	var fps := _add_button(row, "", false, func(): pass)
-	fps.custom_minimum_size = Vector2(214, 46)
-	fps.add_theme_font_size_override("font_size", 14)
-	var fps_text := func() -> void: fps.text = "Плавность: %d" % (120 if GameState.fps_120 else 60)
-	fps_text.call()
-	fps.pressed.connect(func() -> void:
-		GameState.fps_120 = not GameState.fps_120
-		GameState.apply_fps()
-		GameState.save_game()
-		fps_text.call())
+	var opts := _add_button(row, "Настройки", false, _open_settings)
+	opts.custom_minimum_size = Vector2(214, 46)
+	opts.add_theme_font_size_override("font_size", 14)
 	if OS.get_name() != "Web":
 		var quit := _add_button(row, "Выход", false, func(): get_tree().quit())
 		quit.custom_minimum_size = Vector2(114, 46)
@@ -209,6 +203,21 @@ func _open_collection() -> void:
 			_leg.visible = true
 		_collection = null)
 	add_child(_collection)
+
+
+func _open_settings() -> void:
+	if _settings != null:
+		return
+	_settings = SettingsScreen.new()
+	_column.visible = false
+	if _leg != null:
+		_leg.visible = false
+	_settings.closed.connect(func() -> void:
+		_column.visible = true
+		if _leg != null:
+			_leg.visible = true
+		_settings = null)
+	add_child(_settings)
 
 
 func _continue() -> void:
@@ -320,5 +329,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if _collection != null:
 			_collection.close()
+			return
+		if _settings != null:
+			_settings.close()
 			return
 		get_tree().quit()

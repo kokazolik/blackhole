@@ -52,3 +52,27 @@ func go(path: String, out_time := 0.6, in_time := 0.9, tint := Color(0.0, 0.0, 0
 	_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rect.visible = false
 	_busy = false
+
+
+## Счётчик кадров в углу (настройка). Поверх всего, касаний не ловит.
+var _fps: Label
+
+
+func set_fps_counter(on: bool) -> void:
+	if on and _fps == null:
+		_fps = Label.new()
+		_fps.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_fps.position = Vector2(10, 6)
+		_fps.add_theme_font_override("font", UiTheme.FONT_NUMBERS)
+		_fps.add_theme_font_size_override("font_size", 14)
+		_fps.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75, 0.8))
+		_fps.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+		_fps.add_theme_constant_override("outline_size", 4)
+		add_child(_fps)
+	if _fps != null:
+		_fps.visible = on
+
+
+func _process(_delta: float) -> void:
+	if _fps != null and _fps.visible:
+		_fps.text = "%d кадр/с" % Engine.get_frames_per_second()

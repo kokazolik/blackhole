@@ -788,7 +788,7 @@ func hub_target() -> Vector2:
 
 func _vibrate(ms: int) -> void:
 	if OS.has_feature("mobile"):
-		Input.vibrate_handheld(ms)
+		GameState.vibrate(ms)
 
 
 # --- Вид ---

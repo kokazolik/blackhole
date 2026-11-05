@@ -33,7 +33,15 @@ var prologue_seen := false
 var tutorial_done := false
 var pebble_intro_done := false  # рассказ Звездочёта о жизни гальки уже был
 var boulder_intro_done := false
-var fps_120 := false  # настройка, а не прогресс: «Начать заново» её не сбрасывает
+# Настройки (экран «Настройки» в меню и в паузе), а не прогресс: «Начать заново»
+# их не сбрасывает. В сохранении — словарь "settings".
+var fps_max := 60          # 30 — экономия батареи, 60 — ровно, 120 — быстрые экраны
+var vibration := true      # толчки телефона на огромных телах и ударах
+var show_names := true     # имя и масса над телами на этапе гиганта
+var show_marks := true     # стрелки к телам за краем экрана
+var captions := true       # подписи о событиях (каждая и так один раз за игру)
+var fps_counter := false   # счётчик кадров в углу
+var keep_awake := true     # экран не гаснет, пока игра открыта
 var heal_pool := 0.0  # отколотая масса, которая ещё прирастёт обратно (не сохраняется)
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 var tree_view: Array = []  # где игрок оставил камеру книги: [x, y, масштаб] точки в центре
@@ -502,7 +510,9 @@ func save_game() -> void:
 		"pebble_intro_done": pebble_intro_done,
 		"boulder_intro_done": boulder_intro_done,
 		"tips_seen": tips_seen,
-		"fps_120": fps_120,
+		"settings": {"fps": fps_max, "vibration": vibration, "names": show_names,
+			"marks": show_marks, "captions": captions, "fps_counter": fps_counter,
+			"keep_awake": keep_awake},
 		"tree_view": tree_view,
 		"planet_time": planet_time,
 		"melted": is_melted,
@@ -546,7 +556,15 @@ func load_game() -> void:
 	pebble_intro_done = bool(data.get("pebble_intro_done", false))
 	boulder_intro_done = bool(data.get("boulder_intro_done", false))
 	tips_seen = Array(data.get("tips_seen", []))
-	fps_120 = bool(data.get("fps_120", false))
+	# Старые сохранения: была только «Плавность 120».
+	var st: Dictionary = Dictionary(data.get("settings", {}))
+	fps_max = int(st.get("fps", 120 if bool(data.get("fps_120", false)) else 60))
+	vibration = bool(st.get("vibration", true))
+	show_names = bool(st.get("names", true))
+	show_marks = bool(st.get("marks", true))
+	captions = bool(st.get("captions", true))
+	fps_counter = bool(st.get("fps_counter", false))
+	keep_awake = bool(st.get("keep_awake", true))
 	tree_view = Array(data.get("tree_view", []))
 	planet_time = float(data.get("planet_time", 0.0))
 	is_melted = bool(data.get("melted", false))
@@ -591,15 +609,39 @@ func has_progress() -> bool:
 	return currency > 0.0 or mass > 1.0 or not skill_levels.is_empty()
 
 
-## 60 кадров ровно — по умолчанию; 120 — для мощных телефонов с быстрым экраном.
+## Применить настройки: кадры, экран, счётчик.
 func apply_fps() -> void:
-	Engine.max_fps = 120 if fps_120 else 60
+	Engine.max_fps = fps_max
+	DisplayServer.screen_set_keep_on(keep_awake)
+	Fader.call_deferred("set_fps_counter", fps_counter)
+
+
+## Толчок телефона — только если игрок не выключил вибрацию.
+func vibrate(ms: int) -> void:
+	if vibration:
+		Input.vibrate_handheld(ms)
+
+
+## Стереть всё: забег, наследие, коллекцию, пролог и обучение. Настройки остаются.
+func wipe_all() -> void:
+	_reset_values()
+	legacy = 0
+	endings_seen = []
+	stages_seen = []
+	tips_seen = []
+	prologue_seen = false
+	tutorial_done = false
+	pebble_intro_done = false
+	boulder_intro_done = false
+	save_game()
 
 
 ## Подписи и сообщения о событиях — как обучение: каждое показывается
 ## один раз за всю игру, потом не повторяется. Ключ — заголовок или первые
 ## два слова сообщения (числа и имена лун не в счёт).
 func once(kind: String, text: String) -> bool:
+	if not captions:
+		return false
 	var key := kind + ":" + _msg_key(text)
 	if key in tips_seen:
 		return false

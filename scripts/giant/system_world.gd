@@ -527,7 +527,7 @@ func spawn_wanderer(k := -1.0, close := -1) -> Dictionary:
 	b["cruise"] = dir * speed
 	b["v"] = dir * speed
 	if huge:
-		Input.vibrate_handheld(400)
+		GameState.vibrate(400)
 	return b
 
 
@@ -1351,7 +1351,7 @@ func _giant_impact(b: Dictionary, wp: Vector2, vrel: float) -> void:
 		stage.body.steal(-loc * 6.0)
 		extra += " · удар выбил луну"
 	if OS.has_feature("mobile"):
-		Input.vibrate_handheld(220)
+		GameState.vibrate(220)
 	if not _said.has("impact"):
 		_said["impact"] = true
 		stage.hud.caption("Гигантский удар", "крупное тело с разгона: его масса твоя, оболочка раскалилась, выбитое вещество упадёт обратно", 4.0)

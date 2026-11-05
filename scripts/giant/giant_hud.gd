@@ -445,5 +445,7 @@ func _draw_names() -> void:
 
 ## Стрелки к телам мира за краем экрана.
 func _draw_pointer() -> void:
-	_draw_names()
-	_draw_world_marks()
+	if GameState.show_names:
+		_draw_names()
+	if GameState.show_marks:
+		_draw_world_marks()

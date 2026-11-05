@@ -5,9 +5,11 @@ config_version=5
 [application]
 
 config/name="От пылинки до чёрной дыры"
-config/version="0.99.61"
+config/version="0.99.62"
 run/main_scene="res://scenes/boot.tscn"
 run/max_fps=60
+boot_splash/bg_color=Color(0.01, 0.01, 0.03, 1)
+boot_splash/show_image=false
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://icon.svg"
 
