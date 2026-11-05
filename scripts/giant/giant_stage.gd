@@ -37,7 +37,6 @@ var ang := 0.0
 var vel := Vector2.ZERO     # скорость в мире
 var kick := Vector2.ZERO    # толчки за кадр в системе гиганта (x — от звезды): тяготение, удары; уходят в vel
 var _cam_ang := 0.0         # камера не крутится: экран повёрнут один раз, на старте
-var _vortex_t := 0.0
 var gas := 0.0
 var gas_total := 1.0
 var moons := 0
@@ -165,8 +164,9 @@ func _ready() -> void:
 	# Камера повёрнута раз и навсегда: на старте звезда слева. Дальше экран
 	# не крутится — летишь, куда показывает стик.
 	camera.ignore_rotation = false
-	camera.position_smoothing_enabled = true
-	camera.position_smoothing_speed = 4.0
+	# Без сглаживания: при свободном полёте с инерцией камера иначе отстаёт
+	# и гигант уезжает к краю экрана.
+	camera.position_smoothing_enabled = false
 	camera.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(camera)
 	_update_view(0.0)
@@ -335,6 +335,7 @@ func _notification(what: int) -> void:
 
 const THRUST_K := 1.6        # тяга: за сколько секунд гигант набирает полный ход (1/k)
 const GAS_DRAG := 0.18       # трение о газ диска, 1/с при полном газе
+const MAX_V := 2400.0        # быстрее газ диска не пускает (ударная волна тормозит)
 
 
 func hill() -> float:
@@ -384,6 +385,7 @@ func _process(delta: float) -> void:
 	if input.length() > 0.05:
 		vel += (input.rotated(_cam_ang) * speed - vel).limit_length(thrust * delta)
 	vel *= exp(-GAS_DRAG * gk * delta)
+	vel = vel.limit_length(MAX_V)
 	var was := pos
 	pos += vel * delta
 	# Звезда и край диска: дальше не пускает (у звезды жарко, за краем пусто).
@@ -402,7 +404,6 @@ func _process(delta: float) -> void:
 	_flow = lerpf(_flow, clampf(mdot / (0.6 * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")), 0.0, 1.0), minf(delta * 2.0, 1.0))
 	clumps.step(delta)
 	world.step(delta)
-	_vortices(delta, h)
 	_moons_step(delta)
 	value_boost = maxf(value_boost - delta, 0.0)
 	_update_view(delta)
@@ -484,21 +485,6 @@ func _moons_step(delta: float) -> void:
 		if not _said.has("fall"):
 			_said["fall"] = true
 			hud.caption("Магнитное поле", "поле выметает полость у гиганта и спасает луны от падения: его даёт железное ядро и «Динамо»", 4.0)
-
-
-## Вихри Россби на краях щели: газ, сгребённый приливом, закручивается.
-func _vortices(delta: float, h: float) -> void:
-	if not _said.has("gap"):
-		return
-	_vortex_t -= delta
-	if _vortex_t > 0.0:
-		return
-	_vortex_t = randf_range(45.0, 70.0)
-	var side := 1.0 if randf() < 0.5 else -1.0
-	var r := orbit + side * 2.6 * h
-	if r < GameData.GIANT_ORBIT_MIN or r > GameData.GIANT_DISK.y - 800.0:
-		r = orbit - side * 2.6 * h
-	world.spawn_vortex(r, str(GameState.giant.get("flavor", "")) == "giant_dark")
 
 
 ## Подсказки и вехи по ходу этапа.

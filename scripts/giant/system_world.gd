@@ -1555,8 +1555,6 @@ func markers() -> Array:
 		out.append({"p": pos_of(big), "col": Color(1.0, 0.66, 0.36), "text": "таран: " + str(KINDS[big.kind]["name"])})
 	if not troj.is_empty() and bt > 2500.0:
 		out.append({"p": pos_of(troj), "col": Color(0.85, 0.9, 0.75), "text": "троянцы"})
-	for v in vortices:
-		out.append({"p": Vector2.from_angle(float(v.a)) * float(v.r), "col": Color(0.8, 0.7, 0.5), "text": "вихрь"})
 	return out
 
 
