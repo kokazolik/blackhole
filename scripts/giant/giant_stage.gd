@@ -9,7 +9,6 @@ extends Node2D
 const GasDisk := preload("res://scripts/giant/gas_disk.gd")
 const GiantBody := preload("res://scripts/giant/giant_body.gd")
 const GiantHud := preload("res://scripts/giant/giant_hud.gd")
-const GiantEvents := preload("res://scripts/giant/giant_events.gd")
 const GasClumps := preload("res://scripts/giant/gas_clumps.gd")
 const SAVE_EVERY := 3.0
 const STAR_SCALE := GameData.GIANT_STAR_R / GameData.STAR_RADIUS  # звезда в разы шире гиганта
@@ -22,7 +21,6 @@ var camera := Camera2D.new()
 var disk: GasDisk
 var body: GiantBody
 var hud: GiantHud
-var events: GiantEvents
 var clumps: GasClumps
 var world: GiantWorld
 var joystick: VirtualJoystick
@@ -133,9 +131,6 @@ func _ready() -> void:
 	star.scale = Vector2.ONE * STAR_SCALE
 	add_child(star)
 	star.get_child(0).visible = false  # тёмное кольцо короны на светлом газе лишнее
-	events = GiantEvents.new()
-	events.stage = self
-	add_child(events)
 	clumps = GasClumps.new()
 	clumps.stage = self
 	add_child(clumps)
@@ -147,7 +142,6 @@ func _ready() -> void:
 	add_child(body)
 	clumps.bind(body.gas)
 	world.bind(body.gas)
-	events.bind(world)
 	body.set_look(str(g.get("flavor", "giant_cold")))
 	body.moons = moons
 	# Только что после лавины: газ оседает на твёрдое ядро на глазах.
@@ -353,7 +347,7 @@ func _process(delta: float) -> void:
 	if _feed0 < 0.0:
 		_feed0 = maxf(feed, 0.05)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
-	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * events.acc_mul() * world.acc_mul()
+	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * world.acc_mul()
 	var gained := mdot * delta
 	earths += gained
 	# Широкая кормовая зона расталкивает газ медленнее: щель открывается позже.
@@ -389,7 +383,6 @@ func _process(delta: float) -> void:
 	_vortices(delta, h)
 	_moons_step(delta)
 	value_boost = maxf(value_boost - delta, 0.0)
-	events.step(delta)
 	_update_view(delta)
 	_tell(feed, gk)
 

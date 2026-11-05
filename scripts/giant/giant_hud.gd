@@ -24,7 +24,6 @@ var _cap_title: Label
 var _cap_sub: Label
 var _toast: Label
 var _badge: Control
-var _ev_label: Label
 var _pointer: Control
 var _shown := 0.0
 var _time := 0.0
@@ -105,17 +104,6 @@ func _ready() -> void:
 	_map.draw.connect(_draw_map)
 	add_child(_map)
 	# Событие: строка над картой и стрелка к цели, если она за краем экрана.
-	_ev_label = _label(17, UiTheme.PARCHMENT, UiTheme.FONT_SEMI)
-	_ev_label.anchor_left = 0.5
-	_ev_label.anchor_right = 0.5
-	_ev_label.anchor_top = 1.0
-	_ev_label.anchor_bottom = 1.0
-	_ev_label.offset_left = -300
-	_ev_label.offset_right = 300
-	_ev_label.offset_top = -MAP_SIZE.y - 60
-	_ev_label.offset_bottom = -MAP_SIZE.y - 34
-	_ev_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(_ev_label)
 	_pointer = Control.new()
 	_pointer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -214,8 +202,13 @@ var _cap_queue: Array = []
 
 ## Большая подпись по центру: появляется и тает. Если на экране уже есть
 ## подпись, новая ждёт своей очереди, а не перебивает её на полуслове.
+## На этапе гиганта подписей нет (автор): открытый мир, всё видно по самим
+## телам и по физике. Вызовы оставлены — включить можно здесь, одним местом.
+const QUIET := true
+
+
 func caption(title: String, sub: String, hold := 4.0) -> void:
-	if not GameState.once("cap", title):
+	if QUIET or not GameState.once("cap", title):
 		return
 	_cap_show(title, sub, hold)
 
@@ -239,7 +232,7 @@ func _cap_show(title: String, sub: String, hold: float) -> void:
 
 ## Короткое сообщение над гигантом.
 func toast(text: String, color := Color(1.0, 0.88, 0.6)) -> void:
-	if not GameState.once("toast", text):
+	if QUIET or not GameState.once("toast", text):
 		return
 	_toast.text = text
 	_toast.add_theme_color_override("font_color", color)
@@ -267,11 +260,6 @@ func _process(delta: float) -> void:
 	_gas_label.text = "газ диска рассеется через %d:%02d" % [int(left) / 60, int(left) % 60]
 	_class.text = _class_text(e, stage.orbit)
 	_badge.visible = _can_buy()
-	var ev = stage.events
-	_ev_label.visible = ev != null and ev.active()
-	if _ev_label.visible:
-		_ev_label.text = ev.hint()
-		_ev_label.add_theme_color_override("font_color", ev.color().lerp(UiTheme.PARCHMENT, 0.4))
 	_pointer.queue_redraw()
 	_spark.queue_redraw()
 	_badge.queue_redraw()
@@ -335,18 +323,6 @@ func _draw_map() -> void:
 		pts.append(Vector2((i + 0.5) * col_w, y))
 		_map.draw_rect(Rect2(i * col_w, y, col_w + 0.5, top + h - y), Color(1.0, 0.7, 0.4, 0.22))
 	_map.draw_polyline(pts, Color(1.0, 0.8, 0.5, 0.85), 2.0, true)
-	var ev = stage.events
-	if ev != null and ev.active():
-		var ex: float = (ev.r - lo) / (hi - lo) * s.x
-		var ec: Color = ev.color()
-		var a := 0.6 + 0.4 * sin(_time * 4.0)
-		if ev.kind == "flare":
-			_map.draw_rect(Rect2(0, top, ex, h), Color(ec, 0.18 * a))
-		else:
-			var ew: float = ev.tol() / (hi - lo) * s.x
-			_map.draw_rect(Rect2(ex - ew, top, ew * 2.0, h), Color(ec, 0.22 * a))
-		_map.draw_line(Vector2(ex, top - 2), Vector2(ex, top + h + 2), Color(ec, a), 2.0)
-		_map.draw_colored_polygon(PackedVector2Array([Vector2(ex - 6, top - 9), Vector2(ex + 6, top - 9), Vector2(ex, top - 1)]), Color(ec, a))
 	# Тела диска на карте: еда тёплая, тяжелее тебя — красная.
 	var w = stage.world
 	if w != null:
@@ -390,7 +366,9 @@ func _draw_world_marks() -> void:
 		var at := vp * 0.5 + dir * k
 		var clash := false
 		for u in used:
-			if (u as Vector2).distance_to(at) < 90.0:
+			# Подпись шириной ~220 px: соседние по горизонтали тоже налезают.
+			var du := (u as Vector2) - at
+			if du.length() < 90.0 or (absf(du.x) < 230.0 and absf(du.y) < 34.0):
 				clash = true
 		if clash:
 			continue
@@ -407,25 +385,6 @@ func _draw_world_marks() -> void:
 		_pointer.draw_string(UiTheme.FONT_SEMI, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 220, 14, Color(c, 0.9))
 
 
-## Стрелка к цели события у края экрана, если сама цель за ним.
+## Стрелки к телам мира за краем экрана.
 func _draw_pointer() -> void:
 	_draw_world_marks()
-	var ev = stage.events
-	if ev == null or not ev.active():
-		return
-	var vp := _pointer.size
-	var zoom: float = stage.camera.zoom.x
-	var sx: float = vp.x * 0.5 + (ev.r - stage.orbit) * zoom
-	if sx > 60.0 and sx < vp.x - 60.0:
-		return
-	var right := sx >= vp.x - 60.0
-	var c: Color = ev.color()
-	var a := 0.65 + 0.35 * sin(_time * 4.0)
-	var x := vp.x - 46.0 if right else 46.0
-	var y := vp.y * 0.5
-	var d := 1.0 if right else -1.0
-	_pointer.draw_colored_polygon(PackedVector2Array([Vector2(x + 18 * d, y), Vector2(x - 6 * d, y - 16), Vector2(x - 6 * d, y + 16)]), Color(c, a))
-	var dist := absf(ev.r - stage.orbit) / GameData.AU_UNITS
-	var txt := ("%.1f" % dist).replace(".", ",") + " а.е."
-	var tx := x - 70.0 if right else x - 10.0
-	_pointer.draw_string(UiTheme.FONT_SEMI, Vector2(tx, y + 38), txt, HORIZONTAL_ALIGNMENT_CENTER, 80, 15, Color(c, 0.9))
