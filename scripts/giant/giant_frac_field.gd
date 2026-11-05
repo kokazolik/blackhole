@@ -60,7 +60,8 @@ func gas_v(p: Vector2, inflow: float) -> Vector2:
 	# пыль падает недалеко от места раскола, а не облетает гиганта по кругу.
 	var fall := smoothstep(R * FALL_R, R * 1.05, r)
 	var vr := -inflow * maxf(r - 0.9 * R, 0.0) - vk * (FALL_K * fall + 0.35 * a)
-	return rh * vr + Vector2(rh.y, -rh.x) * (-DIR) * vk
+	# Орбит нет (автор): газ не кружит вокруг гиганта, только падает в него.
+	return rh * (vr - vk * 0.3)
 
 
 func gas_rho(p: Vector2) -> float:

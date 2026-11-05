@@ -255,7 +255,7 @@ func _process(delta: float) -> void:
 	var e: float = stage.earths
 	_mass.text = "%s масс Земли · %s массы Юпитера" % [_fmt(e), String.num(e / GameData.JUPITER_EARTHS, 2)]
 	var field: float = GameState.giant_field()
-	_field.text = "Магнитное поле %d%% · лун %d из %d" % [roundi(field * 100.0), stage.moons, GameState.giant_moon_cap()]
+	_field.text = "Магнитное поле %d%%" % roundi(field * 100.0)
 	var left: float = maxf(stage.gas, 0.0)
 	_gas_label.text = "газ диска рассеется через %d:%02d" % [int(left) / 60, int(left) % 60]
 	_class.text = _class_text(e, stage.orbit)

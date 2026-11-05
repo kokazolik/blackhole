@@ -84,9 +84,10 @@ func _ready() -> void:
 	_cam_ang = ang
 	gas_total = GameData.GIANT_GAS_TIME * (1.0 + Skills.stat("giant_gas"))
 	gas = float(g.get("gas", gas_total))
-	moons = int(g.get("moons", 0))
-	moon_prog = float(g.get("moon_prog", 0.0))
-	ring_m = float(g.get("ring_m", 0.0))
+	# Лун на гиганте больше нет: старые сохранения тоже без них.
+	moons = 0
+	moon_prog = 0.0
+	ring_m = 0.0   # колец и лун на гиганте нет (старые сохранения тоже)
 	var rc: Array = g.get("ring_col", [])
 	if rc.size() >= 6:
 		ring_col = Color(rc[0], rc[1], rc[2])
@@ -449,42 +450,19 @@ func pay(gained: float) -> void:
 	GameState.add_currency(value)
 
 
-## Луны собираются из пыли в своём диске; поле решает, сколько их удержится.
+## Кольцо медленно тает и оседает в тебя (лун на гиганте нет). У горячего
+## гиганта звезда выпаривает кольцо втрое быстрее.
 func _moons_step(delta: float) -> void:
-	moon_prog += delta * (0.35 + 0.65 * _flow) * Skills.stat("giant_moons") / MOON_TIME
-	# Кольцо медленно тает: внутренний край оседает в облака, у внешнего края
-	# (за пределом Роша) обломки слипаются в луны. У горячего гиганта звезда
-	# выпаривает кольцо втрое быстрее.
 	if ring_m > 0.0:
 		var hot := 3.0 if str(GameState.giant.get("flavor", "")) == "giant_hot" else 1.0
 		var lost := ring_m * RING_DECAY * hot * delta
 		ring_m = maxf(ring_m - lost, 0.0)
 		if ring_m < 0.002:
 			ring_m = 0.0
-		moon_prog += lost * RING_MOON * Skills.stat("giant_moons") / hot
 	body.ring_m = ring_m
 	body.ring_col = ring_col
 	body.ring_col2 = ring_col2
 	body.ring_bands = 1.0 if GameState.body_type() == "neutral" else 0.0
-	if moon_prog < 1.0:
-		return
-	moon_prog -= 1.0
-	if moons < GameState.giant_moon_cap():
-		hud.toast("Родилась луна %s! Хондры +%d" % [GiantBody.moon_name(moons), MOON_CHONDRULES], Color(0.85, 0.92, 1.0))
-		GameState.add_chondrules(MOON_CHONDRULES, body.position)
-		moons += 1
-		body.moons = moons
-		body.birth(moons - 1)
-		if moons == 1 and not _said.has("moon"):
-			_said["moon"] = true
-			hud.caption("Своя луна", "пыль в твоём диске слиплась в спутник: каждая луна +8% к звёздной пыли", 3.0)
-	else:
-		earths += MOON_FALL_GAIN
-		body.fall()
-		hud.toast("Новая луна упала в тебя: поле слишком слабое, чтобы удержать больше", Color(1.0, 0.7, 0.55))
-		if not _said.has("fall"):
-			_said["fall"] = true
-			hud.caption("Магнитное поле", "поле выметает полость у гиганта и спасает луны от падения: его даёт железное ядро и «Динамо»", 4.0)
 
 
 ## Подсказки и вехи по ходу этапа.

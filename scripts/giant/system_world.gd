@@ -318,9 +318,6 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 	elif not kind in ["rival", "dwarf"]:
 		# Свой медленный дрейф: мир не стоит на месте, но и не крутится.
 		b["drift"] = Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(8.0, 40.0)
-	if kind in ["superearth", "minineptune"] and _rng.randf() < 0.35:
-		# Своя луна: достанется тебе вместе с телом, если хватит поля.
-		b["sat"] = true
 	if kind == "minineptune" and _rng.randf() < (0.7 if _flavor() == "giant_ice" else 0.4):
 		b["rings"] = true
 	_next_id += 1
@@ -726,9 +723,10 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 		# Трение только в самом диске (ближе ~1 Хилла) и чуть сильнее у предела
 		# Роша, где газ плотнее. Снаружи — чистое тяготение: пролёт по гиперболе.
 		var fr2 := fr * smoothstep(1.0, 0.45, d) + (1.5 * smoothstep(ho * 1.4, ho * 1.05, d) if ho > 0.0 else 0.0)
-		# Газ диска кружит вокруг тебя и летит вместе с тобой.
-		var gx := pv.x - p.y / maxf(d, 0.05) * vk
-		var gy := pv.y + p.x / maxf(d, 0.05) * vk
+		# Орбит нет (автор): газ у тебя не кружит, а летит вместе с тобой и
+		# падает в тебя. Тело в нём теряет скорость относительно тебя и падает.
+		var gx := pv.x - p.x / maxf(d, 0.05) * vk * 0.3
+		var gy := pv.y - p.y / maxf(d, 0.05) * vk * 0.3
 		p.z -= (p.z - gx) * fr2 * hh
 		p.w -= (p.w - gy) * fr2 * hh
 	b.h = p
@@ -871,8 +869,7 @@ func _frac_notify(ev: String, src: FracWorld.Source) -> void:
 	match ev:
 		"break", "done":
 			t.done = true
-			if ev == "break" and t.get("tidal", false):
-				_to_ring(src.mat_name, float(t.gain))
+			# Кольца нет (автор: «никаких орбит»): всё разорванное падает в тебя.
 			_reward(b, float(t.gain))
 		"hit":
 			# Не треснуло и врезалось целым: огненный след, жар оболочки.
