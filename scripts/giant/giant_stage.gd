@@ -13,6 +13,7 @@ const GasClumps := preload("res://scripts/giant/gas_clumps.gd")
 const SAVE_EVERY := 3.0
 const STAR_SCALE := GameData.GIANT_STAR_R / GameData.STAR_RADIUS  # звезда в разы шире гиганта
 const STAR_GLOW := 6200.0   # радиус свечения вокруг звезды
+const MOONLESS_K := 1.2    # вместо бонуса лун (+8% за луну), которых больше нет
 const MOON_TIME := 75.0     # секунд на луну при обычном притоке газа
 const MOON_FALL_GAIN := 0.6 # масс Земли, если луна упала в гиганта
 const MOON_CHONDRULES := 6  # луна слиплась из пыли: в ней хондры
@@ -446,7 +447,7 @@ func pay(gained: float) -> void:
 	if gained <= 0.0:
 		return
 	var value := (1.5 if value_boost > 0.0 else 1.0) * gained * GameData.GIANT_VALUE * Skills.stat("value") * Skills.stat("value_mul") \
-		* GameState.value_bonus() * (1.0 + 0.08 * moons)
+		* GameState.value_bonus() * MOONLESS_K
 	GameState.add_currency(value)
 
 
