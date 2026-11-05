@@ -83,6 +83,8 @@ func _fluid_me() -> Dictionary:
 
 
 func _fluid_of(b: Dictionary) -> Dictionary:
+	if b.has("cls"):
+		return GiantWorld.WORLD_CLS[b.cls]
 	return FLUID["dwarf"] if b.kind == "dwarf" else FLUID["rival"]
 
 
@@ -412,7 +414,8 @@ func move_bodies(delta: float) -> void:
 		var np: Vector2 = world.pos_of(b) + v * delta
 		b.r = np.length()
 		b.a = np.angle()
-		v *= exp(-0.35 * delta)
+		if not b.has("cruise"):
+			v *= exp(-0.35 * delta)
 		if v.length_squared() < 4.0:
 			b.erase("v")
 		else:

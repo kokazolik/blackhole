@@ -83,7 +83,31 @@ const RIVAL_LOOKS := [
 	[Color(0.86, 0.8, 0.7), Color(0.6, 0.48, 0.38), Color(0.75, 0.45, 0.3)],
 	[Color(0.78, 0.82, 0.86), Color(0.5, 0.56, 0.62), Color(0.62, 0.66, 0.72)],
 	[Color(0.88, 0.74, 0.56), Color(0.56, 0.36, 0.22), Color(0.82, 0.5, 0.3)],
+	# Миры поменьше (WORLD_CLS): 3 ледяной гигант, 4 сатурн, 5 рыхлый мир,
+	# 6 сажевый гигант, 7 тяжёлое ядро, 8 горячий нептун.
+	[Color(0.56, 0.76, 0.92), Color(0.3, 0.5, 0.78), Color(0.22, 0.34, 0.66)],
+	[Color(0.93, 0.87, 0.7), Color(0.78, 0.68, 0.5), Color(0.86, 0.76, 0.56)],
+	[Color(0.92, 0.84, 0.76), Color(0.82, 0.7, 0.62), Color(0.96, 0.88, 0.8)],
+	[Color(0.36, 0.29, 0.25), Color(0.17, 0.13, 0.11), Color(0.46, 0.3, 0.2)],
+	[Color(0.72, 0.68, 0.63), Color(0.47, 0.44, 0.43), Color(0.62, 0.52, 0.43)],
+	[Color(0.5, 0.64, 0.86), Color(0.3, 0.4, 0.62), Color(0.86, 0.52, 0.36)],
 ]
+## Миры заметного размера (автор: «как мы, только меньше — ¼, ⅓, ½ размера,
+## и нестандартные, чтобы их есть по физике»). Размер — доля твоего радиуса,
+## масса из размера честно: ледяные гиганты и сатурны по закону
+## M = 17·(R/3,9 R⊕)^1,92 (Нептун → Сатурн), рыхлый мир — 2–8 M⊕ при размере
+## Сатурна (как Kepler-51), тяжёлое ядро втрое плотнее (как HD 149026 b).
+## Все легче тебя: едятся слиянием (GiantEncounter) — прилив, перетекание
+## через L1, общая оболочка; мягкость soft и время слияния ce — свои.
+const WORLD_CLS := {
+	"icegiant": {"title": "ледяной гигант", "size": Vector2(0.25, 0.4), "look": 3, "soft": 1.2, "ce": 2.6, "w": 1.0},
+	"saturn": {"title": "сатурн", "size": Vector2(0.4, 0.55), "look": 4, "soft": 1.15, "ce": 2.8, "w": 0.8},
+	"puff": {"title": "рыхлый мир", "size": Vector2(0.35, 0.5), "look": 5, "soft": 2.4, "ce": 1.8, "w": 0.6},
+	"soot": {"title": "сажевый гигант", "size": Vector2(0.3, 0.45), "look": 6, "soft": 1.0, "ce": 3.0, "w": 0.6},
+	"dense": {"title": "тяжёлое ядро", "size": Vector2(0.25, 0.35), "look": 7, "soft": 0.65, "ce": 4.2, "w": 0.5},
+	"hotnep": {"title": "горячий нептун", "size": Vector2(0.25, 0.35), "look": 8, "soft": 1.5, "ce": 2.2, "w": 0.3},
+}
+const WORLDS_BY_ERA := [2, 3, 4, 5]
 const NEPTUNE_LOOK := [Color(0.62, 0.8, 0.9), Color(0.36, 0.58, 0.78), Color(0.2, 0.32, 0.6)]
 const DWARF_LOOK := [Color(0.55, 0.22, 0.2), Color(0.28, 0.08, 0.1), Color(0.75, 0.3, 0.18)]
 
@@ -111,6 +135,7 @@ var _ring_list: Array = []   # кольца мини-нептунов этого
 var _over := Node2D.new()    # поверх гиганта: огонь удара и ударная волна
 var _spawn_t := 4.0
 var _dwarf_t := 140.0
+var _wander_t := 0.0         # до следующей проверки странника-гиганта, с
 var _said := {}
 var _sling_cd := 0.0
 var _hit_cd := 0.0
@@ -307,7 +332,7 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 		# Медленно, как настоящие тела: оборот за минуты, а не за секунды.
 		"spin_rate": _rng.randf_range(0.008, 0.03) * (1.0 if _rng.randf() < 0.5 else -1.0),
 		"tilt": _rng.randf_range(0.2, 0.6), "state": "free", "t": 0.0,
-		"h": Vector4.ZERO, "stretch": 0.0, "cd": 0.0, "tag": "", "look": _rng.randi() % RIVAL_LOOKS.size(),
+		"h": Vector4.ZERO, "stretch": 0.0, "cd": 0.0, "tag": "", "look": _rng.randi() % 3,
 	}
 	var sub := _sub_mat(mat, r)
 	if sub != "":
@@ -336,6 +361,174 @@ func _spawn_rival(m: float) -> Dictionary:
 		if (Vector2.from_angle(a) * r).distance_to(gp) > 9000.0:
 			break
 	return _add_body("rival", r, a, "gas", m)
+
+
+## Странники-гиганты (автор: «первую минуту никого, потом с небольшим
+## шансом — гиганты меньше и больше тебя, чтобы дух захватывало»). Первая
+## минута этапа пустая. Дальше раз в 60–120 с бросок: с шансом по флейвору
+## сквозь диск идёт чужой гигант своим курсом. Масса — от твоей: 40% легче
+## (0,35–0,8), 35% тяжелее (1,3–2,8), 25% огромный (4–12, до 4200 M⊕):
+## молодой, ещё раздутый жаром — в 1,4–1,9 раза шире, идёт медленно.
+## Часть проходит вплотную (2,5–4 суммы радиусов): прилив, перетекание,
+## слияние — уже GiantEncounter. Ушёл за 18 000 — исчез без следа.
+const WANDER_CHANCE := {"giant_cold": 0.4, "giant_hot": 0.42, "giant_ice": 0.36,
+	"giant_dark": 0.32, "giant_dense": 0.3}
+
+
+func _step_wanderers(delta: float) -> void:
+	var elapsed: float = float(stage.gas_total) - float(stage.gas)
+	if elapsed < 60.0 or stage.gas < 40.0:
+		return
+	_wander_t -= delta
+	if _wander_t > 0.0:
+		return
+	_wander_t = _rng.randf_range(60.0, 120.0)
+	var n := 0
+	for b in bodies:
+		if b.kind == "rival" and b.has("cruise"):
+			n += 1
+	if n >= 2 or _rng.randf() > float(WANDER_CHANCE.get(_flavor(), 0.35)):
+		return
+	spawn_wanderer(-1.0)
+
+
+var _world_t := 0.0
+
+
+## Миры поменьше всегда где-то рядом: их видно издалека, за ними можно
+## гнаться. Первые — через 45 с, дальше по эпохам 2/3/4/5 сразу.
+func _step_worlds(delta: float) -> void:
+	var elapsed: float = float(stage.gas_total) - float(stage.gas)
+	if elapsed < 45.0 or stage.gas < 40.0:
+		return
+	_world_t -= delta
+	if _world_t > 0.0:
+		return
+	_world_t = _rng.randf_range(5.0, 11.0)
+	var n := 0
+	for b in bodies:
+		if b.has("cls"):
+			n += 1
+	var want := roundi(float(WORLDS_BY_ERA[clampi(stage.era, 0, 3)]) * Skills.stat("giant_bodies"))
+	if n < want:
+		spawn_world("")
+
+
+## Какой мир придёт: по флейвору гиганта и по твоему составу (правило 1).
+func _pick_cls() -> String:
+	var w := {}
+	for k in WORLD_CLS:
+		w[k] = float(WORLD_CLS[k]["w"])
+	match _flavor():
+		"giant_ice":
+			w.icegiant *= 2.0
+			w.saturn *= 1.3
+		"giant_cold":
+			w.saturn *= 1.6
+		"giant_hot":
+			w.hotnep *= 4.0
+			w.puff *= 1.8
+		"giant_dense":
+			w.dense *= 2.5
+			w.puff *= 0.3
+		"giant_dark":
+			w.soot *= 2.5
+	match GameState.body_type():
+		"ice":
+			w.icegiant *= 1.5
+		"carbon":
+			w.soot *= 1.5
+		"metal":
+			w.dense *= 1.5
+		"titan":
+			w.icegiant *= 1.3
+			w.soot *= 1.3
+		"venus":
+			w.puff *= 1.3
+			w.soot *= 1.3
+		"silicate":
+			w.saturn *= 1.3
+		"chondrite", "neutral":
+			# Смешанное тело — пёстрый мир вокруг: все виды ближе к поровну.
+			for k in w:
+				w[k] = sqrt(float(w[k]))
+	var total := 0.0
+	for k in w:
+		total += float(w[k])
+	var x := _rng.randf() * total
+	for k in w:
+		x -= float(w[k])
+		if x <= 0.0:
+			return k
+	return "icegiant"
+
+
+func spawn_world(cls: String, near := -1.0) -> Dictionary:
+	if cls == "":
+		cls = _pick_cls()
+	var c: Dictionary = WORLD_CLS[cls]
+	var e: float = stage.earths
+	var rme := _giant_r()
+	var rr: float = rme * _rng.randf_range(c.size.x, c.size.y)
+	var re := rr / EARTH_R
+	var m := 17.0 * pow(re / 3.9, 1.92)
+	if cls == "puff":
+		m = _rng.randf_range(2.0, 8.0) * clampf(rme / 400.0, 0.4, 1.5)
+	elif cls == "dense":
+		m *= 3.0
+	m = clampf(m, 0.5, e / 1.7)
+	var g: Vector2 = stage.body.position
+	var p := g
+	for attempt in 12:
+		var d := near if near > 0.0 else _rng.randf_range(5200.0, 9000.0)
+		p = g + Vector2.from_angle(_rng.randf() * TAU) * d
+		if p.length() > GameData.HOT_ORBIT and p.length() < GameData.GIANT_DISK.y - 1500.0:
+			break
+	var b := _add_body("rival", p.length(), p.angle(), "gas", m)
+	b["cls"] = cls
+	b["look"] = int(c.look)
+	b["puff"] = rr / GameData.giant_body_r(m)
+	if cls == "saturn":
+		b["rings"] = true
+	return b
+
+
+func spawn_wanderer(k := -1.0, close := -1) -> Dictionary:
+	var e: float = stage.earths
+	var f := _flavor()
+	var roll := _rng.randf()
+	var huge := false
+	if k <= 0.0:
+		if roll < 0.4:
+			k = _rng.randf_range(0.35, 0.8)
+		elif roll < 0.75:
+			k = _rng.randf_range(1.3, 2.8)
+		else:
+			k = _rng.randf_range(4.0, 12.0)
+	huge = k >= 4.0
+	var m := clampf(e * k, 40.0, 4200.0)
+	var g: Vector2 = stage.body.position
+	var dir := Vector2.from_angle(_rng.randf() * TAU)
+	var side := dir.orthogonal()
+	var b := {}
+	var r1 := GameData.giant_body_r(e)
+	var speed := _rng.randf_range(260.0, 380.0) if huge else _rng.randf_range(320.0, 520.0)
+	var puff := 1.0
+	if huge:
+		# Плотный флейвор и соседи у него плотнее; горячий раздувает сильнее.
+		puff = _rng.randf_range(1.4, 1.9) * ({"giant_hot": 1.15, "giant_dense": 0.8}.get(f, 1.0) as float)
+	var r2 := GameData.giant_body_r(m) * puff
+	var near_pass := _rng.randf() < 0.4 if close < 0 else close == 1
+	# Огромный проходит чуть дальше: дух захватывает, но удрать успеваешь.
+	var miss := (_rng.randf_range(3.6, 5.0) if huge else _rng.randf_range(2.5, 4.0)) * (r1 + r2) if near_pass else _rng.randf_range(5000.0, 9000.0)
+	var start := g + side * miss * (1.0 if _rng.randf() < 0.5 else -1.0) - dir * 11000.0
+	b = _add_body("rival", start.length(), start.angle(), "gas", m)
+	b["puff"] = puff
+	b["cruise"] = dir * speed
+	b["v"] = dir * speed
+	if huge:
+		Input.vibrate_handheld(400)
+	return b
 
 
 ## Коричневый карлик проходит сквозь диск по прямой, издалека.
@@ -368,7 +561,8 @@ static func pos_of(b: Dictionary) -> Vector2:
 func rad_of(b: Dictionary) -> float:
 	var k: String = b.kind
 	if k == "rival":
-		return GameData.giant_body_r(float(b.m))
+		# Молодой тяжёлый странник ещё не сжался: раздут жаром (puff).
+		return GameData.giant_body_r(float(b.m)) * float(b.get("puff", 1.0))
 	if k == "dwarf":
 		return GameData.giant_body_r(318.0) * 1.05
 	if k == "comet":
@@ -497,6 +691,8 @@ func step(delta: float) -> void:
 				small += 1
 		if small < want:
 			_spawn_random(false)
+	_step_wanderers(delta)
+	_step_worlds(delta)
 	if stage.era >= 3:
 		_dwarf_t -= delta
 	if _dwarf_t <= 0.0 and stage.gas > 50.0:
@@ -530,6 +726,9 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 	# Свободное тело: занято своим (BodyNpc) — плывёт к цели своим дрейфом,
 	# радиальная скорость гаснет в газе. Орбит нет — само никуда не уносит.
 	if b.kind == "rival":
+		if b.has("cruise") and pos_of(b).distance_to(gpos) > 18000.0 and float(b.t) > 20.0:
+			return false   # странник ушёл своей дорогой
+		b.t = float(b.get("t", 0.0)) + delta
 		BodyNpc.step_rival(self, b, delta, gpos)
 	else:
 		BodyNpc.step(self, b, delta, gpos)
@@ -552,7 +751,7 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 	if float(b.r) < GameData.GIANT_STAR_R * 1.08:
 		_into_star(b)
 		return false
-	if float(b.r) > GameData.GIANT_DISK.y + 600.0:
+	if float(b.r) > GameData.GIANT_DISK.y + 600.0 and not b.has("cruise"):
 		if b.kind != "comet":
 			_ejected(b)
 		return false
@@ -1801,7 +2000,7 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("light_dir", light)
 			m.set_shader_parameter("spin", float(b.spin) * 3.0)
 			m.set_shader_parameter("tilt", 0.1)
-			m.set_shader_parameter("heat", 1.0 if b.kind == "dwarf" else (0.6 if float(b.r) < GameData.HOT_ORBIT else 0.0))
+			m.set_shader_parameter("heat", 1.0 if b.kind == "dwarf" else (0.6 if float(b.r) < GameData.HOT_ORBIT or b.get("cls", "") == "hotnep" else 0.0))
 			# Рядом с тобой форму ведёт GiantEncounter: прилив, полость, касание.
 			var deform: bool = b.has("sh")
 			m.set_shader_parameter("deform", deform)

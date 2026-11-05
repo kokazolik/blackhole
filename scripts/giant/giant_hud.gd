@@ -437,7 +437,10 @@ func _draw_names() -> void:
 		used.append(box)
 		var f := UiTheme.FONT_SEMI
 		_pointer.draw_string(f, top - Vector2(80.0, 18.0), w.name_of(b), HORIZONTAL_ALIGNMENT_CENTER, 160, 14, Color(c, 0.92))
-		_pointer.draw_string(UiTheme.FONT_TEXT, top - Vector2(80.0, 3.0), mass_text(float(b.m)), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color(c, 0.7))
+		var sub_t := mass_text(float(b.m))
+		if b.has("cls"):
+			sub_t = str(GiantWorld.WORLD_CLS[b.cls]["title"]) + " · " + sub_t
+		_pointer.draw_string(UiTheme.FONT_TEXT, top - Vector2(110.0, 3.0), sub_t, HORIZONTAL_ALIGNMENT_CENTER, 220, 12, Color(c, 0.7))
 
 
 ## Стрелки к телам мира за краем экрана.

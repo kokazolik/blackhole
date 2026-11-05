@@ -126,6 +126,12 @@ static func _eat(w, b: Dictionary, t: Dictionary) -> void:
 ## Соперник-гигант: охотится на тела, а от тебя уходит, если ты тяжелее.
 static func step_rival(w, b: Dictionary, delta: float, gpos: Vector2) -> void:
 	var p: Vector2 = w.pos_of(b)
+	if b.has("cruise"):
+		# Странник: идёт сквозь диск своим курсом. Тяготение тебя гнёт его путь,
+		# тяга слабая — курс он выправляет медленно.
+		var cv: Vector2 = b.v if b.has("v") else Vector2.ZERO
+		b["v"] = cv + ((b.cruise as Vector2) - cv).limit_length(RIVAL_ACC * 0.5 * delta)
+		return
 	b["think"] = float(b.get("think", 0.0)) - delta
 	if float(b.think) <= 0.0:
 		b.think = w._rng.randf_range(1.5, 3.0)
