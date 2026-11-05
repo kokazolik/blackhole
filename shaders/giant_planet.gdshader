@@ -24,6 +24,14 @@ uniform float young = 0.0;       // 0..1 накал молодого гиган�
 uniform float temp = 0.6;        // температура фотосферы, тыс. К
 uniform vec3 veil_col : source_color = vec3(0.75, 0.8, 0.9);   // первые облака: конденсат по составу ядра
 
+// Форма жидкого тела рядом с крупным соседом (scripts/giant/giant_encounter.gd):
+// 64 радиуса по углу в долях радиуса — прилив, полость Роша, сплющивание
+// при касании. Облака растягиваются вместе с шаром.
+uniform bool deform = false;
+uniform float shape[64];
+// Ударный нагрев газа: направление (в координатах квада), сила 0..1, температура, тыс. К.
+uniform vec4 shock = vec4(1.0, 0.0, 0.0, 1.0);
+
 vec3 bb(float t) {
 	vec3 c0 = vec3(0.12, 0.01, 0.0);
 	vec3 c1 = vec3(0.55, 0.07, 0.01);
@@ -43,6 +51,13 @@ const float R_MAX = 1.25;
 
 void fragment() {
 	vec2 p = (UV - 0.5) / BODY;
+	vec2 p0 = p;
+	if (deform) {
+		float f = (atan(p.y, p.x) / 6.2831853 + 1.0) * 64.0;
+		int i0 = int(floor(f)) % 64;
+		int i1 = (i0 + 1) % 64;
+		p /= max(mix(shape[i0], shape[i1], fract(f)), 0.05);
+	}
 	float r = length(p);
 	if (r > R_MAX) discard;
 	mat3 mi = transpose(body_to_view());
@@ -125,6 +140,14 @@ void fragment() {
 		float oval = exp(-pow((lat - 0.86) / 0.035, 2.0));
 		float curtain = 0.6 + 0.4 * sin(atan(d.x, d.z) * 11.0 + TIME * 1.7);
 		col += vec3(0.3, 0.95, 0.55) * oval * curtain * aurora * night * 0.55;
+		// Ударная волна и трение в общей оболочке: газ раскалён там, где
+		// давит сосед, к центру шара свечение уходит под облака.
+		if (shock.z > 0.001) {
+			float face = max(dot(normalize(p0), normalize(shock.xy)), 0.0);
+			float zone = pow(face, 3.0) * (0.35 + 0.65 * smoothstep(0.4, 1.0, r));
+			float g = shock.z * zone * (0.75 + 0.25 * fbm(d * 7.0 + vec3(TIME * 0.3)));
+			col += bb(shock.w * (0.8 + 0.4 * g)) * g * 1.4;
+		}
 		alpha = (1.0 - smoothstep(1.0 - aa, 1.0 + aa, r)) * in_a;
 	}
 	// Дымка за краем: тонкий светящийся ободок со стороны звезды.

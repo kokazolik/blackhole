@@ -11,6 +11,9 @@ const PLANET_COLORS := {
 	"giant_core": [Color(0.9, 0.78, 0.6), Color(0.62, 0.46, 0.3)],
 	"super_jupiter": [Color(0.98, 0.78, 0.56), Color(0.7, 0.34, 0.2)],
 	"brown_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
+	"giant_swallowed": [Color(0.86, 0.72, 0.52), Color(0.56, 0.36, 0.26)],
+	"giant_chthonian": [Color(0.5, 0.42, 0.36), Color(0.3, 0.22, 0.18)],
+	"giant_eaten_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
 	"super_earth": [Color(0.55, 0.62, 0.7), Color(0.3, 0.34, 0.4)],
 	"super_iron": [Color(0.62, 0.64, 0.7), Color(0.36, 0.38, 0.44)],
 	"super_neptune": [Color(0.5, 0.74, 0.9), Color(0.3, 0.5, 0.74)],
@@ -70,7 +73,13 @@ func _ready() -> void:
 
 	box.add_child(_line("Концовка", UiTheme.FONT_SERIF_ITALIC, 20, Color(UiTheme.PARCHMENT, 0.7)))
 	box.add_child(_line(info["name"], UiTheme.FONT_HEAD, 30, UiTheme.GOLD))
-	box.add_child(_line(info["desc"], UiTheme.FONT_SERIF_ITALIC, 21, UiTheme.PARCHMENT))
+	var desc := str(info["desc"])
+	# Концовка, общая для всех гигантов, договаривает своё по ядру.
+	var by: Dictionary = info.get("desc_by", {})
+	var fl := str(GameState.giant.get("flavor", "giant_cold"))
+	if by.has(fl):
+		desc += " " + str(by[fl])
+	box.add_child(_line(desc, UiTheme.FONT_SERIF_ITALIC, 21, UiTheme.PARCHMENT))
 
 	var core := "железное ядро %d%% массы" % roundi(GameState.core_share * 100.0) if GameState.is_melted else "без ядра"
 	var stats := "%s · %s · %s%s" % [GameData.format_size(GameState.mass), GameData.format_earths(GameState.mass), core,
@@ -164,7 +173,7 @@ func _make_art() -> void:
 	_art.material = _art_mat
 	_icon.add_child(_art)
 	var cols: Array = PLANET_COLORS.get(kind, PLANET_COLORS["planet_rock"])
-	var giant := kind.begins_with("giant") or kind in ["super_jupiter", "brown_dwarf", "star_failed", "super_neptune"]
+	var giant := (kind.begins_with("giant") and kind != "giant_chthonian") or kind in ["super_jupiter", "brown_dwarf", "star_failed", "super_neptune"]
 	if kind.begins_with("star_") and kind != "star_failed":
 		var mj := float(GameState.cloud.get("mj", 1000.0))
 		var col: Color = GameData.star_color(mj) * (GameData.cloud_params(GameState.fate_type())["tint"] as Color)
@@ -185,13 +194,13 @@ func _make_art() -> void:
 		_art_mat.set_shader_parameter("zone_col", look[0])
 		_art_mat.set_shader_parameter("belt_col", look[1])
 		_art_mat.set_shader_parameter("storm_col", look[2])
-		_art_mat.set_shader_parameter("heat", 0.7 if kind in ["giant_hot", "brown_dwarf", "star_failed"] else 0.0)
+		_art_mat.set_shader_parameter("heat", 0.7 if kind in ["giant_hot", "brown_dwarf", "star_failed", "giant_eaten_dwarf"] else 0.0)
 		_art_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.25))
 	else:
 		_art_mat.shader = preload("res://shaders/embryo.gdshader")
 		var style := 0
 		match kind:
-			"planet_iron", "super_iron":
+			"planet_iron", "super_iron", "giant_chthonian":
 				style = 1
 			"planet_dark", "super_diamond":
 				style = 2

@@ -89,6 +89,7 @@ var vortices: Array = []
 var _pearls: Array = []      # крупные обломки разорванных тел: летят по задаче Хилла
 var tides: TidalStreams     # газовые струи (оболочки, кольца) и шлейфы ударов
 var frac: FracWorld          # движок разрушения: всё твёрдое ломается в нём
+var enc: GiantEncounter      # сближение с крупными жидкими телами: прилив, полость Роша, касание
 var _ffield: GiantFracField
 var _white: ImageTexture
 var _width_curve: Curve
@@ -130,6 +131,10 @@ func setup() -> void:
 	frac.field = _ffield
 	frac.time_k = FRAC_SLOW
 	stage.body.add_child(frac)
+	enc = GiantEncounter.new()
+	enc.stage = stage
+	enc.world = self
+	add_child(enc)
 
 
 ## Мир сразу такой, какой положен эпохе (начало этапа или загрузка посреди).
@@ -333,7 +338,9 @@ func _spawn_dwarf() -> void:
 	var g: Vector2 = stage.body.position
 	var dir := g.normalized().rotated(_rng.randf_range(-0.4, 0.4))
 	var side := dir.orthogonal() * (1.0 if _rng.randf() < 0.5 else -1.0)
-	var miss := _rng.randf_range(1200.0, 2600.0) * (1.0 if _rng.randf() < 0.5 else -1.0)
+	# Мимо тебя, но близко: на таком расстоянии тяга карлика ещё слабее твоего
+	# хода. Подлетишь сам ближе пары тысяч — его тяготение уже не отпустит.
+	var miss := _rng.randf_range(3400.0, 5600.0) * (1.0 if _rng.randf() < 0.5 else -1.0)
 	var start := g + dir * miss - side * 9000.0
 	var b := _add_body("dwarf", start.length(), start.angle(), "gas")
 	b["vel"] = side * 520.0
@@ -397,7 +404,7 @@ func roche_h(b: Dictionary) -> float:
 
 
 func _giant_r() -> float:
-	return stage.body.body_r * stage.body.inflate
+	return stage.body.outer_r()
 
 
 ## Касание облаков, в радиусах Хилла.
@@ -431,6 +438,8 @@ func step(delta: float) -> void:
 		if _step_body(b, delta, orbit, gpos, h, reach):
 			keep.append(b)
 	bodies = keep
+	enc.move_bodies(delta)
+	enc.step(delta)
 	_step_pearls(delta, h)
 	tides.step(delta, _giant_r())
 	_ffield.refresh()
@@ -479,7 +488,6 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		b.r = p.length()
 		b.a = p.angle()
 		_scatter_near(b, delta)
-		_danger(b, delta, gpos, h)
 		return p.length() < GameData.GIANT_DISK.y + 12000.0 and _time < 1e9 and p.distance_to(gpos) < 16000.0
 	# Свободное тело: сдвиг диска, радиальная скорость гаснет в газе.
 	var x := float(b.r) / orbit
@@ -512,6 +520,10 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		_attract(b, delta, p2, gpos, d, h)
 		p2 = pos_of(b)
 		d = p2.distance_to(gpos)
+	# Соперники и карлик — жидкие тела: с ними всё решает GiantEncounter
+	# (тяготение, прилив, перетекание, касание, общая оболочка).
+	if b.kind in ["rival", "dwarf"]:
+		return true
 	match ro:
 		"food", "merge":
 			if d < (2.0 * h * reach if ro == "food" else h * 1.6 + rad_of(b)) and float(b.cd) <= 0.0:
@@ -1745,7 +1757,15 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("spin", float(b.spin) * 3.0)
 			m.set_shader_parameter("tilt", 0.1)
 			m.set_shader_parameter("heat", 1.0 if b.kind == "dwarf" else (0.6 if float(b.r) < GameData.HOT_ORBIT else 0.0))
-			_shape(node, axis_ang, stretch * 0.6, fade)
+			# Рядом с тобой форму ведёт GiantEncounter: прилив, полость, касание.
+			var deform: bool = b.has("sh")
+			m.set_shader_parameter("deform", deform)
+			if deform:
+				m.set_shader_parameter("shape", b.sh)
+			var ch := float(b.get("ce_heat", 0.0))
+			var to_me: Vector2 = (stage.body.position - p).normalized()
+			m.set_shader_parameter("shock", Vector4(to_me.x, to_me.y, ch, 0.9 + 1.2 * ch))
+			_shape(node, axis_ang, 0.0 if deform else stretch * 0.6, fade)
 		"comet":
 			var node := _view("comet") as ColorRect
 			var len := clampf(5200000.0 / float(b.r) / maxf(float(b.r) / 4000.0, 1.0), 500.0, 2600.0)

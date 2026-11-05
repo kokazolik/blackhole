@@ -66,12 +66,12 @@ static func make(id: String) -> ColorRect:
 		m.set_shader_parameter("star_col", GameData.star_color(mj))
 		m.set_shader_parameter("detail", 0.0)
 		return art
-	if id.begins_with("giant") or id in ["super_jupiter", "brown_dwarf", "star_failed", "super_neptune"]:
+	if (id.begins_with("giant") and id != "giant_chthonian") or id in ["super_jupiter", "brown_dwarf", "star_failed", "super_neptune"]:
 		return _giant(art, m, id, light)
 	m.shader = EMBRYO
 	var style := 0
 	match id:
-		"planet_iron", "super_iron":
+		"planet_iron", "super_iron", "giant_chthonian":
 			style = 1
 		"planet_dark", "super_diamond":
 			style = 2
@@ -118,7 +118,7 @@ static func _giant(art: ColorRect, m: ShaderMaterial, id: String, light: Vector2
 	m.set_shader_parameter("zone_col", look[0])
 	m.set_shader_parameter("belt_col", look[1])
 	m.set_shader_parameter("storm_col", look[2])
-	m.set_shader_parameter("heat", 0.7 if id in ["giant_hot", "brown_dwarf", "star_failed"] else 0.0)
+	m.set_shader_parameter("heat", 0.7 if id in ["giant_hot", "brown_dwarf", "star_failed", "giant_eaten_dwarf"] else 0.0)
 	m.set_shader_parameter("light_dir", light)
 	return art
 

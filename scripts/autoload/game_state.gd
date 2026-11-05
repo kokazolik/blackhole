@@ -191,6 +191,7 @@ func start_cloud(from: String) -> void:
 func start_giant(flavor: String, r: float) -> void:
 	stage = GameData.GIANT_STAGE
 	giant = {"flavor": flavor, "e": maxf(earth_masses(), GameData.GIANT_EARTHS), "r": maxf(r, GameData.GIANT_ORBIT_MIN),
+		"core_m": maxf(earth_masses(), GameData.GIANT_EARTHS),
 		"gas": GameData.GIANT_GAS_TIME * (1.0 + Skills.stat("giant_gas")), "sigma": [], "moons": 0, "moon_prog": 0.0}
 	save_game()
 

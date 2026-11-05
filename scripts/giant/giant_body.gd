@@ -21,6 +21,8 @@ var flow := 0.5              # сколько газа падает сейчас
 var field := 0.3
 var moons := 0
 var impact_heat := 0.0       # жар оболочки после гигантского удара, 0..1
+var env_k := 1.0             # толща газа над ядром: 1 — полная оболочка, 0 — голое ядро
+var fade := 1.0              # тонешь в соседе: шар уходит под его оболочку
 var heat_hold := 1.0         # во сколько раз дольше держится жар (расплав)
 var soot := 0.0              # сажа углеродного тела в облаках, 0..1
 var ring_m := 0.0            # кольцо из разорванных тел, масс Земли
@@ -242,14 +244,15 @@ func _process(delta: float) -> void:
 	if impact_heat <= 0.0:
 		heat_hold = 1.0
 	soot = maxf(soot - delta * 0.012, 0.0)
-	var r := body_r * inflate
+	var r := outer_r()
 	var q := r * 2.0 / 0.72  # тело — BODY (0.36) ширины квада
 	_planet.size = Vector2(q, q)
 	_planet.position = -_planet.size * 0.5
 	_planet_mat.set_shader_parameter("aurora", field)
 	_planet_mat.set_shader_parameter("envelope", envelope)
 	_update_young(r)
-	_core.visible = envelope < 0.5
+	_core.visible = envelope < 0.5 or env_k < 0.35
+	_planet.modulate.a = fade * (smoothstep(0.08, 0.3, env_k) if envelope >= 0.5 else 1.0)
 	if _core.visible:
 		var cq := body_r * CORE_R * 2.0 / 0.72
 		_core.size = Vector2(cq, cq)
@@ -322,7 +325,7 @@ func birth(i: int, from := Vector2.INF) -> void:
 
 ## Лишняя луна падает в гиганта по спирали.
 func fall() -> void:
-	var r := body_r * inflate
+	var r := outer_r()
 	_falling.append({"t": 0.0, "a": r * (1.55 + 0.55 * moons), "ang": _rng.randf() * TAU})
 
 
@@ -349,7 +352,7 @@ func _fall_angle(f: Dictionary, r: float, e: float) -> float:
 
 
 func _draw_moons(ci: Node2D) -> void:
-	var r := body_r * inflate
+	var r := outer_r()
 	var px := 1.0 / maxf(zoom, 0.01)
 	_used = 0
 	for i in moons:
@@ -429,16 +432,32 @@ func _update_young(r: float) -> void:
 	_cocoon_mat.set_shader_parameter("spin", _time * 0.25)
 
 
+## Внешний радиус: газ над ядром. Оболочку можно сорвать — тогда шар
+## садится к ядру, и ядро проступает.
+func outer_r() -> float:
+	return body_r * inflate * lerpf(CORE_R * 1.08, 1.0, env_k)
+
+
+## Форма шара рядом с крупным соседом (GiantEncounter): пустой массив —
+## обычный круг. shock — ударный нагрев (направление локально, сила, температура).
+func set_shape(s: PackedFloat32Array, shock: Vector4) -> void:
+	var on := not s.is_empty()
+	_planet_mat.set_shader_parameter("deform", on)
+	if on:
+		_planet_mat.set_shader_parameter("shape", s)
+	_planet_mat.set_shader_parameter("shock", shock)
+
+
 ## Тяжёлый сосед увёл крайнюю луну.
 func steal(to: Vector2) -> void:
-	var r := body_r * inflate
+	var r := outer_r()
 	_stolen.append({"t": 0.0, "from": _moon_orbit(moons, r), "to": to, "i": moons})
 
 
 ## Тёмный след удара в облаках: на карте облаков, крутится вместе с шаром
 ## и расплывается за минуту. dir — точка удара на диске (локально, длина 1).
 func scar(dir: Vector2, size: float, col := Color(0.2, 0.14, 0.11)) -> void:
-	var r := body_r * inflate
+	var r := outer_r()
 	var tl := 0.12
 	var nv := Vector3(dir.x * 0.9, dir.y * 0.9, sqrt(1.0 - 0.81))
 	var d := Vector3(nv.x, cos(tl) * nv.y + sin(tl) * nv.z, -sin(tl) * nv.y + cos(tl) * nv.z)

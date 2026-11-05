@@ -51,6 +51,7 @@ var _save_t := 0.0
 var _time := 0.0
 var _said := {}
 var _ending_t := -1.0
+var _forced_end := ""        # конец не по массе: тебя поглотило крупное тело
 var envelope := 1.0          # сколько газа осело на ядро (0 — голое ядро, 1 — сплошные облака)
 var _core_type := "silicate"
 var _env_step := 0           # какие подписи про оболочку уже были
@@ -522,6 +523,9 @@ func _update_view(delta: float) -> void:
 	body.position = Vector2.from_angle(ang) * orbit
 	body.rotation = ang
 	body.body_r = GameData.giant_body_r(earths)
+	# Толща газа над ядром: радиус гиганта почти не зависит от массы, пока
+	# газа много; сорванная оболочка садится к ядру.
+	body.env_k = sqrt(smoothstep(0.0, 0.6, env_frac()))
 	body.hill = h
 	body.reach = Skills.stat("giant_reach")
 	body.envelope = envelope
@@ -555,6 +559,25 @@ func save() -> void:
 	GameState.save_game()
 
 
+## Масса ядра: с чем пришёл на этап (старые сохранения — критическая масса).
+func core_m() -> float:
+	return float(GameState.giant.get("core_m", GameData.GIANT_EARTHS))
+
+
+## Доля газа в массе: всё, что сверх ядра.
+func env_frac() -> float:
+	return clampf((earths - core_m()) / maxf(earths, 0.01), 0.0, 1.0)
+
+
+## Ядро утонуло в соседе: ты — его часть. Конец этапа и забега.
+func swallowed(kind: String) -> void:
+	if _ending_t >= 0.0:
+		return
+	_forced_end = kind
+	GameState.giant["eaten_by"] = kind
+	_end(1.6)
+
+
 func _end(delay: float) -> void:
 	_ending_t = delay
 	joystick.reset()
@@ -562,6 +585,10 @@ func _end(delay: float) -> void:
 
 
 func _show_ending() -> void:
+	if _forced_end != "":
+		GameState.has_moon = moons > 0
+		_finish(_forced_end)
+		return
 	var kind := GameData.giant_final(str(GameState.giant.get("flavor", "giant_cold")), earths, orbit)
 	GameState.has_moon = moons > 0
 	# Коричневый карлик и супер-Юпитер могут уйти в облако и стать звездой.
