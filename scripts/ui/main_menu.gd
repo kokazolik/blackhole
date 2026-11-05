@@ -1,11 +1,14 @@
 extends Control
-## Главное меню: расписная картина молодой звезды с диском, название и кнопки.
-## Картина медленно «дышит» (приближение и сдвиг), по ней плывут золотые пылинки.
+## Главное меню: живой протопланетный диск шейдером (menu_bg.gdshader) —
+## газ вращается по Кеплеру, в щелях растут планеты, звезда дышит; по нему
+## плывут пылинки. Слева название и кнопки, коллекция тел — отдельным листом.
 
-const BG := preload("res://assets/intro/menu.png")
-const MOTES := 46
+const MOTES := 40
 
-var _bg: TextureRect
+var _bg: ColorRect
+var _collection: CollectionScreen
+var _column: VBoxContainer
+var _leg: Label
 var _motes_layer: Control
 var _motes: Array = []
 var _time := 0.0
@@ -26,11 +29,12 @@ func _build() -> void:
 	under.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(under)
 
-	_bg = TextureRect.new()
-	_bg.texture = BG
-	_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_bg = ColorRect.new()
+	_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bm := ShaderMaterial.new()
+	bm.shader = preload("res://shaders/menu_bg.gdshader")
+	_bg.material = bm
 	add_child(_bg)
 
 	_motes_layer = Control.new()
@@ -46,39 +50,82 @@ func _build() -> void:
 	var column := VBoxContainer.new()
 	column.anchor_top = 0.0
 	column.anchor_bottom = 1.0
-	column.offset_left = 80
+	column.offset_left = 72
 	column.offset_right = 560
-	column.offset_top = 60
-	column.offset_bottom = -40
-	column.add_theme_constant_override("separation", 14)
+	column.offset_top = 64
+	column.offset_bottom = -24
+	column.add_theme_constant_override("separation", 12)
 	add_child(column)
+	_column = column
 
+	# Название: широкий гротеск разрядкой, светлое на тёмном, без завитков.
 	var title := Label.new()
-	title.text = "От пылинки"
-	_style_title(title, 64)
+	title.text = "ОТ ПЫЛИНКИ"
+	_style_title(title, UiTheme.FONT_DISPLAY, 44, 8, Color(0.95, 0.95, 1.0))
 	column.add_child(title)
 	var title2 := Label.new()
-	title2.text = "до чёрной дыры"
-	_style_title(title2, 46)
+	title2.text = "ДО ЧЁРНОЙ ДЫРЫ"
+	_style_title(title2, UiTheme.FONT_DISPLAY_BOLD, 34, 5, Color(1.0, 0.8, 0.52))
 	column.add_child(title2)
+	# Тонкая черта, гаснущая вправо, и подзаголовок разрядкой.
+	var rule := Control.new()
+	rule.custom_minimum_size = Vector2(0, 18)
+	rule.draw.connect(func() -> void:
+		for i in 40:
+			var x0 := float(i) * 9.0
+			rule.draw_line(Vector2(x0, 9), Vector2(x0 + 9.0, 9), Color(1.0, 0.84, 0.6, 0.6 * (1.0 - float(i) / 40.0)), 1.0, true))
+	column.add_child(rule)
 	var subtitle := Label.new()
-	subtitle.text = "путь длиною в миллиарды лет"
-	subtitle.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
-	subtitle.add_theme_font_size_override("font_size", 22)
-	subtitle.add_theme_color_override("font_color", Color(UiTheme.PARCHMENT, 0.75))
+	subtitle.text = "ПУТЬ ДЛИНОЮ В МИЛЛИАРДЫ ЛЕТ"
+	subtitle.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_UI, 4))
+	subtitle.add_theme_font_size_override("font_size", 14)
+	subtitle.add_theme_color_override("font_color", Color(0.8, 0.84, 0.95, 0.6))
 	column.add_child(subtitle)
-
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 30)
+	gap.custom_minimum_size = Vector2(0, 22)
 	column.add_child(gap)
 
 	var progress := GameState.has_progress()
 	if progress:
 		_add_button(column, "Продолжить путь", true, _continue)
+		column.add_child(_small(_where_now(), Color(0.7, 0.86, 1.0, 0.85)))
 	_add_button(column, "Новая игра", not progress, _new_game)
+	var n_end := 0
+	for e in CollectionData.ENDING_NODES:
+		if e in GameState.endings_seen:
+			n_end += 1
+	_add_button(column, "Коллекция тел   %d / %d" % [n_end, CollectionData.ENDING_NODES.size()], false, _open_collection)
 	_add_button(column, "Пролог", false, func(): _open_prologue(false))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	column.add_child(row)
+	var fps := _add_button(row, "", false, func(): pass)
+	fps.custom_minimum_size = Vector2(214, 46)
+	fps.add_theme_font_size_override("font_size", 14)
+	var fps_text := func() -> void: fps.text = "Плавность: %d" % (120 if GameState.fps_120 else 60)
+	fps_text.call()
+	fps.pressed.connect(func() -> void:
+		GameState.fps_120 = not GameState.fps_120
+		GameState.apply_fps()
+		GameState.save_game()
+		fps_text.call())
 	if OS.get_name() != "Web":
-		_add_button(column, "Выход", false, func(): get_tree().quit())
+		var quit := _add_button(row, "Выход", false, func(): get_tree().quit())
+		quit.custom_minimum_size = Vector2(114, 46)
+		quit.add_theme_font_size_override("font_size", 14)
+
+	# Внизу слева — что уже унесено с собой из прошлых забегов.
+	if GameState.legacy > 0:
+		var leg := _small("Наследие %d · звёздной пыли +%d%% в каждом забеге" % [GameState.legacy,
+			roundi(GameState.legacy * GameData.LEGACY_BONUS * 100.0)], Color(1.0, 0.84, 0.5, 0.75))
+		leg.anchor_top = 1.0
+		leg.anchor_bottom = 1.0
+		leg.offset_left = 74
+		leg.offset_right = 700
+		leg.offset_top = -40
+		leg.offset_bottom = -14
+		add_child(leg)
+		_leg = leg
 
 	var version := Label.new()
 	version.text = "версия " + str(ProjectSettings.get_setting("application/config/version", ""))
@@ -91,7 +138,8 @@ func _build() -> void:
 	version.offset_top = -36
 	version.offset_bottom = -12
 	version.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	version.add_theme_font_size_override("font_size", 14)
+	version.add_theme_font_override("font", UiTheme.FONT_UI)
+	version.add_theme_font_size_override("font_size", 13)
 	version.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
 	add_child(version)
 
@@ -103,26 +151,64 @@ func _build() -> void:
 	tw.tween_property(column, "position:y", column.position.y - 20, 1.2).set_delay(0.2).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
-func _style_title(l: Label, size_px: int) -> void:
-	l.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+func _style_title(l: Label, font: Font, size_px: int, spacing: int, col: Color) -> void:
+	l.add_theme_font_override("font", UiTheme.spaced(font, spacing))
 	l.add_theme_font_size_override("font_size", size_px)
-	l.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
-	l.add_theme_color_override("font_outline_color", Color(0.12, 0.05, 0.0, 0.8))
-	l.add_theme_constant_override("outline_size", 8)
-	l.add_theme_color_override("font_shadow_color", Color(1.0, 0.6, 0.2, 0.35))
-	l.add_theme_constant_override("shadow_offset_y", 0)
-	l.add_theme_constant_override("shadow_outline_size", 18)
+	l.add_theme_color_override("font_color", col)
+	# Чистые буквы без обводки и тени: только мягкий свет звезды на них.
+	l.add_theme_constant_override("outline_size", 0)
+	l.add_theme_constant_override("shadow_outline_size", 0)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0))
 
 
 func _add_button(parent: Control, text: String, primary: bool, action: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(330, 64)
+	b.custom_minimum_size = Vector2(340, 54)
 	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	UiTheme.paint_button(b, primary)
+	UiTheme.glass_button(b, primary, 17)
 	b.pressed.connect(action)
 	parent.add_child(b)
 	return b
+
+
+func _small(text: String, col: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", UiTheme.FONT_UI)
+	l.add_theme_font_size_override("font_size", 16)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.02, 0.7))
+	l.add_theme_constant_override("outline_size", 4)
+	return l
+
+
+## Где сейчас тело: под кнопкой «Продолжить».
+func _where_now() -> String:
+	if GameState.is_cloud():
+		return "сейчас: облако · %s" % GameData.format_star_mass(float(GameState.cloud.get("mj", 13.0)))
+	if GameState.is_giant():
+		return "сейчас: газовый гигант · %d масс Земли" % roundi(float(GameState.giant.get("e", 10.0)))
+	if GameState.is_young():
+		return "сейчас: молодая планета"
+	var st: Dictionary = GameData.STAGES[clampi(GameState.stage, 0, GameData.STAGES.size() - 1)]
+	return "сейчас: %s · %s" % [str(st["name"]).to_lower(), GameData.format_size(GameState.mass)]
+
+
+func _open_collection() -> void:
+	if _collection != null:
+		return
+	_collection = CollectionScreen.new()
+	# Меню под листом прячем: буквы не должны просвечивать сквозь дерево.
+	_column.visible = false
+	if _leg != null:
+		_leg.visible = false
+	_collection.closed.connect(func() -> void:
+		_column.visible = true
+		if _leg != null:
+			_leg.visible = true
+		_collection = null)
+	add_child(_collection)
 
 
 func _continue() -> void:
@@ -155,7 +241,13 @@ func _ask_new_game() -> void:
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(dim)
 	_confirm = PanelContainer.new()
-	_confirm.add_theme_stylebox_override("panel", UiTheme.painted_panel(32))
+	var glass := StyleBoxFlat.new()
+	glass.bg_color = Color(0.04, 0.045, 0.08, 0.92)
+	glass.set_border_width_all(1)
+	glass.border_color = Color(0.85, 0.9, 1.0, 0.18)
+	glass.set_corner_radius_all(10)
+	glass.set_content_margin_all(32)
+	_confirm.add_theme_stylebox_override("panel", glass)
 	_confirm.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_confirm.custom_minimum_size = Vector2(560, 0)
 	_confirm.position -= Vector2(280, 120)
@@ -166,28 +258,30 @@ func _ask_new_game() -> void:
 	var q := Label.new()
 	q.text = "Начать путь заново?"
 	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	q.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	q.add_theme_font_size_override("font_size", 32)
+	q.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_DISPLAY_MED, 2))
+	q.add_theme_font_size_override("font_size", 26)
 	q.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
 	box.add_child(q)
 	var t := Label.new()
 	t.text = "Всё собранное и изученное будет потеряно."
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	t.add_theme_font_override("font", UiTheme.FONT_SERIF_ITALIC)
-	t.add_theme_font_size_override("font_size", 21)
-	t.add_theme_color_override("font_color", UiTheme.PARCHMENT)
+	t.add_theme_font_override("font", UiTheme.FONT_UI)
+	t.add_theme_font_size_override("font_size", 18)
+	t.add_theme_color_override("font_color", Color(0.85, 0.88, 0.96))
 	box.add_child(t)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 20)
 	box.add_child(row)
 	var yes := _add_button(row, "Начать заново", true, _start_new)
-	yes.custom_minimum_size = Vector2(230, 60)
+	yes.custom_minimum_size = Vector2(230, 52)
+	yes.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var no := _add_button(row, "Отмена", false, func():
 		dim.queue_free()
 		_confirm.queue_free()
 		_confirm = null)
-	no.custom_minimum_size = Vector2(180, 60)
+	no.custom_minimum_size = Vector2(180, 52)
+	no.alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 
 func _new_mote(anywhere: bool) -> Dictionary:
@@ -202,10 +296,10 @@ func _new_mote(anywhere: bool) -> Dictionary:
 
 func _process(delta: float) -> void:
 	_time += delta
-	# Картина медленно приближается и плывёт: как будто мы тоже летим.
-	var k := 1.06 + 0.03 * sin(_time * 0.08)
-	_bg.size = size * k
-	_bg.position = -(size * (k - 1.0)) * 0.5 + Vector2(sin(_time * 0.05) * 14.0, cos(_time * 0.04) * 8.0)
+	var s := size if size.x > 0 else Vector2(1280, 720)
+	(_bg.material as ShaderMaterial).set_shader_parameter("aspect", Vector2(s.x / s.y, 1.0))
+	# Звезда справа, на трети высоты ниже центра: место для заголовка слева.
+	(_bg.material as ShaderMaterial).set_shader_parameter("center", Vector2(s.x / s.y * 0.66, 0.55))
 	for i in _motes.size():
 		var m: Dictionary = _motes[i]
 		m.pos += m.vel * delta
@@ -217,11 +311,14 @@ func _process(delta: float) -> void:
 func _draw_motes() -> void:
 	for m in _motes:
 		var tw := 0.5 + 0.5 * sin(_time * 2.0 + m.phase)
-		var c := Color(1.0, 0.82, 0.5, 0.35 + 0.5 * tw)
-		_motes_layer.draw_circle(m.pos, m.r * 3.0, Color(c, c.a * 0.15))
-		_motes_layer.draw_circle(m.pos, m.r, c)
+		# Матовые пылинки, подсвеченные звездой: без ярких шаров.
+		var c := Color(1.0, 0.86, 0.66, 0.18 + 0.3 * tw)
+		_motes_layer.draw_circle(m.pos, m.r * 0.8, c)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if _collection != null:
+			_collection.close()
+			return
 		get_tree().quit()

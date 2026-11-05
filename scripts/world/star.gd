@@ -10,8 +10,8 @@ const QUAD_EXTENT := 1.8  # квад шейдера в радиусах звез
 const HALO_EXTENT := 3.0  # свечение короны только рядом со звездой, в радиусах звезды
 const HALO_COLOR := Color(1.0, 0.45, 0.12)
 # Вид звезды: запечённая поверхность + живая анимация.
-# Исходник поверхности: shaders/young_star_procedural.gdshader (тяжёлый, только для запекания
-# через tools/bake_star.tscn). Рельефный вариант: shaders/young_star_relief.gdshader.
+
+
 const STAR_SHADER := preload("res://shaders/young_star.gdshader")
 const HALO_SHADER := preload("res://shaders/star_halo.gdshader")
 const SURFACE_TEX := preload("res://assets/star/star_surface.png")
@@ -26,6 +26,8 @@ var _halo_mat: ShaderMaterial
 var _flare_timer := 0.0
 var _flare_t := -1.0
 
+
+var show_zones := true  # пунктир зон; на этапе гиганта звезда в другом масштабе, он там лишний
 
 func _ready() -> void:
 	# Дальнее свечение: простой квад, яркость считается формулой в шейдере.
@@ -99,6 +101,8 @@ func _make_noise() -> NoiseTexture2D:
 
 
 func _draw() -> void:
+	if not show_zones:
+		return
 	# Границы зон: внутренняя (металл) и снеговая линия (лёд).
 	_draw_dashed_ring(GameData.INNER_ZONE, Color(1.0, 0.7, 0.4, 0.10))
 	_draw_dashed_ring(GameData.SNOW_LINE, Color(0.6, 0.9, 1.0, 0.14))

@@ -335,8 +335,8 @@ func _build() -> void:
 	heading.offset_top = 22
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	heading.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	heading.add_theme_font_size_override("font_size", 32)
+	heading.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_HEAD, 3))
+	heading.add_theme_font_size_override("font_size", 22)
 	heading.add_theme_color_override("font_color", Color(1.0, 0.84, 0.5))
 	heading.add_theme_color_override("font_outline_color", Color(0.1, 0.04, 0.0, 0.8))
 	heading.add_theme_constant_override("outline_size", 6)
@@ -347,8 +347,8 @@ func _build() -> void:
 	_info.add_child(text_box)
 
 	_info_title = Label.new()
-	_info_title.add_theme_font_size_override("font_size", 32)
-	_info_title.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
+	_info_title.add_theme_font_size_override("font_size", 24)
+	_info_title.add_theme_font_override("font", UiTheme.FONT_HEAD)
 	text_box.add_child(_info_title)
 	_info_desc = RichTextLabel.new()
 	_info_desc.bbcode_enabled = true
@@ -393,8 +393,8 @@ func _build() -> void:
 	_buy_button.add_child(_price_row)
 	_price_word = Label.new()
 	_price_word.text = "Изучить"
-	_price_word.add_theme_font_override("font", UiTheme.FONT_SERIF_BOLD)
-	_price_word.add_theme_font_size_override("font_size", 24)
+	_price_word.add_theme_font_override("font", UiTheme.spaced(UiTheme.FONT_DISPLAY_MED, 2))
+	_price_word.add_theme_font_size_override("font_size", 17)
 	_price_word.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_price_row.add_child(_price_word)
 	var word_gap := Control.new()
@@ -490,7 +490,13 @@ func _fill_stats() -> void:
 	var stage := mini(GameState.stage, 2)
 	var income := Skills.stat("value") * Skills.stat("value_mul") * (1.0 if GameState.is_boulder() else Skills.stat("pebble_value_mul"))
 	_stats_row("Доход с добычи", "×" + StatInfo.num(income), "всё, что прибавляет к звёздной пыли, перемножено", true)
-	for g in StatInfo.GROUPS.size():
+	# Свой этап сверху: на гиганте и в облаке не листать мимо пылинки.
+	var order := range(StatInfo.GROUPS.size())
+	var own_g := GameState.stage if GameState.stage >= GameData.GIANT_STAGE else -1
+	if own_g >= 0 and own_g < order.size():
+		order.erase(own_g)
+		order.push_front(own_g)
+	for g in order:
 		var rows := []
 		for key in StatInfo.INFO:
 			if StatInfo.group(key) != g:
@@ -586,23 +592,34 @@ func _refresh() -> void:
 	_currency_label.text = "✦ " + GameData.format_number(GameState.currency)
 	_chondrule_label.visible = GameState.chondrules > 0
 	_chondrule_label.text = str(GameState.chondrules)
-	_chondrule_label.position = Vector2(28 + _currency_label.get_minimum_size().x + 46, 27)
+	# Под звёздной пылью, а не справа: справа заголовок книги, длинное число на него налезало.
+	_chondrule_label.position = Vector2(52, 70)
 	_info.visible = _selected != ""
 	if _selected != "":
 		var node: Dictionary = Skills.nodes[_selected]
 		_info_title.text = node.title
 		# Длинное название уменьшается, чтобы влезть в панель.
-		var title_size := 32
-		while title_size > 22 and UiTheme.FONT_SERIF_BOLD.get_string_size(node.title, HORIZONTAL_ALIGNMENT_LEFT, -1, title_size).x > INFO_WIDTH - 60.0:
+		var title_size := 24
+		while title_size > 16 and UiTheme.FONT_HEAD.get_string_size(node.title, HORIZONTAL_ALIGNMENT_LEFT, -1, title_size).x > INFO_WIDTH - 60.0:
 			title_size -= 1
 		_info_title.add_theme_font_size_override("font_size", title_size)
 		_info_title.add_theme_color_override("font_color", UiTheme.GOLD)
 		_info_desc.text = node.desc
 		if _selected == "boulder_root":
-			var bonus: Dictionary = GameData.BOULDER_MATERIAL.get(GameState.body_type(), {})
+			var bonus: Dictionary = GameData.boulder_material(GameState.body_type())
 			_info_desc.text += "\n\nВещество продолжает путь. " + (
 				"Твоё тело — %s: %s." % [GameData.BODY_TYPES[GameState.body_type()].name.to_lower(), bonus.text] if not bonus.is_empty()
 				else "Состав ещё не сложился, и бонуса от вещества нет: металл, камень, лёд и углерод дают валуну каждый своё.")
+		elif _selected == "t_root":
+			var type := GameState.body_type()
+			var bonus: Dictionary = GameData.PLANET_MATERIAL[GameData.planet_type(type)]
+			var path: Dictionary = GameData.EMBRYO_PATHS.get(GameData.embryo_path(type, GameState.player_position.length()), {})
+			if not bonus.is_empty():
+				_info_desc.text += "\n\nТвоё тело — %s: %s." % [GameData.BODY_TYPES[type].name.to_lower(), bonus.text]
+			if not path.is_empty():
+				_info_desc.text += "\nЕсли так и останется, на тысяче километров тебя ждёт путь «%s»: %s." % [path.name, path.desc]
+		elif _selected == "t_iron_core" and not GameState.is_melted:
+			_info_desc.text += "\n\nСначала нужно расплавиться: вырасти до 20 км, пока алюминий-26 ещё греет."
 		_info_change.text = _change_text(_selected)
 		_info_change.visible = _info_change.text != ""
 		_info_level.text = "Изучено %d из %d" % [Skills.level(_selected), Skills.max_level(_selected)]
@@ -624,8 +641,8 @@ func _refresh() -> void:
 			_buy_button.text = ""
 			_price_row.visible = true
 			# Чего не хватает, то красным. На тусклой кнопке цвета светлее, иначе не прочесть.
-			var short := Color(0.62, 0.12, 0.08) if not _buy_button.disabled else Color(1.0, 0.5, 0.4)
-			var ok := Color(0.28, 0.16, 0.04) if not _buy_button.disabled else Color(0.88, 0.82, 0.7)
+			var short := Color(1.0, 0.5, 0.4) if not _buy_button.disabled else Color(1.0, 0.45, 0.38, 0.85)
+			var ok := Color(1.0, 0.92, 0.8) if not _buy_button.disabled else Color(0.75, 0.76, 0.8)
 			_price_col = ok if GameState.currency >= Skills.cost(_selected) else short
 			_price_row.get_child(2).queue_redraw()
 			_price_word.add_theme_color_override("font_color", ok)
@@ -1003,6 +1020,15 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 	var tp := Vector2(-w * 0.5, r + 30.0)
 	_g.draw_string_outline(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, 5, Color(0.03, 0.02, 0.06, 0.85))
 	_g.draw_string(font, tp, title, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(col.lightened(0.2), 0.95))
+	# Узел открывает эпоху этапа: под названием — какую.
+	var era: String = str(Skills.nodes[id].get("era", ""))
+	if era != "":
+		var et := "открывает «%s»" % era
+		var ef: Font = UiTheme.FONT_SERIF_ITALIC
+		var ew := ef.get_string_size(et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		var ep := Vector2(-ew * 0.5, r + 52.0)
+		_g.draw_string_outline(ef, ep, et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, 4, Color(0.03, 0.02, 0.06, 0.85))
+		_g.draw_string(ef, ep, et, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.62, 0.86, 1.0, 0.95))
 	_g.draw_set_transform(Vector2.ZERO)
 
 
