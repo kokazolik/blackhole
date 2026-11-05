@@ -2,10 +2,9 @@ class_name GasParticles
 extends MultiMeshInstance2D
 ## Газ вокруг гиганта частицами: и фоновые струи, и сгустки, которые можно всосать.
 ##
-## Каждая частица летит в задаче Хилла (как настоящий газ во вращающейся вместе
-## с гигантом системе): сдвиговое течение диска, кориолис и гравитация гиганта.
-## Поэтому сгусток сам вытягивается приливом в струю, огибает гиганта подковой,
-## если прошёл далеко, или закручивается в свой диск и падает, если близко.
+## Каждая частица летит в тяготении гиганта (орбит нет: ни сдвига диска, ни
+## кориолиса). Газ лежит в диске; подлетишь — стекает к тебе, у самого
+## гиганта трётся о свой диск и оседает по спирали.
 ## Никакой анимации «сжатия»: форма — следствие физики.
 ##
 ## Рисуется одним вызовом: MultiMesh мягких спрайтов, вытянутых по скорости.
@@ -120,10 +119,10 @@ func spawn_clump(id: int, x: float, y: float, radius: float, count: int, c: Colo
 		var a := _rng.randf() * TAU
 		var rr := radius * sqrt(-2.0 * log(maxf(_rng.randf(), 1e-4))) * 0.5
 		var ox := cos(a) * rr * 0.75
-		var oy := sin(a) * rr * 1.3   # сдвиг уже вытянул его вдоль орбиты
+		var oy := sin(a) * rr
 		var x0 := x + ox
 		var cc := c.lerp(c.lightened(0.25), _rng.randf() * 0.5)
-		_add(x0, y + oy, _rng.randf_range(-0.03, 0.03), -1.5 * x0 + _rng.randf_range(-0.03, 0.03),
+		_add(x0, y + oy, _rng.randf_range(-0.03, 0.03), _rng.randf_range(-0.03, 0.03),
 			radius * _rng.randf_range(0.45, 0.9), _rng.randf_range(0.10, 0.2), cc, id)
 
 
@@ -162,6 +161,7 @@ func step(delta: float) -> void:
 	var steps := maxi(1, ceili(dt / 0.02))
 	var h := dt / steps
 	var g := 3.0 * reach * reach * reach   # «Длинные руки» шире сфера Хилла
+	var bondi := 2.0 * reach
 	var cap2 := CAPTURE * CAPTURE
 	var i := n - 1
 	while i >= 0:
@@ -178,9 +178,12 @@ func step(delta: float) -> void:
 		var gone := false
 		for k in steps:
 			var d2 := x * x + y * y + 0.02
-			var inv := g / (d2 * sqrt(d2))
-			var ax := 2.0 * uy + 3.0 * x - inv * x
-			var ay := -2.0 * ux - inv * y
+			# Орбит нет: только тяготение гиганта (без кориолиса и прилива звезды).
+			# Дальше ~2 радиусов Хилла газ держит своё давление: гигант его не
+			# перетягивает (радиус Бонди). Подлетишь ближе — потечёт к тебе.
+			var inv := g / (d2 * sqrt(d2)) * (1.0 - smoothstep(bondi * 0.8, bondi * 1.1, sqrt(d2)))
+			var ax := -inv * x
+			var ay := -inv * y
 			ux += ax * h
 			uy += ay * h
 			# У самого гиганта газ трётся о свой диск и оседает по спирали.
@@ -208,14 +211,17 @@ func step(delta: float) -> void:
 
 
 func _spawn_stream() -> void:
-	# Газ приходит по сдвигу: внутренний догоняет снизу, внешний набегает сверху.
+	# Газ лежит в диске вокруг: тяготение гиганта стягивает его к тебе.
 	for attempt in 6:
-		var side := 1.0 if _rng.randf() < 0.5 else -1.0
-		var x := side * _rng.randf_range(0.6, 2.6) * reach
+		var a := _rng.randf() * TAU
+		var rr := _rng.randf_range(1.2, 3.0) * reach
+		var x := cos(a) * rr
+		var y := sin(a) * rr
 		if sigma_at.is_valid() and _rng.randf() > clampf(sigma_at.call(x), 0.0, 1.5) / 1.5:
 			continue
-		var y := 6.5 * side + _rng.randf_range(-0.5, 0.5)
-		_add(x, y, 0.0, -1.5 * x, _rng.randf_range(0.03, 0.06), _rng.randf_range(0.5, 0.9), Color(0.9, 0.8, 0.68), -1)
+		# Турбулентность диска: небольшой вихрь, газ закручивается, падая.
+		var vt := _rng.randfn(0.0, 0.25) * sqrt(3.0 * reach * reach * reach / rr)
+		_add(x, y, -sin(a) * vt, cos(a) * vt, _rng.randf_range(0.03, 0.06), _rng.randf_range(0.5, 0.9), Color(0.9, 0.8, 0.68), -1)
 		return
 
 
@@ -268,8 +274,8 @@ func _upload() -> void:
 static func hill_step(p: Vector4, h: float, g: float, drag: float) -> Vector4:
 	var d2 := p.x * p.x + p.y * p.y + 0.02
 	var inv := g / (d2 * sqrt(d2))
-	var ax := 2.0 * p.w + 3.0 * p.x - inv * p.x
-	var ay := -2.0 * p.z - inv * p.y
+	var ax := -inv * p.x
+	var ay := -inv * p.y
 	var vx := p.z + ax * h
 	var vy := p.w + ay * h
 	var damp := 1.0 - drag * h

@@ -80,6 +80,9 @@ static func make(id: String) -> ColorRect:
 		"planet_living", "planet_ocean":
 			style = 5
 	m.set_shader_parameter("style", style)
+	# Голое ядро ещё раскалено: его только что грела толща газа.
+	if id == "giant_chthonian":
+		m.set_shader_parameter("magma", 0.32)
 	m.set_shader_parameter("light_dir", light)
 	m.set_shader_parameter("seed", 0.37 + 0.13 * float(absi(id.hash()) % 7))
 	var atmo := 0.0
@@ -120,7 +123,31 @@ static func _giant(art: ColorRect, m: ShaderMaterial, id: String, light: Vector2
 	m.set_shader_parameter("storm_col", look[2])
 	m.set_shader_parameter("heat", 0.7 if id in ["giant_hot", "brown_dwarf", "star_failed", "giant_eaten_dwarf"] else 0.0)
 	m.set_shader_parameter("light_dir", light)
+	set_drop(m, id)
 	return art
+
+
+## Концовки сближения: тело вытянуто каплей в полость Роша к соседу
+## (сосед справа-снизу), у карлика ещё и раскалено со стороны удара.
+static func set_drop(m: ShaderMaterial, id: String) -> void:
+	var q := {"giant_swallowed": 0.35, "giant_eaten_dwarf": 0.04}.get(id, -1.0) as float
+	if q < 0.0:
+		return
+	var t := Roche.table(q)
+	var a := 0.45
+	var out := PackedFloat32Array()
+	out.resize(64)
+	var mx := 0.0
+	for k in 64:
+		out[k] = Roche.lobe(t, TAU * k / 64.0 - a)
+		mx = maxf(mx, out[k])
+	for k in 64:
+		out[k] = out[k] / mx * 1.2
+	m.set_shader_parameter("deform", true)
+	m.set_shader_parameter("shape", out)
+	var dir := Vector2.from_angle(a)
+	var hot := 0.55 if id == "giant_eaten_dwarf" else 0.05
+	m.set_shader_parameter("shock", Vector4(dir.x, dir.y, hot, 1.6 if hot > 0.3 else 1.1))
 
 
 ## Сторона квада для тела радиусом r на экране: у каждого шейдера своя доля шара.

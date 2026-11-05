@@ -92,10 +92,10 @@ func _spawn(k: Dictionary, gas: GasParticles) -> void:
 	var h: float = stage.hill()
 	var orbit: float = stage.orbit
 	for attempt in 6:
-		# Сам газ падает на гиганта только из полосы 1.25–2.1 радиуса Хилла
-		# (задача Хилла). Сгустки рождаются вне её: чтобы съесть, надо подъехать.
-		# Навык «длинные руки» расширяет полосу, и часть сгустков падает сама.
-		var off := _rng.randf_range(2.4, 3.8) if _rng.randf() < 0.75 else _rng.randf_range(0.3, 1.0)
+		# Сгустки рождаются в 2,6–4 радиусах Хилла: издалека тяготение тянет
+		# газ еле-еле, подлетишь — стечёт к тебе за секунды. «Длинные руки»
+		# усиливают тяготение (g ∝ reach³), и дальние сгустки текут сами.
+		var off := _rng.randf_range(2.6, 4.0)
 		var x := (1.0 if _rng.randf() < 0.5 else -1.0) * off
 		var r := orbit + x * h
 		if r < GameData.GIANT_STAR_R * 1.25 or r > GameData.GIANT_DISK.y - 600.0:
@@ -107,8 +107,9 @@ func _spawn(k: Dictionary, gas: GasParticles) -> void:
 			s *= 1.8 if r < GameData.HOT_ORBIT + 2000.0 else 0.6
 		if _rng.randf() > clampf(s, 0.0, 1.5) / 1.5:
 			continue
-		# Внешние приходят сверху, внутренние снизу: навстречу по течению.
-		var y := signf(x) * _rng.randf_range(4.5, 6.0)
+		# Сгусток лежит в стороне, в любом направлении: орбит нет, его
+		# никуда не несёт — подлетай, и тяготение стянет газ к тебе.
+		var y := _rng.randf_range(-1.0, 1.0) * off * 1.2
 		var id := _next_id
 		_next_id += 1
 		var count := PARTS if k["mass"] < 1.3 else PARTS + 14

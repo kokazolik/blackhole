@@ -50,6 +50,11 @@ const N_BODIES := 170
 const ERA_BODIES := [12, 40, 65, 90]   # сколько мелких тел в мире по эпохам
 
 # Виды тел: масса в массах Земли, видимый радиус, чем рисуется, что дают.
+const EARTH_R := 36.0         # радиус Земли в единицах мира (Юпитер ≈ 400 = 11 R⊕)
+const DENS_R := {"metal": 0.8, "rock": 1.0, "lava": 1.0, "chondrite": 1.0, "venus": 1.0,
+	"carbon": 1.12, "ice": 1.25, "titan": 1.2, "gas": 1.0}
+const SYL := ["ка", "ро", "лин", "те", "ва", "ми", "до", "ра", "сэ", "ну", "ор", "эл",
+	"та", "ги", "ла", "ви", "ар", "зе", "мо", "кай", "ри", "нот", "ве", "са", "ол", "ден"]
 const KINDS := {
 	"rubble": {"name": "рой обломков", "m": Vector2(0.02, 0.06), "rad": 14.0, "view": "moon", "ch": 0, "extra": 0.0004, "pieces": 5},
 	"planetesimal": {"name": "планетезималь", "m": Vector2(0.1, 0.35), "rad": 15.0, "view": "moon", "ch": 1, "extra": 0.001},
@@ -310,8 +315,11 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 	if sub != "":
 		b["sub"] = sub
 	if kind == "comet":
-		# Кометы падают с окраин к звезде по вытянутой орбите.
+		# Кометы падают с окраин к звезде.
 		b["vr"] = -_rng.randf_range(90.0, 180.0)
+	elif not kind in ["rival", "dwarf"]:
+		# Свой медленный дрейф: мир не стоит на месте, но и не крутится.
+		b["drift"] = Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(8.0, 40.0)
 	if kind in ["superearth", "minineptune"] and _rng.randf() < 0.35:
 		# Своя луна: достанется тебе вместе с телом, если хватит поля.
 		b["sat"] = true
@@ -323,13 +331,15 @@ func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dict
 
 
 func _spawn_rival(m: float) -> Dictionary:
-	var g: float = stage.orbit
+	# Соседи-гиганты рождаются далеко от тебя: встреча — твой выбор.
+	var gp: Vector2 = stage.body.position
 	var r := 0.0
-	for attempt in 12:
+	var a := 0.0
+	for attempt in 16:
 		r = _rng.randf_range(GameData.HOT_ORBIT, GameData.GIANT_DISK.y - 1500.0)
-		if absf(r - g) > 2600.0:
+		a = _rng.randf() * TAU
+		if (Vector2.from_angle(a) * r).distance_to(gp) > 9000.0:
 			break
-	var a: float = stage.ang + _rng.randf_range(0.6, 2.6) * (1.0 if _rng.randf() < 0.5 else -1.0)
 	return _add_body("rival", r, a, "gas", m)
 
 
@@ -340,7 +350,7 @@ func _spawn_dwarf() -> void:
 	var side := dir.orthogonal() * (1.0 if _rng.randf() < 0.5 else -1.0)
 	# Мимо тебя, но близко: на таком расстоянии тяга карлика ещё слабее твоего
 	# хода. Подлетишь сам ближе пары тысяч — его тяготение уже не отпустит.
-	var miss := _rng.randf_range(3400.0, 5600.0) * (1.0 if _rng.randf() < 0.5 else -1.0)
+	var miss := _rng.randf_range(4800.0, 7000.0) * (1.0 if _rng.randf() < 0.5 else -1.0)
 	var start := g + dir * miss - side * 9000.0
 	var b := _add_body("dwarf", start.length(), start.angle(), "gas")
 	b["vel"] = side * 520.0
@@ -356,15 +366,48 @@ static func pos_of(b: Dictionary) -> Vector2:
 	return Vector2.from_angle(float(b.a)) * float(b.r)
 
 
+## Радиус честно по массе и веществу (автор): R/R⊕ ≈ (M/M⊕)^0,27 для камня,
+## железо плотнее, лёд и углерод рыхлее; у мини-нептуна газовая оболочка
+## (≈2 R⊕ × M^0,2); гиганты — тем же законом, что и ты; коричневые карлики —
+## размером с Юпитер при любой массе (вырожденный газ).
 func rad_of(b: Dictionary) -> float:
 	var k: String = b.kind
 	if k == "rival":
-		return GameData.giant_body_r(float(b.m)) * 0.95
+		return GameData.giant_body_r(float(b.m))
 	if k == "dwarf":
-		return GameData.giant_body_r(318.0) * 1.05  # карлики размером с Юпитер
-	if b.get("core", false):
-		k = "superearth"
-	return float(KINDS[k]["rad"]) * pow(float(b.m) / float((KINDS[k]["m"] as Vector2).x), 0.18)
+		return GameData.giant_body_r(318.0) * 1.05
+	if k == "comet":
+		return float(KINDS[k]["rad"]) * pow(float(b.m) / 0.01, 0.18)
+	var m := maxf(float(b.m), 0.001)
+	if k == "minineptune" and not b.get("core", false):
+		return EARTH_R * 2.0 * pow(m, 0.2)
+	var dens: float = DENS_R.get(b.get("sub", b.mat), 1.0)
+	if k in ["rubble", "comet"]:
+		dens *= 1.3     # рыхлая груда
+	return EARTH_R * dens * pow(m, 0.27)
+
+
+## Имя тела: у каждой планеты своё, как в каталоге.
+func name_of(b: Dictionary) -> String:
+	if not b.has("name"):
+		b["name"] = _gen_name(b)
+	return b.name
+
+
+func _gen_name(b: Dictionary) -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(int(b.id) * 7919 + 13)
+	if b.kind == "dwarf":
+		return "Карлик %s-%d" % [["Ахернар", "Тейде", "Глизе", "Лугаль"][rng.randi() % 4], rng.randi_range(100, 999)]
+	var n := ""
+	for i in rng.randi_range(2, 3):
+		n += SYL[rng.randi() % SYL.size()]
+	n = n.left(1).to_upper() + n.substr(1)
+	if b.kind == "rival":
+		return n
+	if b.kind in ["rubble", "planetesimal", "binary", "irondwarf", "trojan"]:
+		return "(%d) %s" % [rng.randi_range(12, 9999), n]
+	return n
 
 
 func hill_of(b: Dictionary) -> float:
@@ -412,15 +455,15 @@ func contact_h(b: Dictionary) -> float:
 	return (_giant_r() + rad_of(b) * 0.8) / stage.hill()
 
 
-## Скорость тела в мире: сдвиг диска, радиальная и набранная тяготением.
+## Скорость тела в мире: свой дрейф, радиальная и набранная тяготением.
+## Орбит нет: тело не уносит сдвигом диска.
 func _vel_of(b: Dictionary) -> Vector2:
-	var x := float(b.r) / float(stage.orbit)
-	var vt := -K_DRIFT * (pow(x, -1.5) - 1.0) * float(b.r)
-	return Vector2.from_angle(float(b.a) + PI * 0.5) * vt + Vector2.from_angle(float(b.a)) * float(b.vr) + (b.get("v", Vector2.ZERO) as Vector2)
+	return Vector2.from_angle(float(b.a)) * float(b.vr) + (b.get("v", Vector2.ZERO) as Vector2) \
+		+ (b.get("drift", Vector2.ZERO) as Vector2)
 
 
 func _player_vel() -> Vector2:
-	return ((stage.vel + stage.kick) as Vector2).rotated(float(stage.ang))
+	return stage.vel
 
 
 # --- Шаг ---
@@ -489,9 +532,17 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		b.a = p.angle()
 		_scatter_near(b, delta)
 		return p.length() < GameData.GIANT_DISK.y + 12000.0 and _time < 1e9 and p.distance_to(gpos) < 16000.0
-	# Свободное тело: сдвиг диска, радиальная скорость гаснет в газе.
-	var x := float(b.r) / orbit
-	b.a = wrapf(float(b.a) - K_DRIFT * (pow(x, -1.5) - 1.0) * delta, -PI, PI)
+	# Свободное тело: занято своим (BodyNpc) — плывёт к цели своим дрейфом,
+	# радиальная скорость гаснет в газе. Орбит нет — само никуда не уносит.
+	if b.kind == "rival":
+		BodyNpc.step_rival(self, b, delta, gpos)
+	else:
+		BodyNpc.step(self, b, delta, gpos)
+	var dr: Vector2 = b.get("drift", Vector2.ZERO)
+	if dr != Vector2.ZERO:
+		var np := pos_of(b) + dr * delta
+		b.r = np.length()
+		b.a = np.angle()
 	if b.kind == "comet":
 		b.r = float(b.r) + float(b.vr) * delta
 	else:
@@ -501,7 +552,6 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		# Соперник тоже пьёт газ и растёт, пока газ есть.
 		var gk: float = clampf(stage.gas / stage.gas_total, 0.0, 1.0)
 		b.m = float(b.m) * (1.0 + 0.0018 * gk * delta)
-		b.r = maxf(float(b.r) - 6.0 * gk * delta, GameData.HOT_ORBIT - 400.0)
 		_rival_feed(b)
 	# Ушло за пределы: упало в звезду или выброшено из системы.
 	if float(b.r) < GameData.GIANT_STAR_R * 1.08:
@@ -630,7 +680,8 @@ func _capture(b: Dictionary, gpos: Vector2, h: float, orbit: float) -> void:
 		_split_binary(b)
 	_take_sat(b)
 	var loc: Vector2 = stage.body.to_local(pos_of(b))
-	var lv: Vector2 = _vel_of(b).rotated(-float(stage.ang))   # x — от звезды, y — рост угла
+	# Скорость относительно тебя: ты сам летишь, задача — в твоей системе.
+	var lv: Vector2 = (_vel_of(b) - _player_vel()).rotated(-float(stage.ang))   # x — от звезды, y — рост угла
 	var s := h * HILL_W
 	b.h = Vector4(loc.x / h, -loc.y / h, lv.x / s, -lv.y / s)
 	b["q"] = clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
@@ -678,7 +729,7 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 		# Твёрдое тело у предела Роша газ уже не тащит вниз: оно подходит по
 		# пологой спирали, и движок разрушения успевает показать раскол.
 		var pull := (fr + 0.4) * ((0.08 + 0.92 * smoothstep(ho, ho * 1.8, d)) if ho > 0.0 else 1.0)
-		var hold := pull + maxf(3.0 * d - g / maxf(d * d, 0.05), 0.0) * 1.25
+		var hold := pull
 		var ux := p.x / maxf(d, 0.1)
 		var uy := p.y / maxf(d, 0.1)
 		var vrad := p.z * ux + p.w * uy
@@ -705,7 +756,8 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	if dist > 2.4:
 		# Ушло за сферу Хилла: снова свободное, со своей скоростью.
 		var s := h * HILL_W
-		b["v"] = (Vector2(p.z, -p.w) * s).rotated(float(stage.ang))
+		b["v"] = (Vector2(p.z, -p.w) * s).rotated(float(stage.ang)) + _player_vel()
+		b.erase("drift")
 		b.vr = 0.0
 		b.state = "free"
 		b.stretch = 0.0
@@ -1280,19 +1332,26 @@ func _ejected(b: Dictionary) -> void:
 func _sling(b: Dictionary, p: Vector2, gpos: Vector2) -> void:
 	var e: float = stage.earths
 	var m: float = b.m
-	var out := signf(float(b.r) - float(stage.orbit))
+	# Пролёт рядом: тело уходит по ходу твоего движения (гравитационный
+	# манёвр), стоишь — просто от тебя. К звезде или прочь — по тому, куда
+	# смотрит бросок.
+	var pv: Vector2 = _player_vel()
+	var dir := pv.normalized() if pv.length() > 80.0 else (p - gpos).normalized()
+	var power := SLING * Skills.stat("giant_sling") * pow(clampf(e / maxf(m, 0.01), 0.3, 8.0), 0.4)
+	var rad := Vector2.from_angle(float(b.a))
+	var out := signf(dir.dot(rad))
 	if out == 0.0:
 		out = 1.0
-	var power := SLING * Skills.stat("giant_sling") * pow(clampf(e / maxf(m, 0.01), 0.3, 8.0), 0.4)
-	b.vr = float(b.vr) + out * power
+	b.vr = float(b.vr) + dir.dot(rad) * power
+	b["drift"] = (b.get("drift", Vector2.ZERO) as Vector2) + (dir - rad * dir.dot(rad)) * power * 0.5
 	b.cd = 5.0
 	b["slung"] = true
 	# Отдача: тебя толкает в другую сторону, тем сильнее, чем тяжелее тело.
-	stage.kick.x -= out * 260.0 * clampf(m / e, 0.05, 1.0)
+	stage.kick -= dir.rotated(-float(stage.ang)) * 260.0 * clampf(m / e, 0.05, 1.0)
 	stage.pay(m * 0.4 * Skills.stat("giant_sling"))
 	if not _said.has("sling"):
 		_said["sling"] = true
-		stage.hud.caption("Гравитационная праща", "тело слишком велико, чтобы съесть, но пролёт рядом бросает его: изнутри орбиты — к звезде, снаружи — прочь из системы", 4.5)
+		stage.hud.caption("Гравитационная праща", "тело слишком велико, чтобы съесть, но пролёт рядом бросает его по ходу твоего движения: к звезде или прочь из системы", 4.5)
 	elif _sling_cd <= 0.0:
 		stage.hud.toast("Праща: %s летит %s" % [KINDS[b.kind]["name"], "наружу" if out > 0.0 else "к звезде"], Color(0.8, 0.9, 1.0))
 	_sling_cd = 2.0
@@ -1438,12 +1497,9 @@ func acc_mul() -> float:
 
 func _step_vortices(delta: float, gpos: Vector2, h: float) -> void:
 	var keep := []
-	var orbit: float = stage.orbit
 	var inside := in_vortex()
 	for v in vortices:
 		v.t = float(v.t) + delta
-		var x := float(v.r) / orbit
-		v.a = wrapf(float(v.a) - K_DRIFT * (pow(x, -1.5) - 1.0) * delta, -PI, PI)
 		if v == inside:
 			v.inside = float(v.inside) + delta
 			# Пыль вихря: хондры раз в несколько секунд, у тёмного — сажа.

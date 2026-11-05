@@ -3,8 +3,8 @@ extends Node2D
 ## Сближение двух жидких тел: ты и гигант-соперник или коричневый карлик.
 ## Всё по физике, без скриптов и подписей.
 ##
-## 1. Тяготение взаимное: каждого тянет к другому G·m/d². Тебя толкает в твой
-##    kick (газ диска гасит его), соперника — в его скорость. Лёгкого тянет
+## 1. Тяготение взаимное: каждого тянет к другому G·m/d². Тебя толкает в твою
+##    скорость (импульс остаётся: орбит нет), соперника — в его. Лёгкого тянет
 ##    сильнее; у тяжёлого соседа есть точка невозврата, где тяга сильнее хода.
 ## 2. Прилив: шар вытягивается вдоль линии центров (равновесный прилив,
 ##    ε = h·(m₂/m₁)·(R/d)³, h — податливость оболочки по флейвору) и не может
@@ -117,6 +117,11 @@ func step(delta: float) -> void:
 		if d > RANGE * (R1 + R2) or d < 1.0:
 			if b.has("sh"):
 				_relax_body(b, delta, d)
+			# Ушёл после тесного пролёта, не слившись: праща («Праща» g_sling).
+			if b.get("close", false) and d >= 1.0:
+				b.erase("close")
+				if b.kind == "rival":
+					stage.pay(float(b.m) * 0.3 * Skills.stat("giant_sling"))
 			continue
 		near = true
 		_pair(b, delta, gpos, p, to, d, R1, R2, target)
@@ -189,14 +194,19 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 	var phi_w := n.angle()
 	# --- Тяготение ---
 	var a1 := G * m2 / (d * d)
-	var a2 := G * m1 / (d * d)
+	# «Праща» (g_sling): твой пролёт сильнее бросает соседа.
+	var a2 := G * m1 / (d * d) * (Skills.stat("giant_sling") if b.kind == "rival" else 1.0)
+	if d < 2.0 * (R1 + R2):
+		b["close"] = true
+	# «Хватка массы» (g_guard): оболочка сидит туже, её труднее вытянуть.
+	var guard := 1.0 + Skills.stat("giant_guard")
 	stage.kick += n.rotated(-ang) * a1 * delta
 	_push(b, -n * a2 * delta)
 	# --- Прилив и полость ---
 	var f1 := _fluid_me()
 	var f2 := _fluid_of(b)
 	# Тонкая оболочка над ядром почти не тянется: масса сжата к центру.
-	var eps1 := clampf(1.5 * float(f1.soft) * lerpf(0.3, 1.0, float(stage.body.env_k)) * (m2 / m1) * pow(R1 / d, 3.0), 0.0, 0.5)
+	var eps1 := clampf(1.5 * float(f1.soft) * lerpf(0.3, 1.0, float(stage.body.env_k)) * (m2 / m1) * pow(R1 / d, 3.0) / guard, 0.0, 0.5)
 	var eps2 := clampf(1.5 * float(f2.soft) * (m1 / m2) * pow(R2 / d, 3.0), 0.0, 0.5)
 	var t1 := Roche.table(m1 / m2)
 	var t2 := Roche.table(m2 / m1)
@@ -268,7 +278,7 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 			over1 = 0.0
 	if over1 > 0.0:
 		# Течёт только газ: твёрдое ядро полость не покидает.
-		var dm := minf(minf(MDOT_K * pow(over1, 3.0), MDOT_MAX) * m1 * delta, maxf(m1 - stage.core_m(), 0.0))
+		var dm := minf(minf(MDOT_K * pow(over1, 3.0), MDOT_MAX) * m1 * delta / guard, maxf(m1 - stage.core_m(), 0.0))
 		stage.earths -= dm
 		b.m = float(b.m) + dm * 0.92
 		_emit(b, "me", dm / m1 / delta, gpos + n * Roche.l1(m1 / m2) * d, n, p, gpos, delta, _my_col())
@@ -313,6 +323,9 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 		var ce_t2 := float((f1 if light2 else f2).ce)
 		if light2:
 			ce_t2 *= float(CORE_CE.get(GameState.body_type(), 1.0))
+		else:
+			# «Слияние» (g_merge): твоя оболочка быстрее гасит ядро соседа.
+			ce_t2 /= 1.0 + 2.0 * Skills.stat("giant_merge")
 		b["ce"] = float(b.get("ce", 0.0)) + delta * (0.15 + 1.5 * maxf(sph, 0.0)) / ce_t2
 		if float(b.ce) >= 1.0:
 			_begin_absorb(b, light2)
@@ -331,7 +344,7 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 	# Тесный пролёт срывает луны: их орбиты шире твоей полости.
 	if stage.moons > 0 and d < (R1 + R2) * 1.6 and float(b.get("moon_cd", 0.0)) <= 0.0 and m2 > m1 * 0.5:
 		b["moon_cd"] = 5.0
-		if _rng.randf() < 0.6:
+		if _rng.randf() < 0.6 / guard:
 			stage.moons -= 1
 			stage.body.moons = stage.moons
 			stage.body.steal(stage.body.to_local(p))
@@ -536,8 +549,9 @@ func _step_absorb(delta: float, gpos: Vector2, R1: float, target: PackedFloat32A
 	var me: bool = b.get("absorb_me", false)
 	var n := (p - gpos).normalized()
 	if me:
-		# Тебя тянет к центру соседа, оболочка стекает к нему.
-		stage.kick += n.rotated(-float(stage.ang)) * 900.0 * delta
+		# Тебя тянет к центру соседа, оболочка стекает к нему: летите вместе.
+		stage.vel = stage.vel.lerp(world._vel_of(b), minf(delta * 3.0, 1.0))
+		stage.pos = stage.pos.lerp(p, minf(delta * 1.2, 1.0))
 		for i in N:
 			target[i] = minf(shape[i], lerpf(1.0, 0.18, k))
 		stage.body.fade = 1.0 - smoothstep(0.35, 1.0, k)
@@ -556,6 +570,8 @@ func _step_absorb(delta: float, gpos: Vector2, R1: float, target: PackedFloat32A
 		_heat_me(n.rotated(-float(stage.ang)), delta * 0.4, 1.3)
 		if k >= 1.0:
 			var gain := float(b.m) * 0.94
+			# Импульс сохраняется: слитое тело летит с общей скоростью.
+			stage.vel = (stage.vel * stage.earths + world._vel_of(b) * gain) / (stage.earths + gain)
 			stage.earths += gain
 			stage.pay(gain)
 			stage.body.impact_heat = maxf(stage.body.impact_heat, 0.55)

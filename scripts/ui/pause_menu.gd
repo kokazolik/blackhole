@@ -169,6 +169,8 @@ func _show_dev() -> void:
 	_dev_button("Гигант: начало", func():
 		_jump(GameData.mass_for_earths(10.5), 4, false)
 		GameState.embryo_choice = "giant"
+		# Как у игрока, дошедшего до гиганта: древо зародыша тоже прокачано.
+		_max_tree_before(GameData.GIANT_STAGE, "giant")
 		GameState.start_giant("giant_cold", 7500.0)
 		Fader.go(Fader.GIANT))
 	_dev_button("Молодая планета: начало", func():
@@ -176,6 +178,7 @@ func _show_dev() -> void:
 		GameState.embryo_choice = "planet"
 		GameState.is_melted = true
 		GameState.core_share = float(GameData.composition(GameState.materials).get("metal", 0.2))
+		_max_tree_before(GameData.YOUNG_STAGE, "planet")
 		GameState.start_young(GameData.AU_UNITS)
 		Fader.go(Fader.YOUNG))
 	_dev_button("Облако: коричневый карлик", func():
@@ -183,6 +186,7 @@ func _show_dev() -> void:
 		GameState.embryo_choice = "giant"
 		GameState.start_giant("giant_cold", 7500.0)
 		GameState.giant.e = GameData.BROWN_DWARF + 10.0
+		_max_tree_before(GameData.CLOUD_STAGE, "giant")
 		GameState.start_cloud("brown_dwarf")
 		Fader.go(Fader.CLOUD))
 	_dev_button("Облако: зажигание", func():
@@ -320,7 +324,7 @@ func _jump(mass: float, stage: int, go := true) -> void:
 
 ## Прокачать всё древо прошлых стадий, как у игрока, дошедшего сюда.
 ## Путь вещества — по главному материалу тела.
-func _max_tree_before(stage: int) -> void:
+func _max_tree_before(stage: int, route := "") -> void:
 	var top := "silicate"
 	for key in GameState.materials:
 		if float(GameState.materials[key]) > float(GameState.materials.get(top, 0.0)):
@@ -328,6 +332,10 @@ func _max_tree_before(stage: int) -> void:
 	for id in Skills.order:
 		var node: Dictionary = Skills.nodes[id]
 		if int(node.get("requires_stage", 0)) >= stage or node.get("requires_melt", false):
+			continue
+		# Ветка пути после зародыша (гигант / молодая планета) — только своя.
+		var need: String = node.get("requires_route", "")
+		if need != "" and need != route:
 			continue
 		var path: String = node.get("path", "")
 		if path != "" and path != top:

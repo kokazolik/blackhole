@@ -187,6 +187,9 @@ func _make_art() -> void:
 	elif giant:
 		_art_mat.shader = preload("res://shaders/giant_planet.gdshader")
 		var look: Array = GameData.GIANT_LOOK.get(kind, [cols[0], cols[1], cols[1]])
+		# Погиб при сближении — на портрете твой гигант, своего флейвора.
+		if kind in ["giant_swallowed", "giant_eaten_dwarf"]:
+			look = GameData.GIANT_LOOK.get(str(GameState.giant.get("flavor", "giant_cold")), look)
 		if kind == "star_failed":
 			look = GameData.GIANT_LOOK["brown_dwarf"]
 		elif kind == "super_neptune":
@@ -196,11 +199,12 @@ func _make_art() -> void:
 		_art_mat.set_shader_parameter("storm_col", look[2])
 		_art_mat.set_shader_parameter("heat", 0.7 if kind in ["giant_hot", "brown_dwarf", "star_failed", "giant_eaten_dwarf"] else 0.0)
 		_art_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.25))
+		BodyArt.set_drop(_art_mat, kind)
 	else:
 		_art_mat.shader = preload("res://shaders/embryo.gdshader")
 		var style := 0
 		match kind:
-			"planet_iron", "super_iron", "giant_chthonian":
+			"planet_iron", "super_iron":
 				style = 1
 			"planet_dark", "super_diamond":
 				style = 2
@@ -208,6 +212,10 @@ func _make_art() -> void:
 				style = 4
 			"planet_living", "planet_ocean":
 				style = 5
+		# Голое ядро — то, с чем пришёл в гиганта, ещё раскалённое.
+		if kind == "giant_chthonian":
+			style = {"metal": 1, "carbon": 2, "ice": 3, "titan": 3, "chondrite": 4}.get(GameState.body_type(), 0)
+			_art_mat.set_shader_parameter("magma", 0.32)
 		_art_mat.set_shader_parameter("style", style)
 		_art_mat.set_shader_parameter("light_dir", Vector2(-1.0, -0.25))
 		_art_mat.set_shader_parameter("seed", 0.37)

@@ -385,6 +385,62 @@ func _draw_world_marks() -> void:
 		_pointer.draw_string(UiTheme.FONT_SEMI, tp, txt, HORIZONTAL_ALIGNMENT_CENTER, 220, 14, Color(c, 0.9))
 
 
+## Над каждой планетой на экране — имя и масса (автор). Масса честная:
+## размер тела на экране считается из неё же (GiantWorld.rad_of).
+const NAMED := ["planetesimal", "binary", "irondwarf", "trojan", "icedwarf", "embryo",
+	"superearth", "minineptune", "rival", "dwarf"]
+
+
+static func mass_text(m: float) -> String:
+	var t := ""
+	if m < 0.1:
+		t = String.num(m, 3)
+	elif m < 10.0:
+		t = String.num(m, 2 if m < 1.0 else 1)
+	else:
+		t = str(roundi(m))
+	t = t.replace(".", ",") + " M⊕"
+	if m >= 100.0:
+		t += " · " + String.num(m / GameData.JUPITER_EARTHS, 1).replace(".", ",") + " Mj"
+	return t
+
+
+func _draw_names() -> void:
+	var w = stage.world
+	if w == null:
+		return
+	var vp := _pointer.size
+	var cam: Camera2D = stage.camera
+	var zoom: float = cam.zoom.x
+	var center: Vector2 = cam.get_screen_center_position()
+	var used: Array[Rect2] = []
+	for b in w.bodies:
+		if not (b.kind in NAMED) or not (b.state in ["free", "pass", "captured"]):
+			continue
+		var bp: Vector2 = w.pos_of(b)
+		var sp: Vector2 = (bp - center).rotated(-cam.rotation) * zoom + vp * 0.5
+		var rad: float = w.rad_of(b) * zoom
+		if sp.x < -40.0 or sp.x > vp.x + 40.0 or sp.y < 120.0 or sp.y > vp.y - 100.0:
+			continue
+		var role: String = w.role(b)
+		var c := Color(1.0, 0.45, 0.36) if role == "danger" else (UiTheme.GOLD if role == "merge" else (Color(1.0, 0.7, 0.42) if role == "big" else Color(0.88, 0.9, 0.95)))
+		var top := sp - Vector2(0.0, maxf(rad, 3.0) + 8.0)
+		top.x = clampf(top.x, 88.0, vp.x - 88.0)
+		var box := Rect2(top - Vector2(80.0, 34.0), Vector2(160.0, 34.0))
+		var clash := false
+		for u in used:
+			if u.intersects(box):
+				clash = true
+				break
+		if clash:
+			continue
+		used.append(box)
+		var f := UiTheme.FONT_SEMI
+		_pointer.draw_string(f, top - Vector2(80.0, 18.0), w.name_of(b), HORIZONTAL_ALIGNMENT_CENTER, 160, 14, Color(c, 0.92))
+		_pointer.draw_string(UiTheme.FONT_TEXT, top - Vector2(80.0, 3.0), mass_text(float(b.m)), HORIZONTAL_ALIGNMENT_CENTER, 160, 12, Color(c, 0.7))
+
+
 ## Стрелки к телам мира за краем экрана.
 func _draw_pointer() -> void:
+	_draw_names()
 	_draw_world_marks()
