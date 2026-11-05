@@ -1807,6 +1807,8 @@ func _view(kind: String) -> CanvasItem:
 				"vortex":
 					mat.shader = preload("res://shaders/vortex.gdshader")
 					mat.set_shader_parameter("noise_tex", NoiseTex.get_tex())
+				"ring":
+					mat.shader = preload("res://shaders/giant_ring.gdshader")
 			node.material = mat
 	add_child(node)
 	pool.append(node)
@@ -1818,11 +1820,13 @@ func _map_for(key: String, look: Array, seed_v: float) -> Texture2D:
 	if _maps.has(key):
 		return (_maps[key] as SubViewport).get_texture()
 	var vp := SubViewport.new()
-	vp.size = Vector2i(256, 128)
+	# Карта печётся один раз, а крупные соседи бывают шире экрана: 1024×512
+	# (было 256×128 — на большом теле видно было мыло).
+	vp.size = Vector2i(1024, 512)
 	vp.disable_3d = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var rect := ColorRect.new()
-	rect.size = Vector2(256, 128)
+	rect.size = Vector2(1024, 512)
 	var mat := ShaderMaterial.new()
 	mat.shader = preload("res://shaders/giant_map.gdshader")
 	mat.set_shader_parameter("zone_col", look[0])
@@ -1993,9 +1997,26 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 				key = "rv%d" % int(b.look)
 			m.set_shader_parameter("map", _map_for(key, look, 0.17 + 0.23 * int(b.look)))
 			if b.get("rings", false) and not b.get("core", false):
-				var rg := {"p": p, "r": rad, "a": float(b.seed) * 0.7, "light": light}
-				_ring_list.append(rg)
-				_draw_ring(self, rg, false)
+				# Кольцо тем же шейдером, что у тебя: вид сверху, дорожки, щель
+				# Кассини, сгустки по Кеплеру, тень планеты. Сатурну — широкое
+				# и тёплое, мини-нептуну — узкое ледяное.
+				var sat: bool = b.get("cls", "") == "saturn"
+				var rn := _view("ring") as ColorRect
+				var ro := 2.25 if sat else 1.75
+				var hs := rad * (ro + 0.05)
+				rn.size = Vector2(hs, hs) * 2.0
+				rn.position = p - Vector2(hs, hs)
+				var rm := rn.material as ShaderMaterial
+				rm.set_shader_parameter("half_size", hs)
+				rm.set_shader_parameter("planet_r", rad)
+				rm.set_shader_parameter("r_in", 1.28 if sat else 1.35)
+				rm.set_shader_parameter("r_out", ro)
+				rm.set_shader_parameter("opacity", 0.95 if sat else 0.55)
+				rm.set_shader_parameter("col", Vector3(0.88, 0.82, 0.7) if sat else Vector3(0.8, 0.86, 0.92))
+				rm.set_shader_parameter("light_dir", light)
+				rm.set_shader_parameter("seed", fmod(float(b.seed), 10.0))
+				rm.set_shader_parameter("time", _time)
+				rn.modulate.a = fade
 			m.set_shader_parameter("haze_col", Color(0.62, 0.74, 0.95) if b.kind != "dwarf" else Color(0.9, 0.35, 0.25))
 			m.set_shader_parameter("light_dir", light)
 			m.set_shader_parameter("spin", float(b.spin) * 3.0)
