@@ -160,17 +160,16 @@ func on_era(era: int) -> void:
 
 
 func _era_guests(era: int) -> void:
-	var e: float = stage.earths
+	# Соседи-гиганты своей массы, не по твоей (автор: «вначале слабые, в конце
+	# сильные»): пришли — тяжелее тебя, к концу этапа ты их перерастаешь.
 	match era:
 		2:
-			# Соперник полегче: вырастешь — съешь.
-			_spawn_rival(maxf(e * 3.0, 35.0) * _rng.randf_range(0.9, 1.3))
+			_spawn_rival(_rng.randf_range(160.0, 260.0))
 			_spawn_trojans()
 		3:
-			# Тяжёлый соперник: бойся.
-			_spawn_rival(maxf(e * 4.0, 300.0) * _rng.randf_range(0.9, 1.4))
+			_spawn_rival(_rng.randf_range(700.0, 1100.0))
 			if _flavor() in ["giant_cold", "giant_hot"]:
-				_spawn_rival(maxf(e * 8.0, 600.0) * _rng.randf_range(0.9, 1.2))
+				_spawn_rival(_rng.randf_range(1800.0, 2600.0))
 			_dwarf_t = minf(_dwarf_t, _rng.randf_range(50.0, 90.0))
 
 
@@ -551,7 +550,7 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 	if b.kind == "rival":
 		# Соперник тоже пьёт газ и растёт, пока газ есть.
 		var gk: float = clampf(stage.gas / stage.gas_total, 0.0, 1.0)
-		b.m = float(b.m) * (1.0 + 0.0018 * gk * delta)
+		b.m = float(b.m) * (1.0 + 0.0006 * gk * delta)
 		_rival_feed(b)
 	# Ушло за пределы: упало в звезду или выброшено из системы.
 	if float(b.r) < GameData.GIANT_STAR_R * 1.08:

@@ -114,6 +114,10 @@ func _spawn(k: Dictionary, gas: GasParticles) -> void:
 		_next_id += 1
 		var count := PARTS if k["mass"] < 1.3 else PARTS + 14
 		var gain: float = maxf(stage.clump_gain(s) * float(k["mass"]) * SECONDS, 0.05)
+		# Смешанное ядро (хондрит, переходное) тянет газ любого сорта: сгустки
+		# ему жирнее — иначе оно отстаёт от специализаций (баланс по ботам).
+		if GameState.body_type() in ["chondrite", "neutral"]:
+			gain *= 1.15
 		clumps[id] = {"mass": gain / count, "left": count, "eaten": 0, "said": false}
 		gas.spawn_clump(id, x, y, _rng.randf_range(0.35, 0.55), count, k["col"])
 		return
