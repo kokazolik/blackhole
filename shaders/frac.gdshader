@@ -4,6 +4,8 @@ shader_type canvas_item;
 // тела берут цвет из текстуры; полоски изломов и тела без снимка помечены
 // uv < 0 и рисуются вершинным цветом как есть.
 
+// b — сила света от самой планеты (молодой гигант светится), цвет self_col.
+uniform vec3 self_col = vec3(0.0);
 varying vec4 vc;
 
 void vertex() {
@@ -22,7 +24,7 @@ void fragment() {
 		COLOR = vc;
 	} else {
 		vec4 t = texture(TEXTURE, UV);
-		vec3 c = t.rgb * vc.r;
+		vec3 c = t.rgb * vc.r + t.rgb * self_col * vc.b;
 		float h = vc.g;
 		// Накал проступает в тёмных местах (трещины, ночная сторона) сильнее.
 		float lum = dot(t.rgb, vec3(0.3, 0.5, 0.2));

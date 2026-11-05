@@ -46,6 +46,11 @@ func shade(_p: Vector2) -> float:
 	return 1.0
 
 
+## Свет от самого центра (раскалённая планета): цвет × сила, a — сила.
+func self_light(_p: Vector2) -> Color:
+	return Color(0, 0, 0, 0)
+
+
 ## Откуда свет (единичный вектор к звезде).
 func light_dir(_p: Vector2) -> Vector2:
 	return Vector2(-1.0, 0.0)

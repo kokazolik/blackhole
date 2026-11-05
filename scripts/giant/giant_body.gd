@@ -432,6 +432,18 @@ func _update_young(r: float) -> void:
 	_cocoon_mat.set_shader_parameter("spin", _time * 0.25)
 
 
+## Свет, которым планета сама освещает соседей: пока молодая и горячая
+## (и после гигантского удара). Цвет по температуре недр, a — сила.
+func self_light() -> Color:
+	var young := 1.0 - smoothstep(0.42, 1.0, envelope)
+	var k := clampf(young * 0.9 + impact_heat * 0.5, 0.0, 1.0)
+	if k <= 0.01:
+		return Color(0, 0, 0, 0)
+	var c := FracWorld.glow_col(clampf((0.5 + (1.3 + _temp_add) * young) * 0.5 + impact_heat * 0.3, 0.0, 1.2)) * k
+	c.a = k
+	return c
+
+
 ## Внешний радиус: газ над ядром. Оболочку можно сорвать — тогда шар
 ## садится к ядру, и ядро проступает.
 func outer_r() -> float:

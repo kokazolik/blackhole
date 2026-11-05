@@ -1361,6 +1361,10 @@ func _draw() -> void:
 			zoom = maxf(cam.zoom.x, 0.0001)
 	var px := 1.0 / zoom
 	var no_uv := PackedVector2Array()
+	var sl0 := field.self_light(Vector2.ZERO)
+	if material is ShaderMaterial:
+		var sc := Vector3(sl0.r, sl0.g, sl0.b) / maxf(sl0.a, 0.001)
+		(material as ShaderMaterial).set_shader_parameter("self_col", sc * 1.4)
 	for ch: Chunk in chunks:
 		if ch.dead:
 			continue
@@ -1369,6 +1373,8 @@ func _draw() -> void:
 		var sn := sin(ch.ang)
 		var shade := field.shade(ch.pos)
 		var L := field.light_dir(ch.pos)
+		var sl := field.self_light(ch.pos)
+		var Ls := -ch.pos.normalized()
 		var inner: Color = src.mat["inner"]
 		# Тонет в облаках: тает у самой кромки.
 		var fade := 1.0
@@ -1387,13 +1393,14 @@ func _draw() -> void:
 			var cols := PackedColorArray()
 			cols.resize(n)
 			if src.tex != null:
-				cols.fill(Color(shade * cell.tone, clampf(heat, 0.0, 1.0), 0.0, fade))
+				cols.fill(Color(shade * cell.tone, clampf(heat, 0.0, 1.0), sl.a * cell.tone, fade))
 				RenderingServer.canvas_item_add_triangle_array(ci, cell.tri, pts, cols, cell.uv, PackedInt32Array(), PackedFloat32Array(), src.tex.get_rid())
 			else:
 				var base: Color = src.col * cell.tone
 				for k in n:
 					var lk := 0.55 + 0.6 * maxf(cell.poly[k].normalized().rotated(ch.ang).dot(L), 0.0)
-					var cl := (base * lk * shade).lerp(glow_col(heat), clampf(heat, 0.0, 1.0) * 0.8)
+					var ls := (0.35 + 0.9 * maxf(cell.poly[k].normalized().rotated(ch.ang).dot(Ls), 0.0)) * 1.4
+					var cl := (base * lk * shade + base * sl * ls).lerp(glow_col(heat), clampf(heat, 0.0, 1.0) * 0.8)
 					cl.a = fade
 					cols[k] = cl
 				if no_uv.size() < n:
@@ -1429,7 +1436,8 @@ func _draw() -> void:
 				if nrm.dot(p0 - cc) < 0.0:
 					nrm = -nrm
 				var lit := 0.32 + 0.85 * maxf(nrm.dot(L), 0.0)
-				var col := (inner * lit * maxf(shade, 0.12)).lerp(glow_col(heat), clampf(heat * 1.1, 0.0, 1.0) * 0.9)
+				var lis := (0.3 + 1.1 * maxf(nrm.dot(Ls), 0.0)) * 1.4
+				var col := (inner * lit * maxf(shade, 0.12) + inner * sl * lis).lerp(glow_col(heat), clampf(heat * 1.1, 0.0, 1.0) * 0.9)
 				col.a = fade
 				var i0 := rim_pts.size()
 				var q0 := p0 + (cc - p0).normalized() * minf(rw, p0.distance_to(cc) * 0.4)
@@ -1463,7 +1471,7 @@ func _draw_dust() -> void:
 		var p := Vector2(gx[i], gy[i])
 		var s := maxf(gs[i], 1.1 * px)
 		var h := gh[i]
-		var col: Color = src.col * field.shade(p)
+		var col: Color = src.col * field.shade(p) + src.col * field.self_light(p) * 1.5
 		col = col.lerp(glow_col(h), clampf(h * 1.2, 0.0, 1.0))
 		col.a = clampf(0.55 + 0.35 * gs[i] / maxf(2.0 * px, 0.01), 0.3, 0.95) * smoothstep(0.0, 0.15, gt[i] + 0.15)
 		if gr[i] == 1:

@@ -37,7 +37,6 @@ const ENVELOPE_R := 2.7      # здесь мини-нептун теряет г�
 const GAS_ROT := 0.92        # газ своего диска кружит с такой долей круговой скорости
 const HANDOVER := 1.2        # тело уходит в движок разрушения на стольких пределах Роша
 const FRAC_SLOW := 0.6       # раскол и полёт кусков идут медленнее (автор: «чуть замедлим»)
-const ATTRACT := 60.0        # взаимное тяготение у края сферы Хилла, ед./с²
 const IMPACT_V := 330.0      # скорость сближения для гигантского удара, ед./с
 const BIG_RATIO := 1.4       # крупное: легче тебя хотя бы во столько раз
 const CAPTURE := 0.42        # куски ниже этого — упали в облака
@@ -56,7 +55,7 @@ const DENS_R := {"metal": 0.8, "rock": 1.0, "lava": 1.0, "chondrite": 1.0, "venu
 const SYL := ["ка", "ро", "лин", "те", "ва", "ми", "до", "ра", "сэ", "ну", "ор", "эл",
 	"та", "ги", "ла", "ви", "ар", "зе", "мо", "кай", "ри", "нот", "ве", "са", "ол", "ден"]
 const KINDS := {
-	"rubble": {"name": "рой обломков", "m": Vector2(0.02, 0.06), "rad": 14.0, "view": "moon", "ch": 0, "extra": 0.0004, "pieces": 5},
+	"rubble": {"name": "рой обломков", "m": Vector2(0.02, 0.06), "rad": 14.0, "view": "moon", "ch": 0, "extra": 0.0004, "pieces": 1},
 	"planetesimal": {"name": "планетезималь", "m": Vector2(0.1, 0.35), "rad": 15.0, "view": "moon", "ch": 1, "extra": 0.001},
 	"comet": {"name": "комета", "m": Vector2(0.01, 0.03), "rad": 6.0, "view": "comet", "ch": 1, "extra": 0.0008},
 	"embryo": {"name": "зародыш", "m": Vector2(0.6, 3.0), "rad": 27.0, "view": "embryo", "ch": 3, "extra": 0.004},
@@ -637,13 +636,16 @@ func _attract(b: Dictionary, delta: float, p: Vector2, gpos: Vector2, d: float, 
 	var v: Vector2 = b.get("v", Vector2.ZERO)
 	if d < 4.0 * h:
 		var dir := (gpos - p) / maxf(d, 1.0)
-		var acc := ATTRACT * pow(h / maxf(d, h * 0.5), 2.0)
+		# То же тяготение, что ведёт захваченное тело (задача Хилла), — энергия
+		# сохраняется: быстрый пролёт уходит по гиперболе, а не липнет.
+		var g := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
+		var acc := g * h * HILL_W * HILL_W * pow(h / maxf(d, h * 0.5), 2.0)
 		v += dir * acc * delta
 		var q := clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
 		if q > 0.02:
 			stage.kick += (-dir).rotated(-float(stage.ang)) * acc * q * delta
-	# Газ диска гасит набранную скорость.
-	v *= exp(-0.35 * delta)
+	# Газ диска понемногу гасит набранную скорость.
+	v *= exp(-0.12 * delta)
 	if v.length_squared() < 1.0 and d > 4.0 * h:
 		b.erase("v")
 		return
@@ -679,8 +681,9 @@ func _capture(b: Dictionary, gpos: Vector2, h: float, orbit: float) -> void:
 		_split_binary(b)
 	_take_sat(b)
 	var loc: Vector2 = stage.body.to_local(pos_of(b))
-	# Скорость относительно тебя: ты сам летишь, задача — в твоей системе.
-	var lv: Vector2 = (_vel_of(b) - _player_vel()).rotated(-float(stage.ang))   # x — от звезды, y — рост угла
+	# Скорость тела в мире: оно летит своей дорогой, ты — своей (shift
+	# двигает систему вместе с тобой, тело в ней остаётся на своём пути).
+	var lv: Vector2 = _vel_of(b).rotated(-float(stage.ang))   # x — от звезды, y — рост угла
 	var s := h * HILL_W
 	b.h = Vector4(loc.x / h, -loc.y / h, lv.x / s, -lv.y / s)
 	b["q"] = clampf(float(b.m) / float(stage.earths), 0.0, 1.0)
@@ -707,39 +710,27 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	var steps := maxi(1, ceili(dt / 0.02))
 	var hh := dt / steps
 	var p: Vector4 = b.h
-	# Тяжёлое тело тормозится о диск дольше: спираль крупного — на пару оборотов.
+	# Честно (автор: «тело не должно клеиться»): только тяготение гиганта и
+	# трение о его околопланетный диск (до ~1 Хилла) и атмосферу. Пролетел
+	# быстро мимо — тело уходит по гиперболе своей дорогой; зашло в диск
+	# медленно — газ гасит скорость относительно тебя, и оно ложится на орбиту.
 	var q: float = b.get("q", 0.0)
-	var fr := 0.9 / (1.0 + q) * (1.0 + 0.18 * float(b.t))
+	var fr := 0.9 / (1.0 + q)
 	var ho := maxf(roche_h(b) * HANDOVER, contact_h(b) * 1.6) if _solid(b) else 0.0
+	var pl: Vector2 = (stage.vel as Vector2).rotated(-float(stage.ang)) / (h * HILL_W)
+	var pv := Vector2(pl.x, -pl.y)     # твоя скорость в единицах задачи
 	for k in steps:
 		p = GasParticles.hill_step(p, hh, g, 0.0)
-		# Трение о свой диск тянет тело к тебе по спирали. Диск сам кружит
-		# в прямую сторону, поэтому трение не гасит скорость в ноль, а
-		# сводит тело на его вращение (чуть медленнее круговой): тело
-		# подходит к пределу Роша по орбите, а не падает отвесно.
 		var d := sqrt(p.x * p.x + p.y * p.y)
-		var vk := maxf(sqrt(g / maxf(d, 0.05)) - d, 0.0) * GAS_ROT
-		# Ближе к пределу Роша газ плотнее и сильнее закручивает тело.
-		var fr2 := fr + (14.0 * smoothstep(ho * 2.6, ho * 1.3, d) if ho > 0.0 else 0.0)
-		p.z -= (p.z + p.y / maxf(d, 0.05) * vk) * fr2 * hh
-		p.w -= (p.w - p.x / maxf(d, 0.05) * vk) * fr2 * hh
-		# Снаружи сферы Хилла прилив звезды тянет прочь: газ оболочки тормозит
-		# тело и не даёт ему уйти (захват трением о газ).
-		# Твёрдое тело у предела Роша газ уже не тащит вниз: оно подходит по
-		# пологой спирали, и движок разрушения успевает показать раскол.
-		var pull := (fr + 0.4) * ((0.08 + 0.92 * smoothstep(ho, ho * 1.8, d)) if ho > 0.0 else 1.0)
-		var hold := pull
-		var ux := p.x / maxf(d, 0.1)
-		var uy := p.y / maxf(d, 0.1)
-		var vrad := p.z * ux + p.w * uy
-		if vrad > 0.0:
-			hold += vrad * 5.0 * smoothstep(0.6, 1.3, d)
-		p.z -= ux * hold * hh
-		p.w -= uy * hold * hh
-		# Орбита сжимается: тело отдаёт энергию газу и ложится всё ниже.
-		var shrink := 1.0 - (0.3 + 0.08 * float(b.t)) / (1.0 + q) * hh
-		p.x *= shrink
-		p.y *= shrink
+		var vk := sqrt(g / maxf(d, 0.05)) * GAS_ROT
+		# Трение только в самом диске (ближе ~1 Хилла) и чуть сильнее у предела
+		# Роша, где газ плотнее. Снаружи — чистое тяготение: пролёт по гиперболе.
+		var fr2 := fr * smoothstep(1.0, 0.45, d) + (1.5 * smoothstep(ho * 1.4, ho * 1.05, d) if ho > 0.0 else 0.0)
+		# Газ диска кружит вокруг тебя и летит вместе с тобой.
+		var gx := pv.x - p.y / maxf(d, 0.05) * vk
+		var gy := pv.y + p.x / maxf(d, 0.05) * vk
+		p.z -= (p.z - gx) * fr2 * hh
+		p.w -= (p.w - gy) * fr2 * hh
 	b.h = p
 	var dist := sqrt(p.x * p.x + p.y * p.y)
 	var roche := roche_h(b)
@@ -755,7 +746,7 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	if dist > 2.4:
 		# Ушло за сферу Хилла: снова свободное, со своей скоростью.
 		var s := h * HILL_W
-		b["v"] = (Vector2(p.z, -p.w) * s).rotated(float(stage.ang)) + _player_vel()
+		b["v"] = (Vector2(p.z, -p.w) * s).rotated(float(stage.ang))
 		b.erase("drift")
 		b.vr = 0.0
 		b.state = "free"
@@ -804,7 +795,8 @@ func _solid(b: Dictionary) -> bool:
 ## Награда — в миг, когда тело треснуло (или врезалось целым).
 func _to_engine(b: Dictionary, p: Vector4, h: float, tidal: bool) -> FracWorld.Source:
 	var from := Vector2(p.x, -p.y) * h
-	var vel := Vector2(p.z, -p.w) * h * HILL_W
+	# Движок живёт в твоей системе: скорость тела относительно тебя.
+	var vel := Vector2(p.z, -p.w) * h * HILL_W - _pv_local()
 	var gain := _gain(b)
 	var snap: Dictionary = b.get("snap", {})
 	if snap.is_empty():
@@ -954,7 +946,7 @@ func _tear(b: Dictionary, p: Vector4, h: float) -> void:
 	if solid or b.kind == "comet":
 		# Твёрдое тело рассыпается, как валун: куски, обломки, пыль — каждый
 		# со скоростью тела в миг разрыва, без остановки.
-		var vel := Vector2(p.z, -p.w) * h * HILL_W
+		var vel := Vector2(p.z, -p.w) * h * HILL_W - _pv_local()
 		var flv := str(GameState.giant.get("flavor", ""))
 		# Сколько всего рисовать — по размеру тела рядом с тобой: мелочь
 		# (рой обломков, планетезималь) тонет тихой горсткой, крупное
@@ -1446,8 +1438,13 @@ func _scatter_near(dw: Dictionary, delta: float) -> void:
 			b["slung"] = false
 
 
-## Гигант сдвинулся. Связанное с ним (ближе 1,5 радиуса Хилла) летит
-## вместе с ним, как настоящие обломки в его сфере; дальнее остаётся в диске.
+## Твоя скорость в твоей же системе (x — от звезды), единицы мира.
+func _pv_local() -> Vector2:
+	return (stage.vel as Vector2).rotated(-float(stage.ang))
+
+
+## Гигант сдвинулся. Захваченные тела летят своей дорогой в мире: их
+## координаты относительно тебя сдвигаются целиком (скорость — мировая).
 func shift(d: Vector2) -> void:
 	var h: float = stage.hill()
 	var dx := d.x / h
@@ -1460,9 +1457,7 @@ func shift(d: Vector2) -> void:
 
 
 static func _shift_one(p: Vector4, dx: float, dy: float) -> Vector4:
-	var d2 := p.x * p.x + p.y * p.y
-	var k := 1.0 - smoothstep(1.2, 1.8, sqrt(d2))
-	return Vector4(p.x - dx * (1.0 - k), p.y - dy * (1.0 - k), p.z, p.w)
+	return Vector4(p.x - dx, p.y - dy, p.z, p.w)
 
 
 # --- Вихри у краёв щели ---
