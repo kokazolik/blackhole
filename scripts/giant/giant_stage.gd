@@ -68,6 +68,11 @@ var _focus_loc := Vector2.ZERO   # куда смотреть, в системе 
 var _focus_k := 0.0
 var _focus_w := 0.0
 var value_boost := 0.0      # секунд звёздной пыли ×1,5 (событие парникового мира)
+# Диск тает изнутри: радиус дыры у звезды (0 — ещё нет). Считается по времени
+# газа, в сохранение не идёт: из gas он восстанавливается сам.
+var hole := 0.0
+var evap := 0.0             # сколько газа сдувает звезда сейчас, M⊕/с
+var evap_held := 0.0        # доля, которую держит магнитное поле (для вида и HUD)
 # Эпохи этапа: мир наполняется постепенно. 0 — рыхлое облако, вокруг только газ;
 # 1 — кормовая зона: обломки и планетезимали; 2 — соседи: зародыши, троянцы,
 # лёгкий соперник; 3 — хозяин диска: суперземли, мини-нептуны, тяжёлые
@@ -362,15 +367,18 @@ func _process(delta: float) -> void:
 	_era_check(false)
 	gas -= delta
 	var gk := clampf(gas / gas_total, 0.0, 1.0)
+	hole = hole_r()
+	disk.clear_hole(delta, hole)
 	var h := hill()
 	var width := 1.6 * h * Skills.stat("giant_reach")
-	var feed := disk.feed(orbit, width)
+	var feed := disk.feed(orbit, width) * rim_gas_k()
 	if _feed0 < 0.0:
 		_feed0 = maxf(feed, 0.05)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
-	mdot = GameData.GIANT_ACC * feed * gk * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * world.acc_mul()
+	mdot = GameData.GIANT_ACC * feed * gas_k() * pow(earths / 10.0, mexp) * Skills.stat("giant_acc") * world.acc_mul()
 	var gained := mdot * delta
 	earths += gained
+	_evaporate(delta)
 	# Широкая кормовая зона расталкивает газ медленнее: щель открывается позже.
 	var torque := GameData.GIANT_TORQUE * earths / 100.0 / Skills.stat("giant_reach")
 	disk.step(delta, orbit, width, h, gained * GameData.GIANT_EAT, torque)
@@ -390,7 +398,8 @@ func _process(delta: float) -> void:
 	kick = Vector2.ZERO
 	if input.length() > 0.05:
 		vel += (input.rotated(_cam_ang) * speed - vel).limit_length(thrust * delta)
-	vel *= exp(-GAS_DRAG * gk * delta)
+	# В дыре газа нет: и трения о него нет, гигант скользит дальше.
+	vel *= exp(-GAS_DRAG * gk * in_gas() * delta)
 	vel = vel.limit_length(MAX_V)
 	var was := pos
 	pos += vel * delta
@@ -436,9 +445,97 @@ func _process(delta: float) -> void:
 
 ## Сколько масс Земли за секунду дал бы газ плотности s сейчас: мерка для сгустков.
 func clump_gain(s: float) -> float:
-	var gk := clampf(gas / gas_total, 0.0, 1.0)
 	var mexp := 2.0 / 3.0 + Skills.stat("giant_runaway") / 3.0
-	return GameData.GIANT_ACC * clampf(s, 0.1, 1.5) * maxf(gk, 0.3) * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")
+	return GameData.GIANT_ACC * clampf(s, 0.1, 1.5) * maxf(gas_k(), 0.3) * pow(earths / 10.0, mexp) * Skills.stat("giant_acc")
+
+
+## Сколько газа ещё в диске вне дыры. Дыра съедает диск изнутри, поэтому
+## снаружи газ тает медленнее, чем раньше по всему диску (OUTER_FADE).
+func gas_k() -> float:
+	var gk := clampf(gas / gas_total, 0.0, 1.0)
+	return 1.0 - GameData.OUTER_FADE * (1.0 - gk)
+
+
+## Радиус дыры у звезды сейчас. Открывается на доле HOLE_START этапа (горячему
+## раньше), край идёт наружу и к концу газа доходит до HOLE_END_R. «Долгий диск»
+## растягивает газ — и дыра ползёт медленнее сама.
+func hole_r() -> float:
+	var t := 1.0 - clampf(gas / gas_total, 0.0, 1.0)
+	var t0: float = GameData.HOLE_START_HOT if _flavor() == "giant_hot" else GameData.HOLE_START
+	if t <= t0:
+		return 0.0
+	var f := (t - t0) / (1.0 - t0)
+	return lerpf(GameData.HOLE_R0, GameData.HOLE_END_R, f)
+
+
+## 0 — гигант в дыре (газа нет), 1 — в газе. Переход по мягкому краю.
+func in_gas(r := -1.0) -> float:
+	if hole <= 0.0:
+		return 1.0
+	if r < 0.0:
+		r = orbit
+	return smoothstep(hole - 300.0, hole + 300.0, r)
+
+
+## Насколько близко к кромке дыры: 1 — на самой кромке (пылевая ловушка).
+func on_rim(r: float) -> float:
+	if hole <= 0.0:
+		return 0.0
+	var d := r - hole
+	return smoothstep(-200.0, 150.0, d) * (1.0 - smoothstep(GameData.HOLE_RIM * 0.7, GameData.HOLE_RIM * 1.2, d))
+
+
+## Лёд на кромке за снеговой линией испаряется на прямом свету звезды и
+## обогащает газ: ледяному гиганту ×1,5, льду и титану ×1,3.
+func rim_gas_k() -> float:
+	if orbit < GameData.SNOW_LINE:
+		return 1.0
+	var k := 0.0
+	if _flavor() == "giant_ice":
+		k = 0.5
+	elif GameState.body_type() in ["ice", "titan"]:
+		k = 0.3
+	return 1.0 + k * on_rim(orbit)
+
+
+func _flavor() -> String:
+	return str(GameState.giant.get("flavor", "giant_cold"))
+
+
+## Множитель сдувания по оболочке: рыхлая ледяная сдувается легче, дымка
+## сажи и серы поглощает свет высоко, раздутая жаром — легче всех.
+func evap_mul() -> float:
+	var k := 1.0
+	match _flavor():
+		"giant_hot":
+			k *= 1.3
+		"giant_ice":
+			k *= 1.2
+		"giant_dark":
+			k *= 0.8
+	match GameState.body_type():
+		"ice", "titan":
+			k *= 1.1 if _flavor() != "giant_ice" else 1.0
+		"carbon", "venus":
+			k *= 0.85 if _flavor() != "giant_dark" else 1.0
+	return k
+
+
+## Звезда сдувает оболочку ближе EVAP_R. Поле держит ионизированный поток.
+## Сдувается только газ: ниже массы ядра не опустишься.
+func _evaporate(delta: float) -> void:
+	evap = 0.0
+	evap_held = 0.0
+	if orbit >= GameData.EVAP_R or envelope < 0.6:
+		return
+	var x := 1.3 * pow(3600.0 / orbit, 2.0) * smoothstep(GameData.EVAP_R, GameData.EVAP_FULL, orbit) * evap_mul()
+	var field: float = GameState.giant_field()
+	var raw := GameData.EVAP_K * GameData.GIANT_ACC * pow(earths / 10.0, 2.0 / 3.0) * x
+	evap = raw * (1.0 - field)
+	evap_held = field
+	var floor_m := core_m() * 1.05
+	var lost := minf(evap * delta, maxf(earths - floor_m, 0.0))
+	earths -= lost
 
 
 ## Подвести камеру к событию: loc — в системе гиганта, k — насколько ближе.
@@ -532,7 +629,11 @@ func _update_view(delta: float) -> void:
 	body.zoom = camera.zoom.x
 	body.set_look(str(GameState.giant.get("flavor", "giant_cold")), 1.0 - smoothstep(GameData.HOT_ORBIT - 300.0, GameData.HOT_ORBIT + 900.0, orbit))
 	var gk := clampf(gas / gas_total, 0.0, 1.0)
-	disk.set_view(orbit, h, gk, 0.3 + 0.5 * clampf(earths / 300.0, 0.0, 1.0), ang)
+	disk.set_view(orbit, h, gas_k(), 0.3 + 0.5 * clampf(earths / 300.0, 0.0, 1.0), ang)
+	disk.set_hole(hole, clampf((hole - GameData.HOLE_R0) / 700.0, 0.0, 1.0))
+	body.evap_k = clampf(evap / (GameData.GIANT_ACC * pow(earths / 10.0, 2.0 / 3.0) * 1.6), 0.0, 1.0)
+	var look: Array = GameData.GIANT_LOOK.get(_flavor(), GameData.GIANT_LOOK["giant_cold"])
+	body.wind_tint = (look[0] as Color).lerp(Color(0.85, 0.85, 0.88), 0.45)
 
 
 func save() -> void:

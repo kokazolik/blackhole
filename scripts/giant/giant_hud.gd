@@ -258,7 +258,15 @@ func _process(delta: float) -> void:
 	var e: float = stage.earths
 	_mass.text = "%s масс Земли · %s массы Юпитера" % [_fmt(e), String.num(e / GameData.JUPITER_EARTHS, 2)]
 	var field: float = GameState.giant_field()
-	_field.text = "Магнитное поле %d%%" % roundi(field * 100.0)
+	# Близко к звезде: она сдувает оболочку, поле держит. Видно, кто сильнее.
+	var ev: float = stage.evap
+	if ev > 0.01:
+		var net: float = stage.mdot - ev
+		_field.text = "Магнитное поле %d%% · звезда сдувает %s M⊕/с" % [roundi(field * 100.0), String.num(ev, 2 if ev < 1.0 else 1).replace(".", ",")]
+		_field.add_theme_color_override("font_color", Color(1.0, 0.55, 0.42) if net < 0.0 else Color(0.62, 0.95, 0.78).lerp(UiTheme.TEXT_DIM, clampf(ev / maxf(stage.mdot, 0.01), 0.0, 1.0)))
+	else:
+		_field.text = "Магнитное поле %d%%" % roundi(field * 100.0)
+		_field.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 	var left: float = maxf(stage.gas, 0.0)
 	_gas_label.text = "газ диска рассеется через %d:%02d" % [int(left) / 60, int(left) % 60]
 	_class.text = _class_text(e, stage.orbit)
@@ -363,6 +371,15 @@ func _draw_map() -> void:
 	_map.draw_rect(Rect2(0, top, hot_x, h), Color(1.0, 0.4, 0.2, 0.12))
 	var snow_x := (GameData.SNOW_LINE - lo) / (hi - lo) * s.x
 	_map.draw_line(Vector2(snow_x, top), Vector2(snow_x, top + h), Color(0.6, 0.85, 1.0, 0.45), 1.5)
+	# Дыра у звезды: газа нет, на карте — тёмная зона и светлый край.
+	var hole: float = stage.hole
+	if hole > lo:
+		var hx := clampf((hole - lo) / (hi - lo), 0.0, 1.0) * s.x
+		_map.draw_rect(Rect2(0, top, hx, h), Color(0.0, 0.0, 0.02, 0.45))
+		_map.draw_line(Vector2(hx, top), Vector2(hx, top + h), Color(1.0, 0.86, 0.66, 0.7), 1.5)
+	# Зона, где звезда сдувает оболочку.
+	var ev_x := (GameData.EVAP_R - lo) / (hi - lo) * s.x
+	_map.draw_rect(Rect2(hot_x, top, maxf(ev_x - hot_x, 0.0), h), Color(1.0, 0.5, 0.3, 0.05))
 	var pts := PackedVector2Array()
 	var n: int = disk.sigma.size()
 	var col_w := s.x / n

@@ -328,8 +328,34 @@ func _spawn_random(anywhere: bool) -> void:
 		# Новые приходят из-за края экрана: с окраин или по орбите издалека.
 		var g: float = stage.ang
 		a = g + (1.0 if _rng.randf() < 0.5 else -1.0) * _rng.randf_range(0.5, 1.2)
+	# Диск тает изнутри: в дыре тел не рождается, а кромка — пылевая ловушка,
+	# камешки и тела копятся там (вдвое чаще, если кромка недалеко от тебя).
+	var hole: float = stage.hole
+	var rim := false
+	if hole > 0.0:
+		var near_rim := absf(orb - hole) < SPAWN_BAND
+		if _rng.randf() < (0.5 if near_rim else 0.2):
+			r = hole + _rng.randf_range(100.0, GameData.HOLE_RIM)
+			rim = true
+		elif r < hole + 100.0:
+			r = hole + 100.0 + (hi - hole - 100.0) * sqrt(_rng.randf()) if hi > hole + 200.0 else hole + _rng.randf_range(100.0, GameData.HOLE_RIM)
+			rim = r < hole + GameData.HOLE_RIM
 	var kind := _pick_kind(r)
-	_add_body(kind, r, a, _material_at(r))
+	var b := _add_body(kind, r, a, _rim_mat(r) if rim else _material_at(r))
+	if rim:
+		b["rim"] = true
+
+
+## Вещество тела на кромке: у горячего звезда прогрела кромку — лава;
+## углеродные зёрна переживают свет звезды — у тёмного и углеродного их вдвое больше.
+func _rim_mat(r: float) -> String:
+	var f := _flavor()
+	var type := GameState.body_type()
+	if f == "giant_hot" and _rng.randf() < 0.5:
+		return "lava"
+	if (f == "giant_dark" or type == "carbon") and _rng.randf() < 0.5:
+		return "carbon"
+	return _material_at(r)
 
 
 func _add_body(kind: String, r: float, a: float, mat: String, m := -1.0) -> Dictionary:
@@ -764,9 +790,8 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		b.r = float(b.r) + float(b.vr) * delta
 		b.vr = float(b.vr) * exp(-RADIAL_DRAG * delta)
 	if b.kind == "rival":
-		# Соперник тоже пьёт газ и растёт, пока газ есть.
-		var gk: float = clampf(stage.gas / stage.gas_total, 0.0, 1.0)
-		b.m = float(b.m) * (1.0 + 0.0006 * gk * delta)
+		# Соперник пьёт тот же газ диска, что и ты, и роет свою щель.
+		_rival_drink(b, delta)
 		_rival_feed(b)
 	# У звезды тело не исчезает, а сгорает на глазах (автор): накаляется,
 	# тает, с него сдувает хвост пара и дыма. Время — по веществу.
@@ -1480,6 +1505,9 @@ func _reward(b: Dictionary, gain: float, how := "tear", more := "") -> void:
 	if how == "hit":
 		# Целым врезалось: обломков-хондр меньше, чем при разрыве.
 		ch = ch / 2
+	if b.get("rim", false) and ch > 0:
+		# С кромки дыры, из пылевой ловушки: хондр больше (хондриту — вдвое).
+		ch = ceili(float(ch) * (2.0 if type == "chondrite" else 1.5))
 	if ch > 0:
 		GameState.add_chondrules(ch, stage.body.position)
 		extra += " · хондры +%d" % ch
@@ -1675,6 +1703,35 @@ func _danger_soft(b: Dictionary, delta: float, gpos: Vector2, h: float) -> void:
 
 
 ## Соперник глотает мелочь у себя под боком.
+## Сосед пьёт газ диска по той же формуле, что и ты (× RIVAL_ACC и класс
+## мира): в густом газе растёт быстро, в своей выпитой щели — почти никак.
+## Его приливы раздвигают газ — в диске видна тёмная полоса. Странники
+## проходят сквозь диск и газ не пьют. Считается раз в 0,25 с.
+const DRINK_BY := {"icegiant": 0.4, "saturn": 0.9, "puff": 0.7, "soot": 1.0, "dense": 1.5, "hotnep": 0.6}
+
+
+func _rival_drink(b: Dictionary, delta: float) -> void:
+	if b.has("cruise") or b.state != "free" or b.get("sucked", false):
+		return
+	b["drink_t"] = float(b.get("drink_t", 0.0)) + delta
+	if float(b.drink_t) < 0.25:
+		return
+	var dt: float = b.drink_t
+	b.drink_t = 0.0
+	var r: float = b.r
+	if r < GameData.GIANT_DISK.x or r > GameData.GIANT_DISK.y:
+		return
+	var m: float = b.m
+	var hb := 2.2 * GameData.giant_body_r(m)
+	var width := 1.6 * hb
+	var disk = stage.disk
+	var feed: float = disk.feed(r, width)
+	var k: float = GameData.RIVAL_ACC * float(DRINK_BY.get(str(b.get("cls", "")), 1.0))
+	var gain: float = GameData.GIANT_ACC * feed * stage.gas_k() * pow(m / 10.0, 2.0 / 3.0) * k * dt
+	b.m = m + gain
+	disk.step(dt, r, width, hb, gain * GameData.GIANT_EAT, GameData.GIANT_TORQUE * m / 100.0, false)
+
+
 func _rival_feed(rv: Dictionary) -> void:
 	var p := pos_of(rv)
 	var bh := hill_of(rv) * 1.4
