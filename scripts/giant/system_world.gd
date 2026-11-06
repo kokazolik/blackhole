@@ -277,7 +277,10 @@ func _pick_kind(r: float) -> String:
 	var w := {"rubble": 0.24, "planetesimal": 0.22, "binary": 0.08, "irondwarf": 0.03, "icedwarf": 0.0,
 		"embryo": 0.16, "superearth": 0.08, "minineptune": 0.03, "comet": 0.0}
 	if r > GameData.SNOW_LINE:
-		w["comet"] = 0.18 * (2.2 if f == "giant_ice" else 1.0)
+		# Комет с хвостом на гиганте нет (автор): за снеговой линией вместо них
+		# ледяные глыбы — у ледяного гиганта их вдвое больше.
+		w["comet"] = 0.0
+		w["rubble"] = 0.24 + 0.1 * (2.2 if f == "giant_ice" else 1.0)
 		w["minineptune"] = 0.07 * (1.8 if f == "giant_ice" else 1.0)
 		w["icedwarf"] = 0.08 * (2.0 if f == "giant_ice" else 1.0)
 		w["irondwarf"] = 0.0

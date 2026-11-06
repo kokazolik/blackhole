@@ -147,6 +147,8 @@ func _ready() -> void:
 	star.scale = Vector2.ONE * STAR_SCALE
 	add_child(star)
 	star.get_child(0).visible = false  # тёмное кольцо короны на светлом газе лишнее
+	# Звезда здесь огромна на экране: дешёвые выборки (лаг у звезды, автор).
+	star._body_mat.set_shader_parameter("lite", true)
 	clumps = GasClumps.new()
 	clumps.stage = self
 	add_child(clumps)

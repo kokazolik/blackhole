@@ -11,6 +11,9 @@ shader_type canvas_item;
 uniform float strength = 0.0;  // сколько газа уходит, 0..1
 uniform float field = 0.3;     // магнитное поле 0..1
 uniform float pr = 0.16;       // радиус планеты в долях половины квада
+// Квад обрезан: к звезде за шаром пусто, рисуем только хвостовую сторону.
+uniform vec2 uv_off = vec2(-1.0, -1.0);
+uniform vec2 uv_scale = vec2(2.0, 2.0);
 uniform vec3 tint : source_color = vec3(0.8, 0.78, 0.74);
 
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
@@ -20,7 +23,7 @@ float fbm(vec2 p) {
 }
 
 void fragment() {
-	vec2 p = (UV - 0.5) * 2.0;
+	vec2 p = UV * uv_scale + uv_off;
 	vec2 q = p / pr;                 // в радиусах планеты
 	float r = length(q);
 	// Под шаром ничего не видно: шар рисуется сверху, но край пусть тает сам.

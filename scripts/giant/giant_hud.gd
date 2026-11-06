@@ -507,6 +507,9 @@ func _draw_names() -> void:
 		var top := sp - Vector2(0.0, maxf(rad, 3.0) + 8.0)
 		top.x = clampf(top.x, 88.0, vp.x - 88.0)
 		var box := Rect2(top - Vector2(80.0, 34.0), Vector2(160.0, 34.0))
+		# Подпись не лезет на шкалу газа и строку «сейчас» вверху экрана.
+		if box.position.y < 128.0:
+			continue
 		var clash := false
 		for u in used:
 			if u.intersects(box):

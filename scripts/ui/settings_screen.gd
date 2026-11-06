@@ -73,6 +73,7 @@ func _ready() -> void:
 	_toggle(rows, "Стрелки к телам", "Куда лететь, когда тело за краем экрана (гигант)", "show_marks")
 	_toggle(rows, "Подписи событий", "Короткие пояснения, что сейчас случилось", "captions")
 	_toggle(rows, "Не гасить экран", "Телефон не уснёт посреди игры", "keep_awake")
+	_toggle(rows, "Кнопка скриншота", "Кружок у правого края: снимок экрана в галерею (Pictures/DustToBlackhole)", "shot_button")
 	_toggle(rows, "Счётчик кадров", "Сколько кадров в секунду — в левом верхнем углу", "fps_counter")
 
 	var sep := Control.new()

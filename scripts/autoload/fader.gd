@@ -73,6 +73,19 @@ func set_fps_counter(on: bool) -> void:
 		_fps.visible = on
 
 
+## Кнопка скриншота (настройка). Под затемнением перехода, над игрой.
+var _shot: ShotButton
+
+
+func set_shot_button(on: bool) -> void:
+	if on and _shot == null:
+		_shot = ShotButton.new()
+		add_child(_shot)
+		move_child(_shot, 0)
+	if _shot != null:
+		_shot.visible = on
+
+
 func _process(_delta: float) -> void:
 	if _fps != null and _fps.visible:
 		_fps.text = "%d кадр/с" % Engine.get_frames_per_second()

@@ -15,6 +15,9 @@ uniform float rotation_speed = 0.02;
 uniform float prominence_amount = 0.8;
 uniform float ray_amount = 0.3;   // вблизи прямые лучи читаются как швы, поэтому слабые и мягкие
 uniform float boil_amount = 0.08;      // сила «кипения» поверхности
+// Звезда во весь экран (этап гиганта): бикубические выборки и процедурные
+// протуберанцы на сотнях тысяч пикселей тормозят телефон — берём простые.
+uniform bool lite = false;
 
 uniform sampler2D surface_tex : filter_linear, repeat_enable;
 uniform sampler2D noise_tex : filter_linear, repeat_enable;
@@ -123,12 +126,17 @@ vec3 surface(vec2 p, float r) {
 	float z = sqrt(max(1.0 - r * r, 0.0));
 	vec3 sp = rotate_y(vec3(p, z), TIME * rotation_speed);
 	vec2 uv = vec2(atan(sp.x, sp.z) / TAU + 0.5, 0.5 - asin(clamp(sp.y, -1.0, 1.0)) / PI);
-	vec4 s = texture_bicubic(surface_tex, uv);
+	vec4 s = lite ? texture(surface_tex, uv) : texture_bicubic(surface_tex, uv);
 
 	float heat = s.r * HEAT_RANGE + HEAT_MIN;
 	// Кипение: медленно плывущая рябь яркости поверх запечённых гранул.
-	float boil = nz(uv * vec2(16.0, 8.0) + vec2(TIME * 0.01, TIME * 0.013)) - 0.5;
-	boil += 0.5 * (nz(uv * vec2(32.0, 16.0) - vec2(TIME * 0.017, TIME * 0.009)) - 0.5);
+	float boil;
+	if (lite) {
+		boil = texture(noise_tex, uv * vec2(16.0, 8.0) + vec2(TIME * 0.01, TIME * 0.013)).r - 0.5;
+	} else {
+		boil = nz(uv * vec2(16.0, 8.0) + vec2(TIME * 0.01, TIME * 0.013)) - 0.5;
+		boil += 0.5 * (nz(uv * vec2(32.0, 16.0) - vec2(TIME * 0.017, TIME * 0.009)) - 0.5);
+	}
 	heat += boil * boil_amount * 2.0;
 	// Пульсация вспышек.
 	float pulse = 0.7 + 0.3 * sin(TIME * 1.5 + s.b * 20.0);
@@ -168,10 +176,12 @@ void fragment() {
 	if (edge > 0.0 && edge < 0.6 + 0.6 * spot) {
 		vec2 dir = normalize(p);
 		vec3 q = vec3(dir * 3.0, edge * 2.5 - TIME * 0.06);
-		vec3 warp = vec3(fbm(q + vec3(0.0, 0.0, TIME * 0.05), 2), fbm(q + vec3(5.2, 1.3, 0.0), 2), 0.0);
-		float strands = fbm(vec3(dir * 5.0, edge * 6.0) + warp * 3.5, 3);
+		vec3 warp = lite ? vec3(texture(noise_tex, q.xy * 0.2 + vec2(q.z * 0.1, TIME * 0.01)).r, texture(noise_tex, q.xy * 0.2 + vec2(0.37, q.z * 0.1)).r, 0.0)
+			: vec3(fbm(q + vec3(0.0, 0.0, TIME * 0.05), 2), fbm(q + vec3(5.2, 1.3, 0.0), 2), 0.0);
+		float strands = lite ? texture(noise_tex, dir * 0.9 + vec2(edge * 1.2, 0.0) + warp.xy * 0.6).r * 1.6
+			: fbm(vec3(dir * 5.0, edge * 6.0) + warp * 3.5, 3);
 		float filament = pow(1.0 - abs(sin(strands * 7.0)), 4.0);
-		float region = max(smoothstep(0.3, 0.6, noise(vec3(dir * 2.5, 9.0 + TIME * 0.02))), spot);
+		float region = max(smoothstep(0.3, 0.6, lite ? texture(noise_tex, dir * 0.45 + vec2(TIME * 0.003, 0.61)).r : noise(vec3(dir * 2.5, 9.0 + TIME * 0.02))), spot);
 		// Во время вспышки выброс плазмы поднимается выше и светит ярче.
 		prom = filament * region * exp(-edge * (8.0 - 5.0 * spot)) * smoothstep(0.0, 0.03, edge) * prominence_amount * (1.0 + 2.5 * spot);
 	}

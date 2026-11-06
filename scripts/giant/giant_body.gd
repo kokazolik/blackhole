@@ -340,8 +340,12 @@ func _update_wind(delta: float) -> void:
 	if not _wind.visible:
 		return
 	var half := outer_r() * WIND_REACH
-	_wind.size = Vector2(half, half) * 2.0
-	_wind.position = -_wind.size * 0.5
+	# Слева (к звезде) только гало у шара: квад от -1,5 радиуса, а не от -9.
+	var x0 := -1.5 / WIND_REACH
+	_wind.size = Vector2(half * (1.0 - x0), half * 2.0)
+	_wind.position = Vector2(half * x0, -half)
+	_wind_mat.set_shader_parameter("uv_off", Vector2(x0, -1.0))
+	_wind_mat.set_shader_parameter("uv_scale", Vector2(1.0 - x0, 2.0))
 	_wind_mat.set_shader_parameter("strength", _wind_shown * fade)
 	_wind_mat.set_shader_parameter("field", field)
 	_wind_mat.set_shader_parameter("tint", wind_tint)

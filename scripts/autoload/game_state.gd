@@ -42,6 +42,7 @@ var show_marks := true     # стрелки к телам за краем экр
 var captions := true       # подписи о событиях (каждая и так один раз за игру)
 var fps_counter := false   # счётчик кадров в углу
 var keep_awake := true     # экран не гаснет, пока игра открыта
+var shot_button := true    # кнопка скриншота под правым большим пальцем
 var heal_pool := 0.0  # отколотая масса, которая ещё прирастёт обратно (не сохраняется)
 var tips_seen: Array = []  # какие явления Звездочёт уже показал по ходу игры
 var tree_view: Array = []  # где игрок оставил камеру книги: [x, y, масштаб] точки в центре
@@ -512,7 +513,7 @@ func save_game() -> void:
 		"tips_seen": tips_seen,
 		"settings": {"fps": fps_max, "vibration": vibration, "names": show_names,
 			"marks": show_marks, "captions": captions, "fps_counter": fps_counter,
-			"keep_awake": keep_awake},
+			"keep_awake": keep_awake, "shot_button": shot_button},
 		"tree_view": tree_view,
 		"planet_time": planet_time,
 		"melted": is_melted,
@@ -565,6 +566,7 @@ func load_game() -> void:
 	captions = bool(st.get("captions", true))
 	fps_counter = bool(st.get("fps_counter", false))
 	keep_awake = bool(st.get("keep_awake", true))
+	shot_button = bool(st.get("shot_button", true))
 	tree_view = Array(data.get("tree_view", []))
 	planet_time = float(data.get("planet_time", 0.0))
 	is_melted = bool(data.get("melted", false))
@@ -614,6 +616,7 @@ func apply_fps() -> void:
 	Engine.max_fps = fps_max
 	DisplayServer.screen_set_keep_on(keep_awake)
 	Fader.call_deferred("set_fps_counter", fps_counter)
+	Fader.call_deferred("set_shot_button", shot_button)
 
 
 ## Толчок телефона — только если игрок не выключил вибрацию.
