@@ -28,8 +28,11 @@ extends Node2D
 ## sink(масса, кусок ли, точка, размер, src).
 
 const DT_MAX := 1.0 / 90.0
-const MAX_CELLS := 420
-const MAX_GRAINS := 900
+const MAX_CELLS := 260
+const MAX_GRAINS := 420
+const MAX_BODY_CELLS := 26     # больше ячеек на тело — дорого считать швы (лаг при 2–3 расколах)
+const HEX := [Vector2(1, 0), Vector2(0.5, 0.866), Vector2(-0.5, 0.866), Vector2(-1, 0), Vector2(-0.5, -0.866), Vector2(0.5, -0.866)]
+const STRESS_ITERS := 10      # итераций сетки пружин за кадр (решение тёплое, с прошлого кадра)
 const MAX_CHUNKS := 64        # кусков больше — мелочь уже не дробится, а рассыпается пылью
 const FATIGUE := 0.62        # шов под нагрузкой выше этой доли прочности копит усталость
 const FATIGUE_K := 2.2
@@ -44,7 +47,8 @@ const IMPACT_K := 0.8        # скорость удара, что колет ш
 var prof := Vector3.ZERO
 var time_k := 1.0             # замедление времени движка (раскол виден глазом)
 const LIFE := 40.0           # кусок дольше этого не живёт: тонет с учётом массы
-const GRAIN_LIFE := 30.0
+const GRAIN_LIFE := 12.0
+const GRAIN_TS_MAX := 0.35     # пыль не летит своим ходом дольше этого: газ уносит её к планете
 
 var field: FracField
 var sources: Array = []
@@ -198,7 +202,7 @@ func spawn_body(o: Dictionary) -> Source:
 	src.coh = float(o.get("coh", src.mat["coh"]))
 	var pos: Vector2 = o.get("pos", Vector2.ZERO)
 	var vel: Vector2 = o.get("vel", Vector2.ZERO)
-	_budget(int(o.get("cells", 24)))
+	_budget(mini(int(o.get("cells", 24)), MAX_BODY_CELLS))
 	# Прилив, при котором тело начинает рваться: из точки разрыва или задан.
 	src.tide0 = field.tide(pos.normalized() * float(o.get("r_crit", pos.length())))
 	# Прочность шва на единицу длины: центральный шов круглого тела несёт
@@ -207,7 +211,9 @@ func spawn_body(o: Dictionary) -> Source:
 	src.vq = IMPACT_K * rad * sqrt(maxf(src.tide0, 1e-6))
 	# Нарезка: зёрна гуще вдоль линии на центр (там прилив и рвёт плитами)
 	# или у точки удара.
-	var n := clampi(int(round(float(o.get("cells", 24)) * float(src.mat["cells"]))), 3, 56)
+	# Несколько тел сразу — каждое режется крупнее: швов на всех меньше.
+	var crowd := 1.0 + 0.45 * sources.size()
+	var n := clampi(int(round(float(o.get("cells", 24)) * float(src.mat["cells"]) / crowd)), 3, MAX_BODY_CELLS)
 	var seeds: PackedVector2Array
 	if o.has("impact_at"):
 		seeds = FracGeom.seeds_impact(n, rad, o.impact_at, _rng)
@@ -248,9 +254,11 @@ func spawn_body(o: Dictionary) -> Source:
 		var worst := PackedFloat32Array()
 		worst.resize(nb)
 		var sum := 0.0
-		for k in 8:
-			ch.ang = a0 + PI * k / 8.0
-			var loads: PackedFloat32Array = _loads(ch, at, 160)[0]
+		# Четыре поворота, решение сетки тёплое (с прошлого поворота): раньше
+		# 8 × 160 итераций давали рывок в кадр раскола.
+		for k in 4:
+			ch.ang = a0 + PI * k / 4.0
+			var loads: PackedFloat32Array = _loads(ch, at, 60 if k == 0 else 30)[0]
 			var best := 0.0
 			for bi in nb:
 				var bd: Bond = ch.bonds[bi]
@@ -260,7 +268,7 @@ func spawn_body(o: Dictionary) -> Source:
 		ch.ang = a0
 		src.S0 = ch.size
 		if sum > 0.0:
-			src.sigma = sum / 8.0
+			src.sigma = sum / 4.0
 			for bi in nb:
 				var bd: Bond = ch.bonds[bi]
 				bd.s = bd.w * (0.5 * maxf(worst[bi], 1e-9) + 0.5 * src.sigma * maxf(bd.len, 0.01))
@@ -504,7 +512,7 @@ func _stress(delta: float) -> void:
 			continue
 		if ch.intact == 0:
 			continue
-		var lt := _loads(ch, ch.pos)
+		var lt := _loads(ch, ch.pos, STRESS_ITERS)
 		var loads: PackedFloat32Array = lt[0]
 		# Приливный момент: вытянутый кусок разворачивает вдоль линии на центр.
 		ch.w += float(lt[1]) / ch.inertia * delta
@@ -1213,8 +1221,11 @@ func _step_grains(delta: float) -> void:
 		var inflow := src.inflow * (1.0 + maxf(gt[i] - 4.0, 0.0) * 0.4) * gk[i]
 		for s in steps:
 			var a := field.accel(p, v)
-			var vg := field.gas_v(p, inflow)
-			var ts := ts0 / maxf(field.gas_rho(p), 0.02)
+			# Пыль — как пыль на первом этапе: газ быстро забирает её и несёт
+			# прямо в планету (автор: «песчинки улетают в разные стороны»).
+			# Своя скорость гаснет за долю секунды, дальше — сток к центру.
+			var vg := field.gas_v(p, inflow) + field.grain_fall(p)
+			var ts := minf(ts0 / maxf(field.gas_rho(p), 0.02), GRAIN_TS_MAX)
 			v += a * dt
 			v = vg + (v - vg) * exp(-dt / maxf(ts, 0.004))
 			p += v * dt
@@ -1464,6 +1475,9 @@ func _draw_dust() -> void:
 	_draw_bolides(px)
 	if gm.is_empty():
 		return
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
 	for i in gm.size():
 		if gm[i] < 0.0:
 			continue
@@ -1476,10 +1490,22 @@ func _draw_dust() -> void:
 		col.a = clampf(0.55 + 0.35 * gs[i] / maxf(2.0 * px, 0.01), 0.3, 0.95) * smoothstep(0.0, 0.15, gt[i] + 0.15)
 		if gr[i] == 1:
 			# Хондра: светлое округлое зерно с бликом со стороны звезды.
-			var hc: Color = col.lerp(Color(0.86, 0.82, 0.74) * field.shade(p), 0.55)
-			hc.a = col.a
-			_dust.draw_circle(p, s * 0.5, hc)
-		elif s > 2.2 * px:
-			_dust.draw_circle(p, s * 0.5, col)
+			col = Color(col.lerp(Color(0.86, 0.82, 0.74) * field.shade(p), 0.55), col.a)
+		# Вся пыль — одним вызовом (раньше по кругу на пылинку: сотни команд).
+		# Крупное и хондры — шестиугольником (на экране круглое), мелочь — квадратом.
+		var i0 := pts.size()
+		var hr := s * 0.5
+		if gr[i] == 1 or s > 2.2 * px:
+			pts.append(p)
+			cols.append(col)
+			for k in 6:
+				pts.append(p + HEX[k] * hr)
+				cols.append(col)
+			for k in 6:
+				idx.append_array([i0, i0 + 1 + k, i0 + 1 + (k + 1) % 6])
 		else:
-			_dust.draw_rect(Rect2(p - Vector2(s, s) * 0.5, Vector2(s, s)), col)
+			pts.append_array([p + Vector2(-hr, -hr), p + Vector2(hr, -hr), p + Vector2(hr, hr), p + Vector2(-hr, hr)])
+			cols.append_array([col, col, col, col])
+			idx.append_array([i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3])
+	if not idx.is_empty():
+		RenderingServer.canvas_item_add_triangle_array(_dust.get_canvas_item(), idx, pts, cols)

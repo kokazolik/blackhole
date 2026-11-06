@@ -21,6 +21,11 @@ func gas_v(_p: Vector2, _inflow: float) -> Vector2:
 	return Vector2.ZERO
 
 
+## Добавочный сток пыли к центру (пыль падает в тело, а не разлетается).
+func grain_fall(_p: Vector2) -> Vector2:
+	return Vector2.ZERO
+
+
 ## Плотность газа: 1 — обычный диск, в атмосфере во много раз больше.
 func gas_rho(_p: Vector2) -> float:
 	return 0.0

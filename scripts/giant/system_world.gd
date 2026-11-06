@@ -43,6 +43,9 @@ const CAPTURE := 0.42        # куски ниже этого — упали в 
 const EAT_RATIO := 0.1       # съесть можно тело легче этой доли твоей массы
 const MERGE_RATIO := 1.4     # соперника-гиганта — когда ты тяжелее во столько раз
 const SLING := 380.0         # пинок пращи, ед./с
+const SWIRL_DAMP := 2.6       # пойманное тело: газ гасит боковую скорость (в единицах задачи Хилла)
+const FALL_MIN := 0.22        # пойманное тело падает не медленнее этой доли круговой скорости
+const FALL_CAP := 0.75        # и не быстрее этой доли второй космической
 const RADIAL_DRAG := 0.12    # газ гасит радиальную скорость тел
 const DEBRIS_BASE := 1000000 # номера учёта обломков в частицах
 const N_BODIES := 170
@@ -770,7 +773,8 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		return true
 	match ro:
 		"food", "merge":
-			if d < (2.0 * h * reach if ro == "food" else h * 1.6 + rad_of(b)) and float(b.cd) <= 0.0:
+			if d < (2.0 * h * reach if ro == "food" else h * 1.6 + rad_of(b)) and float(b.cd) <= 0.0 \
+					and _slow_enough(b, d, h):
 				_capture(b, gpos, h, orbit)
 				if b.state == "gone":
 					return false
@@ -851,6 +855,14 @@ func _attract(b: Dictionary, delta: float, p: Vector2, gpos: Vector2, d: float, 
 	b.a = np.angle()
 
 
+## Ловится ли тело: медленнее второй космической на этом расстоянии (с
+## запасом на «Длинные руки»). Быстрое пролетает мимо по гиперболе.
+func _slow_enough(b: Dictionary, d: float, h: float) -> bool:
+	var g := 3.0 * pow(Skills.stat("giant_reach"), 3.0)
+	var vesc := sqrt(2.0 * g * h * h * h * HILL_W * HILL_W / maxf(d, h * 0.3))
+	return (_vel_of(b) - _player_vel()).length() < vesc * 1.15 * Skills.stat("giant_grab")
+
+
 ## Сколько разгона нужно для удара: плотные тела надо бить сильнее.
 func _impact_need() -> float:
 	return 1.0 / sqrt(Skills.stat("giant_impact"))
@@ -906,28 +918,31 @@ func _step_captured(b: Dictionary, delta: float, h: float) -> bool:
 	var steps := maxi(1, ceili(dt / 0.02))
 	var hh := dt / steps
 	var p: Vector4 = b.h
-	# Честно (автор: «тело не должно клеиться»): только тяготение гиганта и
-	# трение о его околопланетный диск (до ~1 Хилла) и атмосферу. Пролетел
-	# быстро мимо — тело уходит по гиперболе своей дорогой; зашло в диск
-	# медленно — газ гасит скорость относительно тебя, и оно ложится на орбиту.
+	# Пойман только медленный (_slow_enough): быстрый пролёт уходит по
+	# гиперболе и не клеится (0.99.56).
 	var q: float = b.get("q", 0.0)
-	var fr := 0.9 / (1.0 + q)
-	var ho := maxf(roche_h(b) * HANDOVER, contact_h(b) * 1.6) if _solid(b) else 0.0
 	var pl: Vector2 = (stage.vel as Vector2).rotated(-float(stage.ang)) / (h * HILL_W)
 	var pv := Vector2(pl.x, -pl.y)     # твоя скорость в единицах задачи
+	# Как галька и валун на ранних этапах (автор): пойманное тело тянется
+	# к тебе и падает, а не кружит. Тяготение разгоняет его к центру, газ
+	# твоей оболочки гасит боковую скорость (тело заходит дугой, без витков)
+	# и не даёт разогнаться до второй космической — отскочить оно не может.
+	# Тяжёлое (q ближе к 1) гасится медленнее: заходит шире.
+	var side_k := SWIRL_DAMP / (1.0 + 2.0 * q)
 	for k in steps:
 		p = GasParticles.hill_step(p, hh, g, 0.0)
-		var d := sqrt(p.x * p.x + p.y * p.y)
-		var vk := sqrt(g / maxf(d, 0.05)) * GAS_ROT
-		# Трение только в самом диске (ближе ~1 Хилла) и чуть сильнее у предела
-		# Роша, где газ плотнее. Снаружи — чистое тяготение: пролёт по гиперболе.
-		var fr2 := fr * smoothstep(1.0, 0.45, d) + (1.5 * smoothstep(ho * 1.4, ho * 1.05, d) if ho > 0.0 else 0.0)
-		# Орбит нет (автор): газ у тебя не кружит, а летит вместе с тобой и
-		# падает в тебя. Тело в нём теряет скорость относительно тебя и падает.
-		var gx := pv.x - p.x / maxf(d, 0.05) * vk * 0.3
-		var gy := pv.y - p.y / maxf(d, 0.05) * vk * 0.3
-		p.z -= (p.z - gx) * fr2 * hh
-		p.w -= (p.w - gy) * fr2 * hh
+		var d := maxf(sqrt(p.x * p.x + p.y * p.y), 0.05)
+		var n := Vector2(-p.x, -p.y) / d                 # к тебе
+		var rel := Vector2(p.z - pv.x, p.w - pv.y)
+		var vr := rel.dot(n)
+		var vt := rel - n * vr
+		vt *= exp(-side_k * hh)
+		var vesc := sqrt(2.0 * g / d)
+		# Уходить от тебя оно уже не может: газ разворачивает его к центру.
+		vr = clampf(vr, FALL_MIN * sqrt(g / d), FALL_CAP * vesc)
+		rel = n * vr + vt
+		p.z = pv.x + rel.x
+		p.w = pv.y + rel.y
 	b.h = p
 	var dist := sqrt(p.x * p.x + p.y * p.y)
 	var roche := roche_h(b)

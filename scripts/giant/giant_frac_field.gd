@@ -13,6 +13,7 @@ const ATM_TOP := 0.09        # верх атмосферы над облакам
 const ATM_H := 0.025         # шкала высот атмосферы, в радиусах
 const FALL_R := 1.75         # отсюда к облакам газ всё сильнее стекает внутрь
 const FALL_K := 0.9          # у облаков скорость стока — эта доля круговой
+const GRAIN_FALL := 0.55     # сток пыли раскола к центру, в долях круговой скорости
 const DIR := -1.0            # прямое вращение: угол убывает
 
 var world                    # system_world.gd
@@ -62,6 +63,14 @@ func gas_v(p: Vector2, inflow: float) -> Vector2:
 	var vr := -inflow * maxf(r - 0.9 * R, 0.0) - vk * (FALL_K * fall + 0.35 * a)
 	# Орбит нет (автор): газ не кружит вокруг гиганта, только падает в него.
 	return rh * (vr - vk * 0.3)
+
+
+## Пыль раскола падает в тебя, как пыль на первом этапе: прямо к центру,
+## тем быстрее, чем ближе (≈ круговая скорость у облаков).
+func grain_fall(p: Vector2) -> Vector2:
+	var r := maxf(p.length(), R * 0.5)
+	var vk := sqrt(GM / r)
+	return -p / r * vk * GRAIN_FALL
 
 
 func gas_rho(p: Vector2) -> float:
