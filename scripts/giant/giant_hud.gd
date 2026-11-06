@@ -25,6 +25,8 @@ var _cap_sub: Label
 var _toast: Label
 var _badge: Control
 var _pointer: Control
+var _leave: PanelContainer
+var _leave_text: Label
 var _shown := 0.0
 var _time := 0.0
 
@@ -109,6 +111,7 @@ func _ready() -> void:
 	_pointer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pointer.draw.connect(_draw_pointer)
 	add_child(_pointer)
+	_build_leave()
 
 	var tree := Button.new()
 	tree.icon = BOOK_ICON
@@ -267,6 +270,52 @@ func _process(delta: float) -> void:
 	_map.queue_redraw()
 
 
+## Плашка «ты покидаешь систему»: по центру, ниже заголовка, тёмное стекло
+## с тёплой рамкой, отсчёт до ухода (автор: «вернуться, иначе через 10 секунд»).
+func _build_leave() -> void:
+	_leave = PanelContainer.new()
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(0.05, 0.03, 0.03, 0.88)
+	st.set_border_width_all(1)
+	st.border_color = Color(1.0, 0.55, 0.4, 0.75)
+	st.set_corner_radius_all(10)
+	st.content_margin_left = 28
+	st.content_margin_right = 28
+	st.content_margin_top = 14
+	st.content_margin_bottom = 14
+	_leave.add_theme_stylebox_override("panel", st)
+	_leave.anchor_left = 0.5
+	_leave.anchor_right = 0.5
+	_leave.offset_left = -300
+	_leave.offset_right = 300
+	_leave.offset_top = 132
+	_leave.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_leave.visible = false
+	add_child(_leave)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_leave.add_child(box)
+	var head := _label(20, Color(1.0, 0.7, 0.55), UiTheme.FONT_HEAD)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	head.text = "Ты покидаешь систему"
+	box.add_child(head)
+	_leave_text = _label(16, UiTheme.TEXT, UiTheme.FONT_SEMI)
+	_leave_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_leave_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_leave_text)
+
+
+## left < 0 — плашку спрятать.
+func set_leave(left: float) -> void:
+	if _leave == null:
+		return
+	_leave.visible = left >= 0.0
+	if left >= 0.0:
+		_leave_text.text = "Газа здесь нет, звезда почти не держит. Вернись к диску, иначе через %d с улетишь в межзвёздную пустоту" % ceili(left)
+		_leave.modulate.a = 0.9 + 0.1 * sin(_time * 5.0)
+
+
 func _fmt(e: float) -> String:
 	return str(roundi(e)) if e >= 100.0 else String.num(e, 1)
 
@@ -336,7 +385,7 @@ func _draw_map() -> void:
 			var bc := Color(1.0, 0.4, 0.32, 0.95) if role == "danger" else (UiTheme.GOLD if role == "merge" else (Color(0.95, 0.88, 0.7, 0.6) if role == "food" else (Color(1.0, 0.62, 0.32, 0.85) if role == "big" else Color(0.7, 0.8, 0.95, 0.6))))
 			var by := top + h * (0.25 + 0.5 * fmod(float(b.seed), 1.0))
 			_map.draw_circle(Vector2(bx, by), 4.0 if b.kind in ["rival", "dwarf"] else 2.0, bc)
-	var px: float = (stage.orbit - lo) / (hi - lo) * s.x
+	var px: float = clampf((stage.orbit - lo) / (hi - lo), 0.0, 1.0) * s.x
 	_map.draw_line(Vector2(px, top - 4), Vector2(px, top + h + 2), UiTheme.GOLD, 2.5)
 	_map.draw_circle(Vector2(px, top - 4), 5.0, UiTheme.GOLD)
 	var f := UiTheme.FONT_TEXT

@@ -13,6 +13,7 @@ const PLANET_COLORS := {
 	"brown_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
 	"giant_swallowed": [Color(0.86, 0.72, 0.52), Color(0.56, 0.36, 0.26)],
 	"giant_chthonian": [Color(0.5, 0.42, 0.36), Color(0.3, 0.22, 0.18)],
+	"giant_rogue": [Color(0.42, 0.44, 0.52), Color(0.2, 0.2, 0.26)],
 	"giant_eaten_dwarf": [Color(0.8, 0.36, 0.24), Color(0.36, 0.1, 0.08)],
 	"super_earth": [Color(0.55, 0.62, 0.7), Color(0.3, 0.34, 0.4)],
 	"super_iron": [Color(0.62, 0.64, 0.7), Color(0.36, 0.38, 0.44)],
@@ -190,6 +191,10 @@ func _make_art() -> void:
 		# Погиб при сближении — на портрете твой гигант, своего флейвора.
 		if kind in ["giant_swallowed", "giant_eaten_dwarf"]:
 			look = GameData.GIANT_LOOK.get(str(GameState.giant.get("flavor", "giant_cold")), look)
+		elif kind == "giant_rogue":
+			# Сирота: свой гигант, но без звезды — только тусклый свет издалека.
+			var own: Array = GameData.GIANT_LOOK.get(str(GameState.giant.get("flavor", "giant_cold")), look)
+			look = [(own[0] as Color).darkened(0.45), (own[1] as Color).darkened(0.45), (own[2] as Color).darkened(0.3)]
 		if kind == "star_failed":
 			look = GameData.GIANT_LOOK["brown_dwarf"]
 		elif kind == "super_neptune":

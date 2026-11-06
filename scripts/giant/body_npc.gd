@@ -32,8 +32,8 @@ static func zone_of(b: Dictionary) -> Vector2:
 		"ice", "titan":
 			return Vector2(GameData.SNOW_LINE - 400.0, GameData.GIANT_DISK.y - 1500.0)
 		"metal", "rock", "lava", "venus":
-			return Vector2(GameData.HOT_ORBIT * 0.7, GameData.SNOW_LINE + 600.0)
-	return Vector2(GameData.HOT_ORBIT * 0.7, GameData.GIANT_DISK.y - 1500.0)
+			return Vector2(GameData.GIANT_ORBIT_MIN, GameData.SNOW_LINE + 600.0)
+	return Vector2(GameData.GIANT_ORBIT_MIN, GameData.GIANT_DISK.y - 1500.0)
 
 
 ## Шаг свободного тела: решить, куда плыть, и подправить дрейф.

@@ -30,6 +30,14 @@ const STICK := 5.0           # общая оболочка держит расх
 const SHAPE_W := 5.2         # частота основной моды оболочки, рад/с
 const SHAPE_Z := 0.32        # затухание
 const MAX_P := 900
+## Высасывание соседа, которого тебе можно съесть (role "merge", навык
+## «Пожиратель гигантов»): доля его газа в секунду при касании. Растёт с
+## близостью ∝ k², начинается с SUCK_FROM суммы радиусов.
+const SUCK := 0.2
+const SUCK_FROM := 2.6
+## Твой флейвор: горячий гигант раздут и пьёт жаднее, плотный — медленно,
+## но его ядро тяжелее и держит; ледяной рыхлый — быстрее.
+const SUCK_BY := {"giant_hot": 1.3, "giant_ice": 1.15, "giant_cold": 1.0, "giant_dark": 1.0, "giant_dense": 0.8}
 
 ## Оболочка по флейвору: податливость прилива (число Лява), время утопления
 ## ядра в общей оболочке, цвет струи. Плотный гигант (железное ядро, газ
@@ -270,6 +278,22 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 	_spring(sb, vb, _smooth(tb), delta)
 	b.sh = sb
 	b.shv = vb
+	# --- Высасывание: ты можешь съесть этого гиганта ---
+	# Не отталкиваешь его, а пьёшь: газ соседа течёт к тебе струёй, тем
+	# сильнее, чем ближе. Твой газ к нему не течёт. Останется голое ядро.
+	var edible: bool = b.kind == "rival" and world.role(b) == "merge"
+	if edible:
+		over1 = 0.0
+		var kk := smoothstep(SUCK_FROM, 0.9, d / (R1 + R2))
+		if kk > 0.0:
+			var rate := SUCK * kk * kk * float(SUCK_BY.get(_flavor(), 1.0)) * float(f2.soft) * (1.0 + Skills.stat("giant_merge") * 2.0)
+			var dm3 := minf(rate * m2 * delta, maxf(m2 - core_of(b), 0.0))
+			if dm3 > 0.0:
+				b.m = float(b.m) - dm3
+				stage.earths += dm3 * 0.95
+				stage.pay(dm3 * 0.95)
+				_emit(b, "it", rate * 0.5, p - n * minf(R2 * 0.95, d * 0.5), -n, gpos, p, delta, _col_of(b))
+				b["ce_heat"] = clampf(float(b.get("ce_heat", 0.0)) + kk * delta * 0.3, 0.0, 0.8)
 	# --- Перетекание через L1 ---
 	# Когда оболочки уже слились, полость теряет смысл: газ течёт только от
 	# лёгкого к тяжёлому (общая оболочка садится на тяжёлое ядро).
@@ -311,7 +335,8 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 		var dv := dvn + dvt
 		stage.kick += dv.rotated(-ang) * (m2 / mt)
 		_push(b, -dv * (m1 / mt))
-		var ap := PRESS * o * o
+		# Съедаемого не отталкиваешь: давление только между равными.
+		var ap := 0.0 if edible else PRESS * o * o
 		stage.kick -= n.rotated(-ang) * ap * (m2 / mt) * delta
 		_push(b, n * ap * (m1 / mt) * delta)
 		# Трение греет общую оболочку.
@@ -320,7 +345,7 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 		_heat_me(n.rotated(-ang), fr * delta * 0.6, 1.4)
 	# Общая оболочка: центры ближе суммы радиусов — ядро лёгкого тонет.
 	var sph := (R1 + R2 - d) / minf(R1, R2)
-	if sph > -0.03:
+	if sph > -0.03 and not edible:
 		var light2 := m1 < m2
 		var ce_t2 := float((f1 if light2 else f2).ce)
 		if light2:
@@ -356,7 +381,16 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 ## Ядро соседа: несколько масс Земли камня и льда под его газом.
 func core_of(b: Dictionary) -> float:
 	if not b.has("core_m"):
-		b["core_m"] = clampf(float(b.m) * 0.04, 8.0, 30.0)
+		var k := 1.0
+		# Тяжёлое ядро (мир «dense») — втрое больше, рыхлый мир — почти без ядра.
+		match str(b.get("cls", "")):
+			"dense":
+				k = 3.0
+			"puff":
+				k = 0.5
+			"icegiant":
+				k = 1.6
+		b["core_m"] = clampf(float(b.m) * 0.04 * k, 2.0, 60.0)
 	return float(b.core_m)
 
 
@@ -365,9 +399,11 @@ func core_of(b: Dictionary) -> float:
 func _strip_rival(b: Dictionary) -> void:
 	b.kind = "superearth"
 	b["core"] = true
-	b.mat = "rock"
+	# Ядро того, из чего сосед собирался: ледяной гигант — лёд, сажевый —
+	# углерод, тяжёлое ядро — железо, горячий нептун — лава, остальные — камень.
+	b.mat = {"icegiant": "ice", "soot": "carbon", "dense": "metal", "hotnep": "lava"}.get(str(b.get("cls", "")), "rock")
 	b.m = core_of(b)
-	for k in ["sh", "shv", "ce", "ce_heat", "m0", "touched", "v"]:
+	for k in ["sh", "shv", "ce", "ce_heat", "m0", "touched", "v", "cruise", "puff", "cls", "rings"]:
 		b.erase(k)
 
 

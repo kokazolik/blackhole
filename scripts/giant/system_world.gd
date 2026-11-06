@@ -46,6 +46,14 @@ const SLING := 380.0         # пинок пращи, ед./с
 const SWIRL_DAMP := 2.6       # пойманное тело: газ гасит боковую скорость (в единицах задачи Хилла)
 const FALL_MIN := 0.22        # пойманное тело падает не медленнее этой доли круговой скорости
 const FALL_CAP := 0.75        # и не быстрее этой доли второй космической
+const BURN_START := 1.3      # ближе стольких радиусов звезды тело начинает гореть
+## Сколько секунд горит у звезды: лёд испаряется быстро, железо держится.
+const BURN_T := {"ice": 2.6, "carbon": 3.6, "rock": 4.4, "lava": 3.2, "metal": 6.0}
+## Хвост горящего тела: пар льда голубовато-белый, камень — оранжевый дым,
+## железо — светлые капли расплава, углерод — тёмно-красная сажа.
+const BURN_TAIL := {"ice": Color(0.8, 0.9, 1.0), "carbon": Color(0.55, 0.22, 0.12),
+	"rock": Color(1.0, 0.55, 0.25), "lava": Color(1.0, 0.5, 0.2), "metal": Color(1.0, 0.85, 0.6)}
+const SPAWN_BAND := 11000.0  # тела рождаются не дальше этого от твоей орбиты
 const RADIAL_DRAG := 0.12    # газ гасит радиальную скорость тел
 const DEBRIS_BASE := 1000000 # номера учёта обломков в частицах
 const N_BODIES := 170
@@ -309,6 +317,11 @@ func _pick_kind(r: float) -> String:
 func _spawn_random(anywhere: bool) -> void:
 	var lo := GameData.GIANT_ORBIT_MIN * 1.05
 	var hi := GameData.GIANT_DISK.y - 400.0
+	# Поле вдвое шире (0.99.64), а тел столько же: рождаются в полосе ±BAND
+	# вокруг тебя, чтобы рядом было так же людно, как на старом диске.
+	var orb: float = stage.orbit
+	lo = maxf(lo, orb - SPAWN_BAND)
+	hi = minf(hi, orb + SPAWN_BAND)
 	var r := lerpf(lo, hi, sqrt(_rng.randf()))
 	var a := _rng.randf() * TAU
 	if not anywhere:
@@ -617,7 +630,9 @@ func role(b: Dictionary) -> String:
 	if b.kind == "dwarf":
 		return "danger"
 	if b.kind == "rival":
-		if e >= m * (MERGE_RATIO - Skills.stat("giant_merge")):
+		# Какого гиганта можно высосать, решает навык «Пожиратель гигантов»:
+		# без него — до 0,6 твоей массы, на максимуме — даже чуть тяжелее тебя.
+		if m <= e * Skills.stat("giant_eat"):
 			return "merge"
 		return "danger" if m > e else "sling"
 	if m <= eat_limit():
@@ -750,14 +765,30 @@ func _step_body(b: Dictionary, delta: float, orbit: float, gpos: Vector2, h: flo
 		var gk: float = clampf(stage.gas / stage.gas_total, 0.0, 1.0)
 		b.m = float(b.m) * (1.0 + 0.0006 * gk * delta)
 		_rival_feed(b)
-	# Ушло за пределы: упало в звезду или выброшено из системы.
-	if float(b.r) < GameData.GIANT_STAR_R * 1.08:
-		_into_star(b)
-		return false
-	if float(b.r) > GameData.GIANT_DISK.y + 600.0 and not b.has("cruise"):
-		if b.kind != "comet":
+	# У звезды тело не исчезает, а сгорает на глазах (автор): накаляется,
+	# тает, с него сдувает хвост пара и дыма. Время — по веществу.
+	if float(b.r) < GameData.GIANT_STAR_R * BURN_START or b.has("burn"):
+		if not _burn_step(b, delta):
+			return false
+	# За край диска тела не улетают в никуда: звезда тянет назад, газа там нет —
+	# разворачиваются к диску. Только брошенное твоей пращой уходит из системы
+	# (далеко за краем, за экраном) — за это награда.
+	var edge := GameData.GIANT_DISK.y
+	if float(b.r) > edge - 400.0 and not b.has("cruise"):
+		if b.get("slung", false) and float(b.r) > edge + 4000.0:
 			_ejected(b)
-		return false
+			return false
+		if not b.get("slung", false):
+			b.vr = minf(float(b.vr), 0.0) - 40.0 * delta
+			var v0: Vector2 = b.get("v", Vector2.ZERO)
+			var out := pos_of(b).normalized()
+			if v0.dot(out) > 0.0:
+				b["v"] = v0 - out * v0.dot(out) * minf(1.0, 3.0 * delta)
+			var dr0: Vector2 = b.get("drift", Vector2.ZERO)
+			if dr0.dot(out) > 0.0:
+				b["drift"] = dr0 - out * dr0.dot(out)
+			if b.has("goal") and (b.goal as Vector2).length() > edge - 1500.0:
+				b.erase("goal")
 	var p2 := pos_of(b)
 	var d := p2.distance_to(gpos)
 	var ro := role(b)
@@ -1522,6 +1553,27 @@ func _into_star(b: Dictionary) -> void:
 		stage.hud.toast("%s упал в звезду после твоей пращи: пыль и хондры" % _cap(str(KINDS[b.kind]["name"])), Color(1.0, 0.8, 0.55))
 
 
+## Горит у звезды: накал и таяние за BURN_T, тело оседает к фотосфере.
+## Возвращает false, когда сгорело.
+func _burn_step(b: Dictionary, delta: float) -> bool:
+	var t: float = BURN_T.get(str(b.mat), 4.0)
+	if b.kind == "comet":
+		t = 2.0
+	elif b.kind in ["rival", "dwarf"]:
+		t = 9.0     # газовый гигант испаряется долго
+	b["burn"] = float(b.get("burn", 0.0)) + delta / t
+	var sr := GameData.GIANT_STAR_R
+	# Звезда тянет вниз, у фотосферы тело уже не опускается: тает там.
+	b.vr = minf(float(b.vr), -70.0)
+	b.r = maxf(float(b.r), sr * 1.04)
+	if b.has("v"):
+		b.v = (b.v as Vector2) * exp(-1.5 * delta)
+	if float(b.burn) >= 1.0:
+		_into_star(b)
+		return false
+	return true
+
+
 func _ejected(b: Dictionary) -> void:
 	if b.get("slung", false):
 		var ch := 2 + int(float(b.m) * 0.5)
@@ -1938,6 +1990,11 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 		heat = stretch * 0.5
 	if b.mat == "lava":
 		heat = maxf(heat, 0.0)
+	var burn := float(b.get("burn", 0.0))
+	if burn > 0.0:
+		heat = maxf(heat, smoothstep(0.0, 0.6, burn))
+		rad *= 1.0 - 0.8 * smoothstep(0.2, 1.0, burn)
+		_draw_burn_tail(b, p, rad, burn, px)
 	var view: String = info["view"]
 	if b.get("core", false):
 		view = "embryo"
@@ -2036,7 +2093,7 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("light_dir", light)
 			m.set_shader_parameter("spin", float(b.spin) * 3.0)
 			m.set_shader_parameter("tilt", 0.1)
-			m.set_shader_parameter("heat", 1.0 if b.kind == "dwarf" else (0.6 if float(b.r) < GameData.HOT_ORBIT or b.get("cls", "") == "hotnep" else 0.0))
+			m.set_shader_parameter("heat", maxf(burn, 1.0 if b.kind == "dwarf" else (0.6 if float(b.r) < GameData.HOT_ORBIT or b.get("cls", "") == "hotnep" else 0.0)))
 			# Рядом с тобой форму ведёт GiantEncounter: прилив, полость, касание.
 			var deform: bool = b.has("sh")
 			m.set_shader_parameter("deform", deform)
@@ -2062,6 +2119,38 @@ func _draw_body(b: Dictionary, p: Vector2, rad: float, px: float, gpos: Vector2,
 			m.set_shader_parameter("bend", 0.25)
 			var mv := _view("moon") as MoonView
 			mv.put(p, maxf(rad * 0.6, 1.5 * px), 1, light, fmod(float(b.seed), 10.0), float(b.spin), 1.0, heat, 1.0)
+
+
+## Хвост горящего у звезды тела: сдувает прочь от звезды светом и ветром.
+## Одна вытянутая капля с прозрачным концом, цвет — по веществу.
+func _draw_burn_tail(b: Dictionary, p: Vector2, rad: float, burn: float, px: float) -> void:
+	var away := p.normalized()
+	var side := away.orthogonal()
+	var c: Color = BURN_TAIL.get(str(b.mat), Color(1.0, 0.6, 0.3))
+	if b.kind in ["rival", "dwarf"]:
+		c = Color(1.0, 0.7, 0.45)
+	var k := smoothstep(0.0, 0.3, burn) * (1.0 - smoothstep(0.85, 1.0, burn))
+	var w := maxf(rad, 2.0 * px)
+	var L := w * (4.0 + 10.0 * burn)
+	# Лента из треугольников (не многоугольник: изгиб не ломает разбиение).
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	var n := 10
+	for i in n + 1:
+		var f := float(i) / n
+		var wid := w * (1.0 + 1.4 * f) * (1.0 - f * f) + 0.5 * px
+		var sway := sin(_time * 2.0 + f * 4.0 + float(b.seed)) * w * 0.3 * f
+		var mid := p + away * L * f + side * sway
+		pts.append(mid + side * wid)
+		pts.append(mid - side * wid)
+		var cc := Color(c, 0.55 * k * (1.0 - f))
+		cols.append(cc)
+		cols.append(cc)
+		if i < n:
+			var j := i * 2
+			idx.append_array([j, j + 1, j + 2, j + 1, j + 3, j + 2])
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), idx, pts, cols)
 
 
 ## Своя луна тела: маленький шар на орбите вокруг него.

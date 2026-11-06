@@ -30,13 +30,15 @@ func _ready() -> void:
 ## выметен её магнитным полем.
 func setup(saved: Array) -> void:
 	sigma.resize(GameData.GIANT_BINS)
-	if saved.size() == GameData.GIANT_BINS:
-		for i in sigma.size():
+	for i in sigma.size():
+		var r := bin_r(i)
+		# Внешний диск тоньше и сходит на нет к краю.
+		sigma[i] = GameData.SNOW_LINE / maxf(r, 2200.0) * smoothstep(700.0, 1600.0, r) \
+			* (1.0 - 0.6 * smoothstep(GameData.GIANT_DISK.y * 0.7, GameData.GIANT_DISK.y, r))
+	# Сохранение: своё как было; старое (200 столбцов, диск до 14 000) — внутренняя часть.
+	if saved.size() == GameData.GIANT_BINS or saved.size() == GameData.GIANT_BINS_OLD:
+		for i in saved.size():
 			sigma[i] = float(saved[i])
-	else:
-		for i in sigma.size():
-			var r := bin_r(i)
-			sigma[i] = GameData.SNOW_LINE / maxf(r, 2200.0) * smoothstep(700.0, 1600.0, r)
 	_img = Image.create_from_data(sigma.size(), 1, false, Image.FORMAT_RF, sigma.to_byte_array())
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter("sigma_tex", _tex)

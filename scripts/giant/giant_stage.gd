@@ -57,6 +57,7 @@ var _save_t := 0.0
 var _time := 0.0
 var _said := {}
 var _ending_t := -1.0
+var _leave_t := 0.0         # секунд за краем диска
 var _forced_end := ""        # конец не по массе: тебя поглотило крупное тело
 var envelope := 1.0          # сколько газа осело на ядро (0 — голое ядро, 1 — сплошные облака)
 var _core_type := "silicate"
@@ -393,12 +394,16 @@ func _process(delta: float) -> void:
 	vel = vel.limit_length(MAX_V)
 	var was := pos
 	pos += vel * delta
-	# Звезда и край диска: дальше не пускает (у звезды жарко, за краем пусто).
-	var rr := clampf(pos.length(), GameData.GIANT_ORBIT_MIN, GameData.GIANT_DISK.y - 600.0)
+	# К звезде ближе не пускает (жар и корона). Наружу — можно: за краем
+	# диска газа нет, и через GIANT_LEAVE_T секунд гигант уходит из системы.
+	var rr := maxf(pos.length(), GameData.GIANT_ORBIT_MIN)
 	if absf(rr - pos.length()) > 0.01:
 		var nrm := pos.normalized()
 		pos = nrm * rr
 		vel -= nrm * vel.dot(nrm)
+	_step_leave(delta)
+	if _ending_t >= 0.0:
+		return
 	orbit = pos.length()
 	ang = pos.angle()
 	# Газ лежит в диске, а не едет с гигантом: сдвигаем частицы навстречу.
@@ -552,6 +557,22 @@ func save() -> void:
 ## Масса ядра: с чем пришёл на этап (старые сохранения — критическая масса).
 func core_m() -> float:
 	return float(GameState.giant.get("core_m", GameData.GIANT_EARTHS))
+
+
+## За краем диска: отсчёт до ухода из системы (плашка в HUD). Вернулся —
+## отсчёт сброшен. Звезда чуть тянет назад: чем дальше, тем слабее.
+func _step_leave(delta: float) -> void:
+	var edge := GameData.GIANT_DISK.y
+	if orbit > edge:
+		_leave_t += delta
+		vel -= pos.normalized() * 60.0 * delta
+		hud.set_leave(GameData.GIANT_LEAVE_T - _leave_t)
+		if _leave_t >= GameData.GIANT_LEAVE_T:
+			hud.set_leave(-1.0)
+			swallowed("giant_rogue")
+	elif _leave_t > 0.0:
+		_leave_t = 0.0
+		hud.set_leave(-1.0)
 
 
 ## Доля газа в массе: всё, что сверх ядра.
