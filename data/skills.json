@@ -563,7 +563,15 @@
 				6
 			],
 			"title": "Плотная сердцевина",
-			"icon": "value_1"
+			"icon": "value_1",
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				15,
+				20
+			]
 		},
 		{
 			"id": "well",
@@ -591,7 +599,10 @@
 			"icon": "swarm",
 			"requires_level": 1,
 			"requires_all": true,
-			"legendary": true
+			"legendary": true,
+			"chondrules": [
+				10
+			]
 		},
 		{
 			"id": "combo",
@@ -723,7 +734,13 @@
 				"swarm": 1.0
 			},
 			"icon": "swarm",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				5,
+				8
+			]
 		},
 		{
 			"id": "planetesimal",
@@ -834,7 +851,12 @@
 			},
 			"icon": "mat_metal",
 			"requires_level": 2,
-			"path": "metal"
+			"path": "metal",
+			"chondrules": [
+				0,
+				8,
+				12
+			]
 		},
 		{
 			"id": "aff_ice",
@@ -900,7 +922,12 @@
 			},
 			"icon": "mat_ice",
 			"requires_level": 2,
-			"path": "ice"
+			"path": "ice",
+			"chondrules": [
+				0,
+				8,
+				12
+			]
 		},
 		{
 			"id": "aff_silicate",
@@ -966,7 +993,12 @@
 			},
 			"icon": "mat_silicate",
 			"requires_level": 2,
-			"path": "silicate"
+			"path": "silicate",
+			"chondrules": [
+				0,
+				8,
+				12
+			]
 		},
 		{
 			"id": "aff_carbon",
@@ -1032,7 +1064,12 @@
 			},
 			"icon": "mat_carbon",
 			"requires_level": 2,
-			"path": "carbon"
+			"path": "carbon",
+			"chondrules": [
+				0,
+				8,
+				12
+			]
 		},
 		{
 			"id": "boulder_root",
@@ -1136,7 +1173,15 @@
 				"grip": 0.01
 			},
 			"icon": "grip",
-			"requires_level": 2
+			"requires_level": 2,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				5,
+				8
+			]
 		},
 		{
 			"id": "b_rubble",
@@ -1197,7 +1242,15 @@
 			"effects": {
 				"thrust": 0.06
 			},
-			"icon": "thrust"
+			"icon": "thrust",
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				5,
+				8
+			]
 		},
 		{
 			"id": "b_breakthrough",
@@ -1223,7 +1276,7 @@
 			"icon": "drift_1",
 			"legendary": true,
 			"chondrules": [
-				20
+				15
 			]
 		},
 		{
@@ -1270,7 +1323,7 @@
 			"icon": "armor",
 			"legendary": true,
 			"chondrules": [
-				40
+				25
 			]
 		},
 		{
@@ -1314,9 +1367,9 @@
 			"icon": "pulse",
 			"ability": true,
 			"chondrules": [
+				8,
 				15,
-				30,
-				50
+				25
 			]
 		},
 		{
@@ -1341,8 +1394,8 @@
 			"icon": "halo",
 			"ability": true,
 			"chondrules": [
-				25,
-				60
+				12,
+				30
 			]
 		},
 		{
@@ -1388,7 +1441,7 @@
 			"icon": "gravity_1",
 			"legendary": true,
 			"chondrules": [
-				40
+				30
 			]
 		},
 		{
@@ -1409,7 +1462,15 @@
 			"effects": {
 				"debris_value": 0.2
 			},
-			"icon": "value_1"
+			"icon": "value_1",
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				5,
+				8
+			]
 		},
 		{
 			"id": "b_collapse",
@@ -1435,7 +1496,7 @@
 			"icon": "swarm",
 			"legendary": true,
 			"chondrules": [
-				40
+				25
 			]
 		},
 		{
@@ -1476,7 +1537,19 @@
 				11.5
 			],
 			"title": "Тяжёлое ядро",
-			"icon": "value_1"
+			"icon": "value_1",
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				6,
+				8,
+				10,
+				12
+			]
 		},
 		{
 			"id": "p_speed",
@@ -1580,7 +1653,14 @@
 				"calm": 0.12
 			},
 			"icon": "drift_1",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				10
+			]
 		},
 		{
 			"id": "t_still",
@@ -1603,9 +1683,9 @@
 			"icon": "pulse",
 			"ability": true,
 			"chondrules": [
-				20,
-				40,
-				70
+				12,
+				25,
+				40
 			]
 		},
 		{
@@ -1629,7 +1709,7 @@
 			"icon": "swarm",
 			"legendary": true,
 			"chondrules": [
-				40
+				25
 			],
 			"requires_level": 1
 		},
@@ -1672,7 +1752,14 @@
 				"heal": 0.1
 			},
 			"icon": "toughness",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				10
+			]
 		},
 		{
 			"id": "t_iron_core",
@@ -1695,7 +1782,7 @@
 			"icon": "geode",
 			"legendary": true,
 			"chondrules": [
-				40
+				25
 			],
 			"requires_level": 1,
 			"requires_melt": true
@@ -1739,7 +1826,14 @@
 				"sling": 0.15
 			},
 			"icon": "thrust",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				10
+			]
 		},
 		{
 			"id": "t_oligarch",
@@ -1762,7 +1856,7 @@
 			"icon": "chain",
 			"legendary": true,
 			"chondrules": [
-				40
+				25
 			],
 			"requires_level": 1
 		},
@@ -1805,7 +1899,14 @@
 				"flow_catch": 0.1
 			},
 			"icon": "pebble_root",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				10
+			]
 		},
 		{
 			"id": "t_moon",
@@ -1829,8 +1930,8 @@
 			"icon": "halo",
 			"ability": true,
 			"chondrules": [
-				25,
-				60
+				15,
+				35
 			]
 		},
 		{
@@ -1854,7 +1955,7 @@
 			"icon": "combo",
 			"ability": true,
 			"chondrules": [
-				40
+				25
 			]
 		},
 		{
@@ -1895,7 +1996,19 @@
 			"effects": {
 				"value_mul": 0.15
 			},
-			"icon": "value_1"
+			"icon": "value_1",
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				6,
+				9,
+				12,
+				15
+			]
 		},
 		{
 			"id": "t_maneuver",
@@ -1998,7 +2111,14 @@
 				"rival_rate": 0.1
 			},
 			"icon": "chain",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				14
+			]
 		},
 		{
 			"id": "e_devour",
@@ -2021,7 +2141,7 @@
 			"icon": "swarm",
 			"legendary": true,
 			"chondrules": [
-				30
+				45
 			],
 			"requires_level": 1
 		},
@@ -2064,7 +2184,14 @@
 				"magma_feed": 0.25
 			},
 			"icon": "pulse",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				14
+			]
 		},
 		{
 			"id": "e_impacts",
@@ -2087,7 +2214,7 @@
 			"icon": "combo",
 			"legendary": true,
 			"chondrules": [
-				30
+				45
 			],
 			"requires_level": 1
 		},
@@ -2130,7 +2257,14 @@
 				"hill": 0.08
 			},
 			"icon": "halo",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				14
+			]
 		},
 		{
 			"id": "e_trap",
@@ -2154,7 +2288,7 @@
 			"icon": "pebble_root",
 			"legendary": true,
 			"chondrules": [
-				30
+				45
 			],
 			"requires_level": 1
 		},
@@ -2197,7 +2331,19 @@
 				"value_mul": 0.15
 			},
 			"icon": "geode",
-			"requires_level": 3
+			"requires_level": 3,
+			"chondrules": [
+				0,
+				0,
+				0,
+				0,
+				0,
+				6,
+				9,
+				12,
+				16,
+				20
+			]
 		},
 		{
 			"id": "e_brake",
@@ -2300,7 +2446,13 @@
 			"effects": {
 				"water": 0.03
 			},
-			"icon": "mat_ice"
+			"icon": "mat_ice",
+			"chondrules": [
+				0,
+				0,
+				0,
+				12
+			]
 		},
 		{
 			"id": "o_heart",
@@ -2321,7 +2473,13 @@
 			"effects": {
 				"core_boost": 0.03
 			},
-			"icon": "geode"
+			"icon": "geode",
+			"chondrules": [
+				0,
+				0,
+				0,
+				12
+			]
 		},
 		{
 			"id": "o_calm",
@@ -2539,7 +2697,15 @@
 			},
 			"icon": "geode",
 			"requires_level": 3,
-			"requires_route": "giant"
+			"requires_route": "giant",
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				15,
+				20
+			]
 		},
 		{
 			"id": "g_breath",
@@ -2563,7 +2729,7 @@
 			"icon": "swarm",
 			"legendary": true,
 			"chondrules": [
-				30
+				35
 			],
 			"requires_level": 3,
 			"requires_route": "giant"
@@ -2589,7 +2755,7 @@
 			"icon": "combo",
 			"legendary": true,
 			"chondrules": [
-				40
+				60
 			],
 			"requires_level": 1,
 			"requires_route": "giant"
@@ -2679,7 +2845,13 @@
 			},
 			"requires_route": "giant",
 			"requires_stage": 5,
-			"icon": "chain"
+			"icon": "chain",
+			"chondrules": [
+				0,
+				0,
+				15,
+				25
+			]
 		},
 		{
 			"id": "g_guard",
@@ -2701,7 +2873,13 @@
 			},
 			"requires_route": "giant",
 			"requires_stage": 5,
-			"icon": "armor"
+			"icon": "armor",
+			"chondrules": [
+				0,
+				0,
+				0,
+				12
+			]
 		},
 		{
 			"id": "g_speed",
@@ -2723,7 +2901,13 @@
 			},
 			"requires_route": "giant",
 			"requires_stage": 5,
-			"icon": "drift_1"
+			"icon": "drift_1",
+			"chondrules": [
+				0,
+				0,
+				0,
+				12
+			]
 		},
 		{
 			"id": "g_impact",
@@ -2766,7 +2950,12 @@
 			},
 			"requires_route": "giant",
 			"requires_stage": 5,
-			"icon": "mat_carbon"
+			"icon": "mat_carbon",
+			"chondrules": [
+				0,
+				0,
+				20
+			]
 		},
 		{
 			"id": "g_bodies",
@@ -2788,7 +2977,12 @@
 			},
 			"requires_route": "giant",
 			"requires_stage": 5,
-			"icon": "swarm"
+			"icon": "swarm",
+			"chondrules": [
+				0,
+				0,
+				15
+			]
 		},
 		{
 			"id": "g_merge",
@@ -2812,7 +3006,7 @@
 			"icon": "chain",
 			"legendary": true,
 			"chondrules": [
-				40
+				50
 			],
 			"requires_level": 2
 		},
@@ -2840,7 +3034,7 @@
 			"icon": "gravity_1",
 			"legendary": true,
 			"chondrules": [
-				40
+				50
 			],
 			"requires_level": 2
 		},
@@ -2968,7 +3162,14 @@
 				"cloud_acc": 0.12
 			},
 			"icon": "pebble_swarm",
-			"requires_route": "giant"
+			"requires_route": "giant",
+			"chondrules": [
+				0,
+				0,
+				0,
+				10,
+				15
+			]
 		},
 		{
 			"id": "c_burst",
@@ -2990,7 +3191,11 @@
 				"cloud_burst": 0.3
 			},
 			"icon": "geode",
-			"requires_route": "giant"
+			"requires_route": "giant",
+			"chondrules": [
+				0,
+				12
+			]
 		}
 	]
 }

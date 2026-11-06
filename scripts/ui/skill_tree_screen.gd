@@ -1005,6 +1005,16 @@ func _draw_node(id: String, p: Vector2, k: float) -> void:
 				_g.draw_circle(dp, 3.2, col.lightened(0.3))
 			else:
 				_g.draw_arc(dp, 2.8, 0.0, TAU, 12, Color(col, 0.5), 1.0, true)
+	# Следующий уровень просит хондры: бусина с ценой у правого верхнего края.
+	var c2 := Skills.cost2(id)
+	if c2 > 0 and not Skills.is_maxed(id):
+		var bp := Vector2(r * 0.74, -r * 0.74)
+		UiTheme.draw_chondrule(_g, bp, 7.0)
+		var bf: Font = UiTheme.FONT_NUMBERS
+		var bt := str(c2)
+		_g.draw_string_outline(bf, bp + Vector2(10.0, 6.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, 4, Color(0.03, 0.02, 0.06, 0.85))
+		_g.draw_string(bf, bp + Vector2(10.0, 6.0), bt, HORIZONTAL_ALIGNMENT_LEFT, -1, 17,
+			UiTheme.CHONDRULE if GameState.chondrules >= c2 else Color(UiTheme.CHONDRULE, 0.55))
 	if blocked:
 		# Путь закрыт: тёмная вуаль, перечёркнутый круг и замочек.
 		_g.draw_circle(Vector2.ZERO, r, Color(0.03, 0.02, 0.06, 0.55))

@@ -72,6 +72,8 @@ var _p_life := PackedFloat32Array()
 var _p_max := PackedFloat32Array()
 var _p_col := PackedColorArray()
 var _p_size := PackedFloat32Array()
+var _sink_p := Vector2.ZERO   # где ты (для угасания струи у края облаков)
+var _sink_r := 1.0
 var _p_to := []                        # к кому падает (тело или {} — к тебе), null — ни к кому
 var _rng := RandomNumberGenerator.new()
 var _emit_acc := {}
@@ -545,11 +547,22 @@ func _emit(b: Dictionary, who: String, rate: float, at: Vector2, n: Vector2, acc
 	var key := str(b.id) + who
 	var acc := float(_emit_acc.get(key, 0.0)) + clampf(rate * 1500.0, 6.0, 90.0) * delta
 	var don_v: Vector2 = world._player_vel() if who == "me" else world._vel_of(b)
+	var acc_v: Vector2 = world._vel_of(b) if who == "me" else world._player_vel()
 	var R := don_p.distance_to(at)
+	# Струя из точки Лагранжа несёт момент: относительное движение тел и
+	# вращение принимающего уводят её вбок, и газ входит в облака по касательной
+	# у края, закручиваясь дугой, а не падает отвесно в центр диска.
+	var acc_m: float = float(b.m) if who == "me" else float(stage.earths)
+	var d := maxf(acc_p.distance_to(at), 1.0)
+	var t_dir := n.orthogonal()
+	var side := signf(t_dir.dot(don_v - acc_v))
+	if side == 0.0:
+		side = 1.0
+	var vt := 0.42 * sqrt(G * acc_m / d) * side
 	while acc >= 1.0:
 		acc -= 1.0
 		var j := n.orthogonal() * _rng.randfn(0.0, 0.06) * R
-		var v := don_v + n * _rng.randf_range(40.0, 110.0) + n.orthogonal() * _rng.randfn(0.0, 25.0)
+		var v := don_v + n * _rng.randf_range(40.0, 110.0) + t_dir * (vt * _rng.randf_range(0.8, 1.15) + _rng.randfn(0.0, 25.0))
 		_add_p(at + j, v, _rng.randf_range(3.0, 6.0), c, _rng.randf_range(0.04, 0.08) * R, b if who == "me" else {})
 	_emit_acc[key] = acc
 
@@ -567,6 +580,8 @@ func _add_p(p: Vector2, v: Vector2, life: float, c: Color, size: float, to) -> v
 
 
 func _step_particles(delta: float, gpos: Vector2, R1: float) -> void:
+	_sink_p = gpos
+	_sink_r = R1
 	if _p_pos.is_empty():
 		return
 	var big := []
@@ -582,13 +597,14 @@ func _step_particles(delta: float, gpos: Vector2, R1: float) -> void:
 		var dg := gpos - p
 		var r2 := maxf(dg.length_squared(), R1 * R1 * 0.25)
 		v += dg / sqrt(r2) * G * float(stage.earths) / r2 * delta
-		if dg.length() < R1 * 0.9 and _p_life[i] < _p_max[i] - 0.3:
+		# Газ ныряет в облака у самого края: дальше его не видно.
+		if dg.length() < R1 * 1.0 and _p_life[i] < _p_max[i] - 0.3:
 			dead = true
 		for bb in big:
 			var dd: Vector2 = (bb[0] as Vector2) - p
 			var rr := maxf(dd.length_squared(), float(bb[2]) * float(bb[2]) * 0.25)
 			v += dd / sqrt(rr) * G * float(bb[1]) / rr * delta
-			if dd.length() < float(bb[2]) * 0.9 and _p_life[i] < _p_max[i] - 0.3:
+			if dd.length() < float(bb[2]) * 1.0 and _p_life[i] < _p_max[i] - 0.3:
 				dead = true
 		v *= exp(-0.15 * delta)
 		p += v * delta
@@ -681,10 +697,15 @@ func _draw() -> void:
 		var p := _p_pos[i]
 		var v := _p_vel[i]
 		var c := _p_col[i]
-		c.a = 0.55 * minf(k * 3.0, 1.0) * minf((1.0 - k) * 10.0 + 0.3, 1.0)
+		# Газ струи — не светится: тусклый, цвета донора, в тени своей стороны
+		# темнее; редеет, расплываясь, и тонет в облаках у края (последние
+		# 25% радиуса над облаками — угасает).
+		var depth := smoothstep(_sink_r * 1.0, _sink_r * 1.25, p.distance_to(_sink_p))
+		var r := _p_size[i] * (1.0 + 2.2 * (1.0 - k))
+		c = c.darkened(0.25)
+		c.a = 0.32 * minf(k * 3.0, 1.0) * minf((1.0 - k) * 10.0 + 0.3, 1.0) * depth / (1.0 + 0.8 * (1.0 - k))
 		var edge := c
 		edge.a = 0.0
-		var r := _p_size[i] * (1.0 + 1.5 * (1.0 - k))
 		# Вытянуто по скорости: газ течёт струёй, а не точками.
 		var ax := v.normalized() if v.length_squared() > 1.0 else Vector2.RIGHT
 		var stretch := clampf(v.length() / 300.0, 1.0, 3.0)
