@@ -9,7 +9,7 @@ extends Control
 ## Потом — плавный переход в меню.
 
 const SHADERS := [
-	"comet", "dust", "eddy", "embryo", "far_body", "frac", "gas_disk", "gas_giant",
+	"comet", "dust", "eddy", "embryo", "evap_wind", "far_body", "frac", "gas_disk", "gas_giant",
 	"giant_bake", "giant_cpd", "giant_map", "giant_planet", "giant_ring", "giant_rock",
 	"herald_rock", "herald_shadow", "herald_tile_bake", "impact_plume", "lit_grain",
 	"menu_bg", "moon", "nebula", "pebble", "pebble_body", "planetesimal",

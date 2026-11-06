@@ -66,7 +66,9 @@ func feed(r: float, width: float) -> float:
 
 
 ## Шаг газа: аккреция eaten (в единицах плотности) из зоны, прилив, вязкость.
-func step(delta: float, r: float, width: float, hill: float, eaten: float, torque: float) -> void:
+## visc = false: только выпить и раздвинуть газ (соседи), вязкость считает
+## один раз за кадр шаг игрока.
+func step(delta: float, r: float, width: float, hill: float, eaten: float, torque: float, visc := true) -> void:
 	var n := sigma.size()
 	var w := PackedFloat32Array()
 	w.resize(n)
@@ -93,6 +95,8 @@ func step(delta: float, r: float, width: float, hill: float, eaten: float, torqu
 		if se > 1e-6:
 			for i in n:
 				sigma[i] += moved * e[i] / se
+	if not visc:
+		return
 	# Вязкость: газ затекает в щель (явная схема, шаг заведомо устойчив).
 	var nu := minf(GameData.GIANT_VISC * 5.0 * delta, 0.45)
 	var prev := sigma[0]
@@ -100,6 +104,21 @@ func step(delta: float, r: float, width: float, hill: float, eaten: float, torqu
 		var cur := sigma[i]
 		sigma[i] = cur + nu * (prev - 2.0 * cur + sigma[i + 1])
 		prev = cur
+
+
+## Дыра у звезды (фотоиспарение): газ внутри радиуса hole гаснет за
+## HOLE_CLEAR секунд, на краю — мягкий переход в 0,6 ширины кромки.
+func clear_hole(delta: float, hole: float) -> void:
+	if hole <= GameData.GIANT_DISK.x:
+		return
+	var k := 1.0 - exp(-delta / GameData.HOLE_CLEAR)
+	var soft := 0.25 * GameData.HOLE_RIM
+	for i in sigma.size():
+		var r := bin_r(i)
+		if r > hole + soft:
+			break
+		var w := 1.0 - smoothstep(hole - soft, hole + soft, r)
+		sigma[i] = maxf(sigma[i] * (1.0 - k * w), 0.0)
 
 
 func _process(_delta: float) -> void:
@@ -112,6 +131,11 @@ func _process(_delta: float) -> void:
 	_mat.set_shader_parameter("zoom", camera.zoom.x)
 	_mat.set_shader_parameter("cam_rot", camera.global_rotation)
 	_mat.set_shader_parameter("flare", Star.flare)
+
+
+func set_hole(hole: float, rim_k: float) -> void:
+	_mat.set_shader_parameter("hole", hole)
+	_mat.set_shader_parameter("rim_k", rim_k)
 
 
 func set_view(rp: float, hill: float, gas: float, wake: float, gang := 0.0) -> void:

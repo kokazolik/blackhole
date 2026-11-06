@@ -20,6 +20,10 @@ uniform float snow_line = 6800.0;
 uniform float flare = 0.0;
 uniform float cam_rot = 0.0;    // камера поворачивается вместе с гигантом
 uniform float gang = 0.0;       // угол гиганта на орбите
+// Дыра фотоиспарения: внутри газа нет, край освещён звездой в лоб и
+// отбрасывает тень на диск за собой, на кромке пылевая ловушка.
+uniform float hole = 0.0;       // радиус дыры (0 — дыры нет)
+uniform float rim_k = 0.0;      // кромка проявляется плавно
 
 
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;
@@ -42,6 +46,13 @@ float flow_layer(float r, float th, float dom, float t, vec2 seed) {
 	float n = fbm(p);
 	n += 0.5 * fbm(p * vec2(2.4, 1.3) + vec2(n * 1.5, 0.0));
 	return n / 1.5;
+}
+
+// Край дыры не ровный круг: фронт рвётся неровно, языки газа.
+float noise_edge(float th, float r, float hole_r) {
+	float big = fbm(vec2(th * 2.2, hole_r * 0.0003)) - 0.5;
+	float fine = fbm(vec2(th * 11.0, r * 0.0015 + 7.0)) - 0.5;
+	return big * 420.0 + fine * 170.0;
 }
 
 void fragment() {
@@ -100,5 +111,37 @@ void fragment() {
 	float shade = 0.35 + 0.4 * clamp(dens, 0.0, 1.1);
 	vec3 c = col * light * shade + vec3(0.9, 0.72, 0.5) * wk * s * 0.22 + rim_col * rim * 0.1;
 	float alpha = clamp(0.07 + dens * 0.44 + wk * s * 0.15 + rim * 0.06, 0.0, 0.58) * smoothstep(0.0, 0.05, s + horse);
+
+	if (hole > 0.0) {
+		float dh = r - hole;
+		// Стенка: звезда светит в неё прямо, без пелены внутреннего диска.
+		// Тёплый свет рассеяния, узкий, рваный по краю — без свечения.
+		float edge = noise_edge(th, r, hole);
+		float de = dh - edge;
+		// Резкий подъём на самом краю и свет, гаснущий вглубь газа: звезде
+		// видна только тонкая кожа стенки, дальше её закрывает сама стенка.
+		float wall = smoothstep(-90.0, 30.0, de) * exp(-max(de, 0.0) / 380.0);
+		float clump = 0.55 + 0.75 * n;   // стенка клочковатая, не ровная дуга
+		float lit = wall * clump * smoothstep(0.0, 0.08, s) * rim_k;
+		vec3 wall_col = mix(vec3(1.0, 0.84, 0.62), vec3(1.0, 0.93, 0.82), smoothstep(0.9, 1.4, clump));
+		c = mix(c, wall_col * (0.7 + 0.3 * n), clamp(lit * 0.7, 0.0, 1.0));
+		alpha = max(alpha, lit * 0.42 * clamp(s * 2.5, 0.0, 1.0));
+		// За стенкой тень: раздутый край закрывает диск от звезды.
+		float shadow = smoothstep(150.0, 450.0, dh) * (1.0 - smoothstep(600.0, 3200.0, dh)) * rim_k;
+		c *= 1.0 - 0.25 * shadow;
+		// Кромка — пылевая ловушка: камешки сгущаются в тёмные прожилки.
+		float trap = exp(-pow((dh - 700.0) / 600.0, 2.0)) * rim_k;
+		float grit = smoothstep(0.45, 0.8, fbm(vec2(r * 0.02, th * rp * 0.004) + 3.0 * n));
+		c *= 1.0 - 0.25 * trap * grit;
+		// В самой дыре — редкий ионизированный ветер, уходящий наружу:
+		// бледно-розовый, как свечение водорода (Hα), еле видный.
+		if (dh < 0.0) {
+			float wind = fbm(vec2(r * 0.0016 - TIME * 0.05, th * 1.6));
+			float wa = 0.05 * smoothstep(0.35, 0.85, wind) * smoothstep(-6000.0, -300.0, dh) * rim_k
+				* smoothstep(disk_range.x, disk_range.x + 1500.0, r);
+			c = mix(c, vec3(0.85, 0.5, 0.55), smoothstep(0.0, 0.02, wa) * (1.0 - smoothstep(0.0, 0.05, alpha)));
+			alpha = max(alpha, wa);
+		}
+	}
 	COLOR = vec4(c, alpha);
 }

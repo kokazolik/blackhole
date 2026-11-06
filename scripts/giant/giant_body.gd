@@ -33,6 +33,13 @@ var _ring := ColorRect.new()
 var _ring_mat := ShaderMaterial.new()
 var _ring_shown := 0.0       # видимая плотность кольца: растёт плавно
 var zoom := 0.3
+# Звезда сдувает оболочку (giant_stage._evaporate): поток прочь от звезды.
+var evap_k := 0.0            # сколько уходит, 0..1 (для вида)
+var wind_tint := Color(0.8, 0.78, 0.74)
+var _wind := ColorRect.new()
+var _wind_mat := ShaderMaterial.new()
+var _wind_shown := 0.0
+const WIND_REACH := 9.0      # половина квада потока, в радиусах планеты
 var sigma_at: Callable       # плотность газа по смещению от орбиты в радиусах Хилла
 
 var _planet := ColorRect.new()
@@ -110,6 +117,13 @@ func _ready() -> void:
 	_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ring.visible = false
 	add_child(_ring)
+	_wind_mat.shader = preload("res://shaders/evap_wind.gdshader")
+	_wind_mat.set_shader_parameter("noise_tex", NoiseTex.get_tex())
+	_wind_mat.set_shader_parameter("pr", 1.0 / WIND_REACH)
+	_wind.material = _wind_mat
+	_wind.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wind.visible = false
+	add_child(_wind)
 	_planet.material = _planet_mat
 	_planet.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_planet)
@@ -248,7 +262,9 @@ func _process(delta: float) -> void:
 	var q := r * 2.0 / 0.72  # тело — BODY (0.36) ширины квада
 	_planet.size = Vector2(q, q)
 	_planet.position = -_planet.size * 0.5
-	_planet_mat.set_shader_parameter("aurora", field)
+	# Напор звёздного ветра поле держит — сияния у полюсов ярче.
+	_planet_mat.set_shader_parameter("aurora", clampf(field * (1.0 + 0.8 * _wind_shown), 0.0, 1.0))
+	_update_wind(delta)
 	_planet_mat.set_shader_parameter("envelope", envelope)
 	_update_young(r)
 	_core.visible = envelope < 0.5 or env_k < 0.35
@@ -316,6 +332,19 @@ func _process(delta: float) -> void:
 	for c in get_children():
 		if c.has_meta("moons"):
 			c.queue_redraw()
+
+
+func _update_wind(delta: float) -> void:
+	_wind_shown = lerpf(_wind_shown, evap_k, minf(delta * 1.5, 1.0))
+	_wind.visible = _wind_shown > 0.01 and env_k > 0.2
+	if not _wind.visible:
+		return
+	var half := outer_r() * WIND_REACH
+	_wind.size = Vector2(half, half) * 2.0
+	_wind.position = -_wind.size * 0.5
+	_wind_mat.set_shader_parameter("strength", _wind_shown * fade)
+	_wind_mat.set_shader_parameter("field", field)
+	_wind_mat.set_shader_parameter("tint", wind_tint)
 
 
 ## Новая луна собирается на глазах: из пыли своего диска или из захваченного тела.
