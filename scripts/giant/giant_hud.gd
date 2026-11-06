@@ -374,7 +374,8 @@ func _draw_map() -> void:
 	_map.draw_polyline(pts, Color(1.0, 0.8, 0.5, 0.85), 2.0, true)
 	# Тела диска на карте: еда тёплая, тяжелее тебя — красная.
 	var w = stage.world
-	if w != null:
+	# Тела на карте видны только с «Чутьём тяготения» второго уровня (автор).
+	if w != null and Skills.stat("giant_sense") >= 2.0:
 		for b in w.bodies:
 			var role: String = w.role(b)
 			if role == "food" and float(b.m) < 0.4:
@@ -393,6 +394,10 @@ func _draw_map() -> void:
 	_map.draw_string(f, Vector2(snow_x + 4, s.y - 2), "снеговая линия", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.85, 1.0, 0.8))
 
 
+const SENSE_R := 9000.0
+const SENSE_BY := {"giant_dense": 1.3, "giant_ice": 1.15, "giant_cold": 1.0, "giant_hot": 1.0, "giant_dark": 0.8}
+
+
 ## Стрелки к телам мира за краем экрана: еда, вихри, опасность.
 func _draw_world_marks() -> void:
 	var w = stage.world
@@ -402,8 +407,17 @@ func _draw_world_marks() -> void:
 	var cam: Camera2D = stage.camera
 	var zoom: float = cam.zoom.x
 	var center: Vector2 = cam.get_screen_center_position()
+	# Стрелки — навык «Чутьё тяготения» (автор): 1 — еда, слияние и таран
+	# в радиусе чутья (по флейвору: поле плотного гиганта чувствует дальше,
+	# сажа тёмного глушит), 2 — всё, включая угрозы, на любом расстоянии.
+	var sense := Skills.stat("giant_sense")
+	if sense < 1.0:
+		return
+	var range_u := SENSE_R * float(SENSE_BY.get(str(GameState.giant.get("flavor", "")), 1.0))
 	var used := []
 	for m in w.markers():
+		if sense < 2.0 and (m.get("danger", false) or ((m.p as Vector2) - stage.body.position).length() > range_u):
+			continue
 		var sp: Vector2 = ((m.p as Vector2) - center).rotated(-cam.rotation) * zoom + vp * 0.5
 		var margin := 48.0
 		if sp.x > margin and sp.x < vp.x - margin and sp.y > 140.0 and sp.y < vp.y - 120.0:

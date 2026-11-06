@@ -38,6 +38,10 @@ const SUCK_FROM := 2.6
 ## Твой флейвор: горячий гигант раздут и пьёт жаднее, плотный — медленно,
 ## но его ядро тяжелее и держит; ледяной рыхлый — быстрее.
 const SUCK_BY := {"giant_hot": 1.3, "giant_ice": 1.15, "giant_cold": 1.0, "giant_dark": 1.0, "giant_dense": 0.8}
+## Сосед легче этой доли твоей массы: его ядро рвётся приливом, пока газ ещё
+## течёт к тебе (автор). Горячий гигант раздут — тянет ядро раньше, плотный
+## держит своё газом крепче.
+const EARLY_Q := {"giant_hot": 0.42, "giant_ice": 0.36, "giant_cold": 0.33, "giant_dark": 0.33, "giant_dense": 0.25}
 
 ## Оболочка по флейвору: податливость прилива (число Лява), время утопления
 ## ядра в общей оболочке, цвет струи. Плотный гигант (железное ядро, газ
@@ -287,13 +291,19 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 		var kk := smoothstep(SUCK_FROM, 0.9, d / (R1 + R2))
 		if kk > 0.0:
 			var rate := SUCK * kk * kk * float(SUCK_BY.get(_flavor(), 1.0)) * float(f2.soft) * (1.0 + Skills.stat("giant_merge") * 2.0)
-			var dm3 := minf(rate * m2 * delta, maxf(m2 - core_of(b), 0.0))
+			var keep := 0.0 if b.get("core_out", false) else core_of(b)
+			var dm3 := minf(rate * m2 * delta, maxf(m2 - keep, 0.0))
 			if dm3 > 0.0:
 				b.m = float(b.m) - dm3
 				stage.earths += dm3 * 0.95
 				stage.pay(dm3 * 0.95)
 				_emit(b, "it", rate * 0.5, p - n * minf(R2 * 0.95, d * 0.5), -n, gpos, p, delta, _col_of(b))
 				b["ce_heat"] = clampf(float(b.get("ce_heat", 0.0)) + kk * delta * 0.3, 0.0, 0.8)
+		# Небольшой сосед: ядро выходит к пределу Роша раньше, чем кончится газ.
+		if not b.get("core_out", false) and m2 <= m1 * float(EARLY_Q.get(_flavor(), 0.33)):
+			var tmp := {"kind": "superearth", "mat": _core_mat(b), "core": true}
+			if d < world.roche_h(tmp) * stage.hill() * 1.25:
+				_release_core(b)
 	# --- Перетекание через L1 ---
 	# Когда оболочки уже слились, полость теряет смысл: газ течёт только от
 	# лёгкого к тяжёлому (общая оболочка садится на тяжёлое ядро).
@@ -364,7 +374,13 @@ func _pair(b: Dictionary, delta: float, gpos: Vector2, p: Vector2, to: Vector2, 
 	# решает общая оболочка выше), а вдали оно остаётся само по себе.
 	if stage.env_frac() < 0.03 and absorbing.is_empty() and sph < -0.05:
 		stage.swallowed("giant_chthonian")
-	if b.kind == "rival" and float(b.m) <= core_of(b) * 1.03 and absorbing.is_empty():
+	if b.kind == "rival" and b.get("core_out", false) and float(b.m) <= maxf(0.4, float(b.get("m0", b.m)) * 0.01):
+		# Ядро уже рвётся у тебя, газ допит до конца.
+		stage.earths += float(b.m)
+		b.m = 0.0
+		b.state = "gone"
+		return
+	if b.kind == "rival" and not b.get("core_out", false) and float(b.m) <= core_of(b) * 1.03 and absorbing.is_empty():
 		_strip_rival(b)
 		return
 	b["ce_heat"] = maxf(float(b.get("ce_heat", 0.0)) - delta * 0.05, 0.0)
@@ -395,16 +411,47 @@ func core_of(b: Dictionary) -> float:
 
 
 ## С соседа сорвало весь газ: осталось голое ядро — твёрдое тело,
-## дальше его ведёт движок разрушения, как суперземлю.
+## дальше его ведёт движок разрушения.
 func _strip_rival(b: Dictionary) -> void:
 	b.kind = "superearth"
 	b["core"] = true
-	# Ядро того, из чего сосед собирался: ледяной гигант — лёд, сажевый —
-	# углерод, тяжёлое ядро — железо, горячий нептун — лава, остальные — камень.
-	b.mat = {"icegiant": "ice", "soot": "carbon", "dense": "metal", "hotnep": "lava"}.get(str(b.get("cls", "")), "rock")
+	b.mat = _core_mat(b)
 	b.m = core_of(b)
 	for k in ["sh", "shv", "ce", "ce_heat", "m0", "touched", "v", "cruise", "puff", "cls", "rings"]:
 		b.erase(k)
+	# Ядро — не газ (автор): высосать его нельзя. Оно твёрдое и уже в твоём
+	# поле — сразу падает к тебе и рвётся приливом у предела Роша, как любое
+	# твёрдое тело (вещество решает как: лёд крошится, камень плитами, железо
+	# доходит до облаков целым и рвётся напором). Неважно, какого оно размера.
+	b["sucked"] = true
+	b.state = "free"
+	b.cd = 0.0
+	world._capture(b, stage.body.position, stage.hill(), stage.orbit)
+
+
+## Ядро того, из чего сосед собирался: ледяной гигант — лёд, сажевый —
+## углерод, тяжёлое ядро — железо, горячий нептун — лава, остальные — камень.
+func _core_mat(b: Dictionary) -> String:
+	return {"icegiant": "ice", "soot": "carbon", "dense": "metal", "hotnep": "lava"}.get(str(b.get("cls", "")), "rock")
+
+
+## Ядро небольшого соседа выходит из его газа отдельным твёрдым телом и
+## падает к тебе, а остаток газа течёт дальше струёй.
+func _release_core(b: Dictionary) -> void:
+	var cm := core_of(b)
+	if float(b.m) <= cm * 1.05:
+		return
+	b["core_out"] = true
+	if not b.has("m0"):
+		b["m0"] = float(b.m)
+	b.m = float(b.m) - cm
+	var c: Dictionary = world._add_body("superearth", float(b.r), float(b.a), _core_mat(b), cm)
+	c["core"] = true
+	c["sucked"] = true
+	c.erase("drift")
+	if b.has("v"):
+		c["v"] = b.v
+	world._capture(c, stage.body.position, stage.hill(), stage.orbit)
 
 
 ## Приливный эллипс той же площади: полуоси 1+ε вдоль линии центров и

@@ -629,6 +629,9 @@ func role(b: Dictionary) -> String:
 	var m: float = b.m
 	if b.kind == "dwarf":
 		return "danger"
+	# Ядро высосанного соседа — твоё: оно уже падает в тебя.
+	if b.get("sucked", false):
+		return "food"
 	if b.kind == "rival":
 		# Какого гиганта можно высосать, решает навык «Пожиратель гигантов»:
 		# без него — до 0,6 твоей массы, на максимуме — даже чуть тяжелее тебя.
@@ -1790,7 +1793,7 @@ func markers() -> Array:
 		var ro := role(b)
 		var d := pos_of(b).distance_to(g)
 		if ro == "danger" and d < 9000.0:
-			out.append({"p": pos_of(b), "col": Color(1.0, 0.4, 0.32), "text": KINDS[b.kind]["name"]})
+			out.append({"p": pos_of(b), "col": Color(1.0, 0.4, 0.32), "text": KINDS[b.kind]["name"], "danger": true})
 		elif ro == "merge":
 			out.append({"p": pos_of(b), "col": UiTheme.GOLD, "text": "слияние"})
 		elif ro == "big" and d < 7000.0:
